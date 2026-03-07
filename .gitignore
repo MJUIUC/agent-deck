@@ -1,0 +1,60 @@
+# Rust
+target/
+**/*.rs.bk
+Cargo.lock
+
+# SQLite database files
+*.db
+*.db-shm
+*.db-wal
+data/
+
+# Environment files
+.env
+server/.env
+
+# Build artifacts
+server/public/
+!server/public/index.html
+
+# Node / web
+web/node_modules/
+web/dist/
+web/.vite/
+
+# React Native / mobile
+mobile/BotRelayApp/node_modules/
+mobile/BotRelayApp/android/build/
+mobile/BotRelayApp/android/.gradle/
+mobile/BotRelayApp/android/app/build/
+mobile/BotRelayApp/android/local.properties
+mobile/BotRelayApp/ios/build/
+mobile/BotRelayApp/ios/Pods/
+mobile/BotRelayApp/.expo/
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# SQLx offline query cache (committed intentionally — see PLAN.md §9.4)
+# .sqlx/
+
+# Firebase
+config/firebase-service-account.json
+
+# Avatars uploaded at runtime
+data/avatars/
+
+# Vendor — copilot-api is a git submodule, not ignored
+# vendor/copilot-api is tracked via .gitmodules
