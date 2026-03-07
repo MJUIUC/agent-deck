@@ -1,0 +1,1108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>agent-deck — Mobile: Pairing</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-primary:      #1C1C1A;
+      --bg-secondary:    #242422;
+      --bg-tertiary:     #2E2E2B;
+      --bg-elevated:     #383835;
+      --accent-primary:  #7C8C5A;
+      --accent-secondary:#9AAD6E;
+      --accent-muted:    #4A5235;
+      --text-primary:    #F0EDE4;
+      --text-secondary:  #B8B4A8;
+      --text-tertiary:   #7A7870;
+      --text-inverse:    #1C1C1A;
+      --success:         #6A9E5B;
+      --warning:         #C4A24A;
+      --error:           #C45A5A;
+      --info:            #5A82C4;
+      --border-subtle:   #333330;
+      --border-default:  #444440;
+      --border-strong:   #666660;
+    }
+
+    html, body {
+      min-height: 100%;
+      background: #111110;
+      color: var(--text-primary);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 24px 16px 40px;
+    }
+
+    /* ── Phone frame ── */
+    .phone-frame {
+      width: 375px;
+      min-height: 812px;
+      background: var(--bg-primary);
+      border-radius: 44px;
+      overflow: hidden;
+      position: relative;
+      box-shadow:
+        0 0 0 1px rgba(255,255,255,0.08),
+        0 24px 80px rgba(0,0,0,0.7),
+        inset 0 0 0 1px rgba(255,255,255,0.04);
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Status bar ── */
+    .status-bar {
+      height: 44px;
+      background: var(--bg-primary);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 26px 0 28px;
+      flex-shrink: 0;
+    }
+    .status-time {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text-primary);
+      letter-spacing: -0.01em;
+    }
+    .status-icons {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* ── Navigation bar ── */
+    .nav-bar {
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border-subtle);
+      padding: 10px 20px 12px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+    .nav-back-btn {
+      width: 34px;
+      height: 34px;
+      border-radius: 9px;
+      background: var(--bg-tertiary);
+      border: none;
+      color: var(--accent-secondary);
+      font-size: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: background 0.15s;
+      flex-shrink: 0;
+    }
+    .nav-back-btn:hover { background: var(--bg-elevated); }
+    .nav-title {
+      font-size: 17px;
+      font-weight: 600;
+      color: var(--text-primary);
+      letter-spacing: -0.02em;
+      flex: 1;
+      text-align: center;
+    }
+    /* Spacer to center the title */
+    .nav-spacer {
+      width: 34px;
+      flex-shrink: 0;
+    }
+
+    /* ── Scrollable content ── */
+    .content {
+      flex: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+    .content::-webkit-scrollbar { display: none; }
+
+    /* ── Screen panels ── */
+    .screen {
+      display: none;
+      flex-direction: column;
+      flex: 1;
+    }
+    .screen.active {
+      display: flex;
+    }
+
+    /* ══════════════════════════════════════════
+       SCREEN 1: Welcome / start pairing
+    ══════════════════════════════════════════ */
+    .welcome-screen {
+      padding: 40px 28px 32px;
+      align-items: center;
+      text-align: center;
+      gap: 0;
+    }
+
+    .app-logo {
+      width: 80px;
+      height: 80px;
+      border-radius: 22px;
+      background: var(--accent-muted);
+      border: 2px solid var(--accent-primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 40px;
+      margin-bottom: 24px;
+      box-shadow: 0 8px 28px rgba(124,140,90,0.25);
+    }
+
+    .welcome-title {
+      font-size: 26px;
+      font-weight: 700;
+      color: var(--text-primary);
+      letter-spacing: -0.03em;
+      margin-bottom: 10px;
+    }
+    .welcome-subtitle {
+      font-size: 15px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+      max-width: 290px;
+      margin-bottom: 36px;
+    }
+
+    /* Step indicators */
+    .steps-list {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      margin-bottom: 40px;
+      text-align: left;
+    }
+    .step-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+    }
+    .step-number {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--accent-muted);
+      border: 1px solid var(--accent-primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--accent-secondary);
+      flex-shrink: 0;
+    }
+    .step-text { padding-top: 3px; }
+    .step-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 2px;
+    }
+    .step-desc {
+      font-size: 12px;
+      color: var(--text-tertiary);
+      line-height: 1.5;
+    }
+
+    .start-btn {
+      width: 100%;
+      padding: 16px;
+      background: var(--accent-primary);
+      color: var(--text-inverse);
+      border: none;
+      border-radius: 14px;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      font-family: inherit;
+      transition: background 0.15s, transform 0.1s;
+      letter-spacing: -0.01em;
+    }
+    .start-btn:hover { background: var(--accent-secondary); }
+    .start-btn:active { transform: scale(0.98); }
+
+    .manual-link {
+      margin-top: 16px;
+      font-size: 13px;
+      color: var(--text-tertiary);
+      cursor: pointer;
+      text-decoration: underline;
+      text-underline-offset: 3px;
+      background: none;
+      border: none;
+      font-family: inherit;
+      transition: color 0.15s;
+    }
+    .manual-link:hover { color: var(--accent-secondary); }
+
+    /* ══════════════════════════════════════════
+       SCREEN 2: QR Scanner
+    ══════════════════════════════════════════ */
+    .scanner-screen {
+      flex-direction: column;
+    }
+
+    .scanner-region {
+      position: relative;
+      background: #0A0A09;
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 340px;
+      overflow: hidden;
+    }
+
+    /* Simulated camera noise */
+    .camera-bg {
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(ellipse at 40% 50%, #1a1c14 0%, #0a0a09 70%);
+      opacity: 0.9;
+    }
+
+    /* Simulated QR code target area */
+    .qr-target {
+      position: relative;
+      z-index: 2;
+      width: 220px;
+      height: 220px;
+    }
+
+    /* Corner brackets */
+    .qr-corner {
+      position: absolute;
+      width: 30px;
+      height: 30px;
+      border-color: var(--accent-primary);
+      border-style: solid;
+      border-width: 0;
+    }
+    .qr-corner.tl { top: 0; left: 0; border-top-width: 3px; border-left-width: 3px; border-radius: 4px 0 0 0; }
+    .qr-corner.tr { top: 0; right: 0; border-top-width: 3px; border-right-width: 3px; border-radius: 0 4px 0 0; }
+    .qr-corner.bl { bottom: 0; left: 0; border-bottom-width: 3px; border-left-width: 3px; border-radius: 0 0 0 4px; }
+    .qr-corner.br { bottom: 0; right: 0; border-bottom-width: 3px; border-right-width: 3px; border-radius: 0 0 4px 0; }
+
+    /* Scanning line animation */
+    .scan-line {
+      position: absolute;
+      left: 4px;
+      right: 4px;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--accent-secondary), transparent);
+      top: 10px;
+      animation: scanMove 2.4s ease-in-out infinite;
+      border-radius: 1px;
+      box-shadow: 0 0 8px var(--accent-primary);
+    }
+    @keyframes scanMove {
+      0%   { top: 8px; opacity: 0.9; }
+      45%  { top: calc(100% - 10px); opacity: 0.9; }
+      50%  { top: calc(100% - 10px); opacity: 0; }
+      55%  { top: 8px; opacity: 0; }
+      60%  { opacity: 0.9; }
+      100% { top: 8px; opacity: 0.9; }
+    }
+
+    /* Simulated QR code content inside target */
+    .qr-placeholder {
+      position: absolute;
+      inset: 14px;
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      grid-template-rows: repeat(12, 1fr);
+      gap: 1px;
+      opacity: 0.12;
+    }
+    .qr-cell {
+      background: var(--text-primary);
+      border-radius: 1px;
+    }
+
+    /* Dim overlay outside the target */
+    .scanner-dim {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      pointer-events: none;
+    }
+
+    .scanner-hint {
+      position: absolute;
+      bottom: 18px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 3;
+      background: rgba(28,28,26,0.8);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      padding: 8px 16px;
+      font-size: 12px;
+      color: var(--text-secondary);
+      white-space: nowrap;
+      backdrop-filter: blur(8px);
+    }
+
+    .scanner-bottom {
+      background: var(--bg-secondary);
+      border-top: 1px solid var(--border-subtle);
+      padding: 20px 24px 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .scanner-bottom-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-primary);
+      text-align: center;
+    }
+    .scanner-bottom-desc {
+      font-size: 13px;
+      color: var(--text-tertiary);
+      text-align: center;
+      line-height: 1.55;
+    }
+    .scanner-bottom-desc strong {
+      color: var(--text-secondary);
+      font-weight: 600;
+    }
+    .scanner-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 4px;
+    }
+    .btn-outline {
+      width: 100%;
+      padding: 13px;
+      background: transparent;
+      border: 1px solid var(--border-default);
+      border-radius: 12px;
+      color: var(--text-secondary);
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      font-family: inherit;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+    }
+    .btn-outline:hover { background: var(--bg-elevated); color: var(--text-primary); border-color: var(--border-default); }
+
+    /* ══════════════════════════════════════════
+       SCREEN 3: Manual token entry
+    ══════════════════════════════════════════ */
+    .manual-screen {
+      padding: 28px 24px;
+      flex-direction: column;
+      gap: 0;
+    }
+
+    .manual-icon {
+      width: 60px;
+      height: 60px;
+      border-radius: 16px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-default);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      margin-bottom: 20px;
+    }
+
+    .manual-title {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--text-primary);
+      letter-spacing: -0.02em;
+      margin-bottom: 8px;
+    }
+    .manual-desc {
+      font-size: 13px;
+      color: var(--text-tertiary);
+      line-height: 1.6;
+      margin-bottom: 28px;
+    }
+
+    /* Server URL field */
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      margin-bottom: 16px;
+    }
+    .field-label {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+    }
+    .field-input {
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-default);
+      border-radius: 11px;
+      padding: 13px 14px;
+      color: var(--text-primary);
+      font-size: 15px;
+      font-family: inherit;
+      outline: none;
+      width: 100%;
+      transition: border-color 0.15s, box-shadow 0.15s;
+      -webkit-appearance: none;
+    }
+    .field-input::placeholder { color: var(--text-tertiary); }
+    .field-input:focus {
+      border-color: var(--accent-primary);
+      box-shadow: 0 0 0 3px rgba(124,140,90,0.18);
+    }
+    .field-input.error {
+      border-color: var(--error);
+      box-shadow: 0 0 0 3px rgba(196,90,90,0.15);
+    }
+    .field-hint {
+      font-size: 11px;
+      color: var(--text-tertiary);
+      line-height: 1.5;
+    }
+    .field-error {
+      font-size: 12px;
+      color: var(--error);
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    /* Token input with paste button */
+    .token-input-wrap {
+      display: flex;
+      gap: 8px;
+    }
+    .token-input-wrap .field-input {
+      flex: 1;
+      font-family: "SF Mono", "Fira Code", Menlo, monospace;
+      font-size: 13px;
+      letter-spacing: 0.02em;
+    }
+    .paste-btn {
+      padding: 0 16px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-default);
+      border-radius: 11px;
+      color: var(--text-secondary);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      white-space: nowrap;
+      font-family: inherit;
+      transition: background 0.15s, color 0.15s;
+      flex-shrink: 0;
+    }
+    .paste-btn:hover { background: var(--border-default); color: var(--text-primary); }
+    .paste-btn:active { transform: scale(0.97); }
+
+    .connect-btn {
+      width: 100%;
+      padding: 15px;
+      background: var(--accent-primary);
+      color: var(--text-inverse);
+      border: none;
+      border-radius: 13px;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      font-family: inherit;
+      transition: background 0.15s, transform 0.1s;
+      margin-top: 24px;
+      letter-spacing: -0.01em;
+    }
+    .connect-btn:hover { background: var(--accent-secondary); }
+    .connect-btn:active { transform: scale(0.98); }
+    .connect-btn:disabled {
+      opacity: 0.45;
+      cursor: default;
+    }
+
+    .divider-or {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 20px 0;
+      font-size: 12px;
+      color: var(--text-tertiary);
+    }
+    .divider-or::before, .divider-or::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border-subtle);
+    }
+
+    .scan-again-btn {
+      width: 100%;
+      padding: 13px;
+      background: transparent;
+      border: 1px solid var(--border-default);
+      border-radius: 12px;
+      color: var(--text-secondary);
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      font-family: inherit;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: background 0.15s, color 0.15s;
+    }
+    .scan-again-btn:hover { background: var(--bg-elevated); color: var(--text-primary); }
+
+    /* ══════════════════════════════════════════
+       SCREEN 4: Connecting / success
+    ══════════════════════════════════════════ */
+    .connecting-screen {
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 40px 32px;
+      gap: 20px;
+    }
+
+    /* Spinner */
+    .spinner-ring {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      border: 3px solid var(--border-default);
+      border-top-color: var(--accent-primary);
+      animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Success check */
+    .success-ring {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      background: rgba(106,158,91,0.12);
+      border: 2px solid var(--success);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 32px;
+      animation: popIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+      display: none;
+    }
+    @keyframes popIn {
+      from { transform: scale(0.5); opacity: 0; }
+      to   { transform: scale(1);   opacity: 1; }
+    }
+
+    .connecting-title {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--text-primary);
+      letter-spacing: -0.02em;
+    }
+    .connecting-desc {
+      font-size: 13px;
+      color: var(--text-tertiary);
+      line-height: 1.6;
+    }
+    .connecting-server {
+      font-size: 12px;
+      font-family: "SF Mono", "Fira Code", monospace;
+      color: var(--accent-secondary);
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-subtle);
+      padding: 6px 14px;
+      border-radius: 8px;
+    }
+
+    /* ══════════════════════════════════════════
+       Demo controls (outside phone)
+    ══════════════════════════════════════════ */
+    .demo-hint {
+      position: fixed;
+      top: 16px;
+      right: 20px;
+      background: #1a1a18;
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 11px;
+      color: #555;
+      pointer-events: none;
+    }
+    .demo-hint strong { color: #888; }
+
+    .demo-nav {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      align-items: flex-end;
+    }
+    .demo-nav-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: #444;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 2px;
+    }
+    .demo-nav-btn {
+      padding: 6px 13px;
+      background: #1a1a18;
+      border: 1px solid #2e2e2b;
+      border-radius: 6px;
+      color: #666;
+      font-size: 11px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.15s, color 0.15s;
+    }
+    .demo-nav-btn:hover { background: #252523; color: #aaa; }
+    .demo-nav-btn.active { background: var(--accent-muted); border-color: var(--accent-primary); color: var(--accent-secondary); }
+  </style>
+</head>
+<body>
+
+<div class="phone-frame">
+
+  <!-- ── Status bar ── -->
+  <div class="status-bar">
+    <span class="status-time">9:41</span>
+    <div class="status-icons">
+      <!-- Signal -->
+      <svg width="17" height="12" viewBox="0 0 17 12" fill="var(--text-primary)">
+        <rect x="0"    y="8"  width="3" height="4" rx="0.5"/>
+        <rect x="4.5"  y="5"  width="3" height="7" rx="0.5"/>
+        <rect x="9"    y="2"  width="3" height="10" rx="0.5"/>
+        <rect x="13.5" y="0"  width="3" height="12" rx="0.5" opacity="0.3"/>
+      </svg>
+      <!-- WiFi -->
+      <svg width="16" height="12" viewBox="0 0 24 18" fill="none" stroke="var(--text-primary)" stroke-width="2.2" stroke-linecap="round">
+        <path d="M4.5 10C7.5 7 16.5 7 19.5 10"/>
+        <path d="M8.5 14C10 12.5 14 12.5 15.5 14"/>
+        <circle cx="12" cy="17" r="1.5" fill="var(--text-primary)" stroke="none"/>
+      </svg>
+      <!-- Battery -->
+      <svg width="25" height="12" viewBox="0 0 25 12" fill="none">
+        <rect x="0" y="1" width="21" height="10" rx="2.5" stroke="var(--text-primary)" stroke-width="1.2" opacity="0.5"/>
+        <rect x="1.2" y="2.2" width="15" height="7.6" rx="1.5" fill="var(--text-primary)"/>
+        <path d="M22.5 4v4" stroke="var(--text-primary)" stroke-width="1.5" stroke-linecap="round" opacity="0.4"/>
+      </svg>
+    </div>
+  </div>
+
+  <!-- ── Nav bar (shared across screens, title changes) ── -->
+  <div class="nav-bar" id="nav-bar">
+    <button class="nav-back-btn" id="nav-back-btn">‹</button>
+    <div class="nav-title" id="nav-title">Pair Device</div>
+    <div class="nav-spacer"></div>
+  </div>
+
+  <!-- ── Content area ── -->
+  <div class="content">
+
+    <!-- SCREEN 1: Welcome -->
+    <div class="screen welcome-screen active" id="screen-welcome">
+
+      <div class="app-logo">🤖</div>
+
+      <h1 class="welcome-title">Connect to agent-deck</h1>
+      <p class="welcome-subtitle">
+        Pair this device with your self-hosted agent-deck server over your Tailscale network.
+      </p>
+
+      <div class="steps-list">
+        <div class="step-row">
+          <div class="step-number">1</div>
+          <div class="step-text">
+            <div class="step-title">Open agent-deck in your browser</div>
+            <div class="step-desc">On your Mac mini, go to Settings → Mobile Pairing to display the QR code.</div>
+          </div>
+        </div>
+        <div class="step-row">
+          <div class="step-number">2</div>
+          <div class="step-text">
+            <div class="step-title">Scan the QR code</div>
+            <div class="step-desc">Use this app to scan the QR code shown on your server's pairing screen.</div>
+          </div>
+        </div>
+        <div class="step-row">
+          <div class="step-number">3</div>
+          <div class="step-text">
+            <div class="step-title">Start chatting</div>
+            <div class="step-desc">Your device is paired automatically. Push notifications are enabled.</div>
+          </div>
+        </div>
+      </div>
+
+      <button class="start-btn" id="btn-start-scan">
+        📷 &nbsp;Scan QR Code
+      </button>
+      <button class="manual-link" id="btn-manual-from-welcome">
+        Enter server address manually instead
+      </button>
+
+    </div>
+
+    <!-- SCREEN 2: QR Scanner -->
+    <div class="screen scanner-screen" id="screen-scanner">
+
+      <div class="scanner-region">
+        <div class="camera-bg"></div>
+
+        <!-- Dark overlay outside frame — implemented with box-shadow trick -->
+        <div style="
+          position:absolute; inset:0; z-index:1;
+          background: radial-gradient(
+            ellipse 230px 230px at 50% 48%,
+            transparent 108px,
+            rgba(0,0,0,0.72) 110px
+          );
+          pointer-events:none;
+        "></div>
+
+        <div class="qr-target">
+          <!-- Corner brackets -->
+          <div class="qr-corner tl"></div>
+          <div class="qr-corner tr"></div>
+          <div class="qr-corner bl"></div>
+          <div class="qr-corner br"></div>
+
+          <!-- Fake QR module grid -->
+          <div class="qr-placeholder" id="qr-grid"></div>
+
+          <!-- Scan line -->
+          <div class="scan-line"></div>
+        </div>
+
+        <div class="scanner-hint">
+          Align the QR code within the frame
+        </div>
+      </div>
+
+      <div class="scanner-bottom">
+        <div class="scanner-bottom-title">Scan the Pairing QR Code</div>
+        <div class="scanner-bottom-desc">
+          Open <strong>Settings → Mobile Pairing</strong> on your agent-deck server and point your camera at the QR code.
+        </div>
+        <div class="scanner-actions">
+          <!-- Simulates a successful scan -->
+          <button class="start-btn" id="btn-simulate-scan" style="font-size:14px;padding:13px;">
+            ✓ &nbsp;Simulate Successful Scan
+          </button>
+          <button class="btn-outline" id="btn-manual-from-scanner">
+            ✏ &nbsp;Enter manually instead
+          </button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- SCREEN 3: Manual entry -->
+    <div class="screen manual-screen" id="screen-manual">
+
+      <div class="manual-icon">🔗</div>
+      <div class="manual-title">Manual Pairing</div>
+      <p class="manual-desc">
+        Enter your server's Tailscale address and the auth token printed in the server terminal on first boot.
+      </p>
+
+      <div class="field">
+        <label class="field-label">Server URL</label>
+        <input
+          class="field-input"
+          id="server-url-input"
+          type="url"
+          placeholder="http://100.x.x.x:7474"
+          value="http://100.84.21.7:7474"
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck="false"
+        />
+        <div class="field-hint">Your Tailscale IP address and server port (default 7474).</div>
+      </div>
+
+      <div class="field">
+        <label class="field-label">Auth Token</label>
+        <div class="token-input-wrap">
+          <input
+            class="field-input"
+            id="token-input"
+            type="password"
+            placeholder="64-character hex token"
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false"
+            value=""
+          />
+          <button class="paste-btn" id="paste-btn">Paste</button>
+        </div>
+        <div class="field-hint" id="token-hint">
+          Find your token in the server terminal output at startup, or in Settings → General on the web UI.
+        </div>
+        <div class="field-error" id="token-error" style="display:none;">
+          ✕ Invalid token — check that it matches what's shown in the server terminal.
+        </div>
+      </div>
+
+      <button class="connect-btn" id="btn-connect" disabled>
+        Connect
+      </button>
+
+      <div class="divider-or">or</div>
+
+      <button class="scan-again-btn" id="btn-scan-from-manual">
+        <span>📷</span>
+        <span>Scan QR code instead</span>
+      </button>
+
+    </div>
+
+    <!-- SCREEN 4: Connecting → Success -->
+    <div class="screen connecting-screen" id="screen-connecting">
+
+      <div class="spinner-ring" id="spinner"></div>
+      <div class="success-ring" id="success-ring">✓</div>
+
+      <div>
+        <div class="connecting-title" id="connecting-title">Connecting…</div>
+        <div class="connecting-desc" id="connecting-desc">
+          Verifying your token and establishing a secure connection to your server.
+        </div>
+      </div>
+
+      <div class="connecting-server" id="connecting-server">
+        http://100.84.21.7:7474
+      </div>
+
+    </div>
+
+  </div><!-- /content -->
+
+</div><!-- /phone-frame -->
+
+<div class="demo-hint"><strong>375px</strong> · Pixel 4a viewport</div>
+
+<div class="demo-nav">
+  <div class="demo-nav-label">Screens</div>
+  <button class="demo-nav-btn active" data-screen="welcome">1 — Welcome</button>
+  <button class="demo-nav-btn" data-screen="scanner">2 — QR Scanner</button>
+  <button class="demo-nav-btn" data-screen="manual">3 — Manual entry</button>
+  <button class="demo-nav-btn" data-screen="connecting">4 — Connecting</button>
+  <button class="demo-nav-btn" data-screen="success">5 — Success</button>
+  <button class="demo-nav-btn" data-screen="error">6 — Token error</button>
+</div>
+
+<script>
+  /*</script> ── Fake QR code grid ──────────────────────────── */
+  (function buildQrGrid() {
+    const grid = document.getElementById('qr-grid');
+    // Deterministic pattern that looks vaguely like a QR code
+    const pattern = [
+      1,1,1,1,1,1,1,0,1,1,1,1,
+      1,0,0,0,0,1,0,1,0,1,0,1,
+      1,0,1,1,0,1,0,0,1,0,1,1,
+      1,0,1,1,0,1,0,1,0,0,1,0,
+      1,0,0,0,0,1,0,0,1,1,0,1,
+      1,1,1,1,1,1,1,0,1,0,1,0,
+      0,0,0,0,0,0,0,1,0,1,1,0,
+      1,0,1,1,0,1,1,0,1,0,0,1,
+      0,1,0,0,1,0,0,1,1,1,0,1,
+      1,0,1,0,0,1,0,0,0,1,1,0,
+      0,1,1,0,1,0,1,1,0,0,1,1,
+      1,0,0,1,0,1,0,1,1,0,0,1,
+    ];
+    pattern.forEach(on => {
+      const cell = document.createElement('div');
+      if (on) cell.className = 'qr-cell';
+      grid.appendChild(cell);
+    });
+  })();
+
+  /* ── Screen management ──────────────────────────── */
+  const screens = {
+    welcome:    document.getElementById('screen-welcome'),
+    scanner:    document.getElementById('screen-scanner'),
+    manual:     document.getElementById('screen-manual'),
+    connecting: document.getElementById('screen-connecting'),
+  };
+
+  const navTitles = {
+    welcome:    'Pair Device',
+    scanner:    'Scan QR Code',
+    manual:     'Manual Pairing',
+    connecting: 'Connecting',
+  };
+
+  const navTitle = document.getElementById('nav-title');
+  const navBackBtn = document.getElementById('nav-back-btn');
+  let currentScreen = 'welcome';
+  let previousScreen = null;
+
+  function showScreen(name) {
+    // Handle pseudo-screens
+    if (name === 'success') {
+      showConnecting(true);
+      return;
+    }
+    if (name === 'error') {
+      showManualError();
+      return;
+    }
+
+    Object.values(screens).forEach(s => s.classList.remove('active'));
+    screens[name].classList.add('active');
+    navTitle.textContent = navTitles[name] || 'Pair Device';
+    navBackBtn.style.visibility = name === 'welcome' ? 'hidden' : 'visible';
+
+    previousScreen = currentScreen;
+    currentScreen = name;
+
+    // Update demo buttons
+    document.querySelectorAll('.demo-nav-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.screen === name);
+    });
+  }
+
+  // Back button
+  navBackBtn.style.visibility = 'hidden';
+  navBackBtn.addEventListener('click', () => {
+    if (previousScreen && previousScreen !== currentScreen) {
+      showScreen(previousScreen);
+    } else {
+      showScreen('welcome');
+    }
+  });
+
+  /* ── Welcome screen ── */
+  document.getElementById('btn-start-scan').addEventListener('click', () => showScreen('scanner'));
+  document.getElementById('btn-manual-from-welcome').addEventListener('click', () => showScreen('manual'));
+
+  /* ── Scanner screen ── */
+  document.getElementById('btn-simulate-scan').addEventListener('click', () => {
+    // Flash the scan line bright, then go to connecting
+    showScreen('connecting');
+    showConnecting(false);
+    setTimeout(() => showConnecting(true), 2000);
+  });
+  document.getElementById('btn-manual-from-scanner').addEventListener('click', () => showScreen('manual'));
+
+  /* ── Manual entry screen ── */
+  const tokenInput   = document.getElementById('token-input');
+  const serverInput  = document.getElementById('server-url-input');
+  const connectBtn   = document.getElementById('btn-connect');
+  const tokenError   = document.getElementById('token-error');
+  const tokenHint    = document.getElementById('token-hint');
+
+  function validateForm() {
+    const hasToken  = tokenInput.value.trim().length >= 8;
+    const hasServer = serverInput.value.trim().length > 4;
+    connectBtn.disabled = !(hasToken && hasServer);
+  }
+  tokenInput.addEventListener('input', validateForm);
+  serverInput.addEventListener('input', validateForm);
+
+  document.getElementById('paste-btn').addEventListener('click', () => {
+    // Simulate pasting a token
+    tokenInput.value = 'a3f8c2e1b4d96f0e2a7c5b8d1e4f3a9b2c6d0e8f1a5b7c3d2e6f9a0b4c8d1e5';
+    tokenInput.type = 'text';
+    validateForm();
+    tokenInput.classList.remove('error');
+    tokenError.style.display = 'none';
+    tokenHint.style.display = 'block';
+  });
+
+  document.getElementById('btn-connect').addEventListener('click', () => {
+    tokenInput.classList.remove('error');
+    tokenError.style.display = 'none';
+    tokenHint.style.display = 'block';
+
+    const serverUrl = serverInput.value.trim() || 'http://100.84.21.7:7474';
+    document.getElementById('connecting-server').textContent = serverUrl;
+
+    showScreen('connecting');
+    showConnecting(false);
+    setTimeout(() => showConnecting(true), 2000);
+  });
+
+  document.getElementById('btn-scan-from-manual').addEventListener('click', () => showScreen('scanner'));
+
+  /* ── Connecting / Success animation ── */
+  function showConnecting(success) {
+    const spinner     = document.getElementById('spinner');
+    const successRing = document.getElementById('success-ring');
+    const title       = document.getElementById('connecting-title');
+    const desc        = document.getElementById('connecting-desc');
+
+    if (success) {
+      spinner.style.display = 'none';
+      successRing.style.display = 'flex';
+      title.textContent = 'Paired Successfully!';
+      desc.textContent  = 'Your device is now connected to agent-deck. Push notifications are enabled.';
+      // Mark demo btn active
+      document.querySelectorAll('.demo-nav-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.screen === 'success');
+      });
+    } else {
+      spinner.style.display = 'block';
+      successRing.style.display = 'none';
+      title.textContent = 'Connecting…';
+      desc.textContent  = 'Verifying your token and establishing a secure connection to your server.';
+    }
+  }
+
+  /* ── Error state (manual entry) ── */
+  function showManualError() {
+    showScreen('manual');
+    tokenInput.classList.add('error');
+    tokenInput.value = 'wrongtoken123';
+    tokenInput.type = 'text';
+    tokenError.style.display = 'flex';
+    tokenHint.style.display = 'none';
+    connectBtn.disabled = false;
+    document.querySelectorAll('.demo-nav-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.screen === 'error');
+    });
+  }
+
+  /* ── Demo nav buttons ── */
+  document.querySelectorAll('.demo-nav-btn').forEach(btn => {
+    btn.addEventListener('click', () => showScreen(btn.dataset.screen));
+  });
+
+  /* ── Button press feedback ── */
+  document.querySelectorAll('button').forEach(btn => {
+    if (btn.classList.contains('demo-nav-btn')) return;
+    btn.addEventListener('mousedown', () => { btn.style.opacity = '0.75'; });
+    btn.addEventListener('mouseup',   () => { btn.style.opacity = '';     });
+    btn.addEventListener('mouseleave',() => { btn.style.opacity = '';     });
+  });
+
+  // Initial state
+  showScreen('welcome');
+</script>
+</body>
+</html>

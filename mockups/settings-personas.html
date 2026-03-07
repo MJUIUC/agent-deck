@@ -1,0 +1,789 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>agent-deck — Settings: Personas</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-primary:      #1C1C1A;
+      --bg-secondary:    #242422;
+      --bg-tertiary:     #2E2E2B;
+      --bg-elevated:     #383835;
+      --accent-primary:  #7C8C5A;
+      --accent-secondary:#9AAD6E;
+      --accent-muted:    #4A5235;
+      --text-primary:    #F0EDE4;
+      --text-secondary:  #B8B4A8;
+      --text-tertiary:   #7A7870;
+      --text-inverse:    #1C1C1A;
+      --success:         #6A9E5B;
+      --warning:         #C4A24A;
+      --error:           #C45A5A;
+      --info:            #5A82C4;
+      --border-subtle:   #333330;
+      --border-default:  #444440;
+      --border-strong:   #666660;
+      --bubble-user:     #4A5235;
+      --bubble-agent:    #2E2E2B;
+      --bubble-routine:  #2A3545;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      overflow: hidden;
+    }
+
+    .app { display: flex; height: 100vh; }
+
+    /* ── Sidebar ── */
+    .sidebar {
+      width: 220px;
+      min-width: 220px;
+      background: var(--bg-secondary);
+      border-right: 1px solid var(--border-subtle);
+      display: flex;
+      flex-direction: column;
+      padding: 20px 0;
+    }
+    .sidebar-brand {
+      display: flex; align-items: center; gap: 8px;
+      padding: 0 16px 20px;
+      border-bottom: 1px solid var(--border-subtle);
+      margin-bottom: 12px;
+    }
+    .sidebar-brand .emoji { font-size: 18px; }
+    .sidebar-brand .name { font-size: 14px; font-weight: 700; color: var(--text-primary); letter-spacing: -0.01em; }
+
+    .back-link {
+      display: flex; align-items: center; gap: 7px;
+      padding: 7px 16px; margin: 0 8px 12px;
+      border-radius: 6px; font-size: 13px; color: var(--text-secondary);
+      cursor: pointer; background: none; border: none;
+      transition: background 0.15s, color 0.15s;
+    }
+    .back-link:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+
+    .nav-section-label {
+      padding: 4px 16px 6px; font-size: 10px; font-weight: 600;
+      color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.08em;
+    }
+    .nav-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 16px; margin: 0 8px 2px; border-radius: 7px;
+      font-size: 13px; color: var(--text-secondary); cursor: pointer;
+      background: none; border: none; width: calc(100% - 16px); text-align: left;
+      transition: background 0.15s, color 0.15s;
+    }
+    .nav-item:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+    .nav-item.active { background: var(--accent-muted); color: var(--text-primary); }
+    .nav-item .icon { font-size: 15px; }
+
+    /* ── Main ── */
+    .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+    .page-header {
+      padding: 20px 28px 16px;
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex; align-items: center; justify-content: space-between;
+      background: var(--bg-primary);
+    }
+    .page-title { font-size: 18px; font-weight: 700; letter-spacing: -0.01em; }
+    .page-subtitle { font-size: 13px; color: var(--text-tertiary); margin-top: 2px; }
+
+    /* ── Tabs ── */
+    .tab-bar {
+      display: flex;
+      border-bottom: 1px solid var(--border-subtle);
+      padding: 0 28px;
+      background: var(--bg-primary);
+      gap: 0;
+    }
+    .tab {
+      padding: 10px 16px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-tertiary);
+      cursor: pointer;
+      border: none;
+      background: none;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .tab:hover { color: var(--text-secondary); }
+    .tab.active { color: var(--text-primary); border-bottom-color: var(--accent-primary); }
+
+    .page-body {
+      flex: 1; overflow-y: auto; padding: 24px 28px;
+    }
+    .page-body::-webkit-scrollbar { width: 4px; }
+    .page-body::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: 2px; }
+
+    /* ── Tab panels ── */
+    .tab-panel { display: none; }
+    .tab-panel.visible { display: block; }
+
+    /* ── Buttons ── */
+    .btn {
+      padding: 8px 16px; border-radius: 7px; font-size: 13px; font-weight: 500;
+      cursor: pointer; border: none; transition: background 0.15s, color 0.15s;
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .btn-primary { background: var(--accent-primary); color: var(--text-inverse); }
+    .btn-primary:hover { background: var(--accent-secondary); }
+    .btn-ghost { background: transparent; color: var(--text-secondary); border: 1px solid var(--border-default); }
+    .btn-ghost:hover { background: var(--bg-elevated); color: var(--text-primary); }
+    .btn-danger { background: transparent; color: var(--error); border: 1px solid rgba(196,90,90,0.35); }
+    .btn-danger:hover { background: rgba(196,90,90,0.1); }
+    .btn-sm { padding: 5px 11px; font-size: 12px; }
+
+    /* ── Persona Cards ── */
+    .persona-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 14px;
+      margin-bottom: 24px;
+    }
+
+    .persona-card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      padding: 18px;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+      position: relative;
+    }
+    .persona-card:hover { border-color: var(--border-default); }
+    .persona-card.selected { border-color: var(--accent-primary); }
+
+    .persona-card-top {
+      display: flex; align-items: flex-start; gap: 12px; margin-bottom: 12px;
+    }
+
+    .persona-avatar-wrap {
+      position: relative; flex-shrink: 0;
+    }
+    .persona-avatar {
+      width: 52px; height: 52px; border-radius: 50%;
+      background: var(--bg-elevated);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 24px; overflow: hidden;
+    }
+    .persona-avatar img {
+      width: 100%; height: 100%; object-fit: cover; border-radius: 50%;
+    }
+
+    .persona-card-name {
+      font-size: 15px; font-weight: 700; color: var(--text-primary);
+      margin-bottom: 2px;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .persona-card-model {
+      font-size: 11px; color: var(--text-tertiary);
+    }
+    .persona-card-prompt {
+      font-size: 12px; color: var(--text-secondary); line-height: 1.5;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+      overflow: hidden;
+      border-top: 1px solid var(--border-subtle);
+      padding-top: 10px;
+    }
+    .persona-card-actions {
+      display: flex; gap: 6px; margin-top: 12px;
+    }
+
+    .memory-count-badge {
+      display: inline-flex; align-items: center; gap: 3px;
+      background: rgba(74,82,53,0.35); border: 1px solid var(--accent-muted);
+      border-radius: 4px; padding: 1px 7px;
+      font-size: 10px; font-weight: 600; color: var(--accent-secondary);
+    }
+
+    /* ── Form ── */
+    .form-card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-default);
+      border-radius: 12px; padding: 22px 24px; margin-bottom: 24px;
+    }
+    .form-title {
+      font-size: 15px; font-weight: 600; margin-bottom: 18px; color: var(--text-primary);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .form-full { grid-column: 1 / -1; }
+    .field { display: flex; flex-direction: column; gap: 6px; }
+    .field-label {
+      font-size: 11px; font-weight: 600; color: var(--text-secondary);
+      text-transform: uppercase; letter-spacing: 0.06em;
+    }
+    .field-input, .field-select, .field-textarea {
+      background: var(--bg-tertiary); border: 1px solid var(--border-default);
+      border-radius: 7px; padding: 9px 12px; color: var(--text-primary);
+      font-size: 13px; font-family: inherit; outline: none;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .field-input::placeholder, .field-textarea::placeholder { color: var(--text-tertiary); }
+    .field-input:focus, .field-select:focus, .field-textarea:focus {
+      border-color: var(--accent-primary);
+      box-shadow: 0 0 0 3px rgba(124,140,90,0.15);
+    }
+    .field-textarea { resize: vertical; min-height: 100px; line-height: 1.55; }
+    .field-hint { font-size: 11px; color: var(--text-tertiary); }
+
+    /* Avatar upload */
+    .avatar-upload-area {
+      display: flex; align-items: center; gap: 16px; margin-bottom: 4px;
+    }
+    .avatar-preview {
+      width: 64px; height: 64px; border-radius: 50%;
+      background: var(--bg-elevated); border: 2px solid var(--border-default);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 28px; overflow: hidden; flex-shrink: 0;
+    }
+    .avatar-preview img {
+      width: 100%; height: 100%; object-fit: cover;
+    }
+    .avatar-upload-actions { display: flex; flex-direction: column; gap: 6px; }
+
+    /* Emoji picker row */
+    .emoji-row {
+      display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px;
+    }
+    .emoji-btn {
+      width: 36px; height: 36px; border-radius: 7px; font-size: 18px;
+      background: var(--bg-tertiary); border: 2px solid transparent;
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .emoji-btn:hover { background: var(--bg-elevated); }
+    .emoji-btn.selected { border-color: var(--accent-primary); background: var(--accent-muted); }
+
+    .form-actions {
+      display: flex; justify-content: flex-end; gap: 8px;
+      margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border-subtle);
+    }
+
+    /* ── Memory Viewer ── */
+    .memory-toolbar {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 14px;
+    }
+    .memory-search {
+      background: var(--bg-tertiary); border: 1px solid var(--border-subtle);
+      border-radius: 7px; padding: 7px 12px; color: var(--text-primary);
+      font-size: 13px; outline: none; width: 280px;
+      transition: border-color 0.15s;
+    }
+    .memory-search:focus { border-color: var(--border-default); }
+    .memory-search::placeholder { color: var(--text-tertiary); }
+
+    .memory-stats {
+      font-size: 12px; color: var(--text-tertiary);
+    }
+    .memory-stats strong { color: var(--text-secondary); }
+
+    .memory-list { display: flex; flex-direction: column; gap: 8px; }
+
+    .memory-entry {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-subtle);
+      border-radius: 9px; padding: 12px 14px;
+      display: flex; align-items: flex-start; gap: 12px;
+      transition: border-color 0.15s;
+    }
+    .memory-entry:hover { border-color: var(--border-default); }
+
+    .memory-entry-content { flex: 1; min-width: 0; }
+    .memory-text {
+      font-size: 13px; color: var(--text-primary); line-height: 1.55;
+      margin-bottom: 5px;
+    }
+    .memory-meta {
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    }
+    .memory-meta-item {
+      font-size: 11px; color: var(--text-tertiary);
+      display: flex; align-items: center; gap: 3px;
+    }
+    .memory-thread-link {
+      font-size: 11px; color: var(--accent-secondary);
+      cursor: pointer; text-decoration: none;
+    }
+    .memory-thread-link:hover { text-decoration: underline; }
+
+    .memory-delete-btn {
+      width: 26px; height: 26px; border-radius: 5px;
+      background: transparent; border: none;
+      color: var(--text-tertiary); font-size: 14px;
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; transition: background 0.15s, color 0.15s;
+    }
+    .memory-delete-btn:hover { background: rgba(196,90,90,0.15); color: var(--error); }
+
+    .memory-empty {
+      text-align: center; padding: 48px 20px; color: var(--text-tertiary);
+    }
+    .memory-empty .icon { font-size: 36px; margin-bottom: 12px; }
+    .memory-empty .title { font-size: 14px; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; }
+    .memory-empty .desc { font-size: 13px; }
+
+    /* Persona selector in memory tab */
+    .persona-selector {
+      display: flex; gap: 8px; margin-bottom: 18px; flex-wrap: wrap;
+    }
+    .persona-pill {
+      display: flex; align-items: center; gap: 6px;
+      padding: 6px 12px; border-radius: 20px;
+      background: var(--bg-tertiary); border: 1px solid var(--border-subtle);
+      font-size: 13px; color: var(--text-secondary);
+      cursor: pointer; transition: background 0.15s, color 0.15s, border-color 0.15s;
+    }
+    .persona-pill:hover { background: var(--bg-elevated); color: var(--text-primary); }
+    .persona-pill.active {
+      background: var(--accent-muted); border-color: var(--accent-primary);
+      color: var(--text-primary);
+    }
+    .persona-pill .emoji { font-size: 14px; }
+  </style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ── Sidebar ── -->
+  <div class="sidebar">
+    <div class="sidebar-brand">
+      <span class="emoji">🤖</span>
+      <span class="name">agent-deck</span>
+    </div>
+    <button class="back-link">← Back to Chats</button>
+    <div class="nav-section-label">Settings</div>
+    <button class="nav-item"><span class="icon">🔌</span> Providers</button>
+    <button class="nav-item active"><span class="icon">🎭</span> Personas</button>
+    <button class="nav-item"><span class="icon">🛠</span> Skills</button>
+    <button class="nav-item"><span class="icon">⚙</span> MCP Servers</button>
+    <button class="nav-item"><span class="icon">📱</span> Mobile Pairing</button>
+    <button class="nav-item"><span class="icon">⚙</span> General</button>
+  </div>
+
+  <!-- ── Main ── -->
+  <div class="main">
+    <div class="page-header">
+      <div>
+        <div class="page-title">Personas</div>
+        <div class="page-subtitle">Manage agent personalities, prompts, and memories</div>
+      </div>
+      <button class="btn btn-primary" id="addPersonaBtn">＋ New Persona</button>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tab-bar">
+      <button class="tab active" data-tab="personas">Personas</button>
+      <button class="tab" data-tab="memory">Memory Viewer</button>
+    </div>
+
+    <div class="page-body">
+
+      <!-- ══════ PERSONAS TAB ══════ -->
+      <div class="tab-panel visible" id="tab-personas">
+
+        <!-- Create / Edit Form -->
+        <div class="form-card" id="personaForm" style="display:none;">
+          <div class="form-title">
+            <span id="formTitle">New Persona</span>
+            <button class="btn btn-ghost btn-sm" id="closeFormBtn">✕ Cancel</button>
+          </div>
+
+          <div class="form-grid">
+
+            <!-- Avatar upload -->
+            <div class="field">
+              <label class="field-label">Avatar</label>
+              <div class="avatar-upload-area">
+                <div class="avatar-preview" id="avatarPreview">🦉</div>
+                <div class="avatar-upload-actions">
+                  <button class="btn btn-ghost btn-sm" id="uploadAvatarBtn">Upload Image</button>
+                  <button class="btn btn-ghost btn-sm" id="removeAvatarBtn" style="display:none;">Remove</button>
+                  <span class="field-hint">JPG, PNG, WebP · Max 5 MB</span>
+                </div>
+                <input type="file" id="avatarInput" accept="image/*" style="display:none;" />
+              </div>
+            </div>
+
+            <!-- Emoji -->
+            <div class="field">
+              <label class="field-label">Emoji</label>
+              <div class="emoji-row">
+                <button class="emoji-btn selected" data-emoji="🦉">🦉</button>
+                <button class="emoji-btn" data-emoji="🧠">🧠</button>
+                <button class="emoji-btn" data-emoji="🎨">🎨</button>
+                <button class="emoji-btn" data-emoji="⚒">⚒</button>
+                <button class="emoji-btn" data-emoji="🔮">🔮</button>
+                <button class="emoji-btn" data-emoji="🦊">🦊</button>
+                <button class="emoji-btn" data-emoji="🐉">🐉</button>
+                <button class="emoji-btn" data-emoji="⚡">⚡</button>
+              </div>
+            </div>
+
+            <!-- Name -->
+            <div class="field">
+              <label class="field-label">Name</label>
+              <input type="text" class="field-input" placeholder="e.g. Aldous" id="personaName" />
+            </div>
+
+            <!-- Default model -->
+            <div class="field">
+              <label class="field-label">Default Model</label>
+              <select class="field-select" id="defaultModel">
+                <option value="">None — choose per thread</option>
+                <option value="gpt4o" selected>GPT-4o (OpenAI)</option>
+                <option value="gpt4omini">GPT-4o-mini (OpenAI)</option>
+                <option value="claude35">Claude 3.5 Sonnet (Anthropic)</option>
+              </select>
+            </div>
+
+            <!-- System prompt -->
+            <div class="field form-full">
+              <label class="field-label">System Prompt</label>
+              <textarea
+                class="field-textarea"
+                id="systemPrompt"
+                style="min-height:140px;"
+                placeholder="You are Aldous, a thoughtful and precise assistant. You excel at deep analysis, technical problems, and careful reasoning…"
+              ></textarea>
+              <span class="field-hint">This defines the agent's core personality and behavior. It's always prepended to the conversation context.</span>
+            </div>
+
+          </div>
+
+          <div class="form-actions">
+            <button class="btn btn-ghost" id="cancelFormBtn">Cancel</button>
+            <button class="btn btn-primary" id="savePersonaBtn">Save Persona</button>
+          </div>
+        </div>
+
+        <!-- Persona Cards Grid -->
+        <div class="persona-grid" id="personaGrid">
+
+          <!-- Aldous -->
+          <div class="persona-card selected" data-persona="aldous">
+            <div class="persona-card-top">
+              <div class="persona-avatar-wrap">
+                <div class="persona-avatar">🦉</div>
+              </div>
+              <div style="flex:1;min-width:0;">
+                <div class="persona-card-name">
+                  Aldous
+                  <span class="memory-count-badge">🧠 47</span>
+                </div>
+                <div class="persona-card-model">GPT-4o · OpenAI</div>
+              </div>
+            </div>
+            <div class="persona-card-prompt">
+              You are Aldous, a thoughtful and precise assistant. You excel at deep analysis, technical problems, and careful reasoning…
+            </div>
+            <div class="persona-card-actions">
+              <button class="btn btn-ghost btn-sm" onclick="editPersona('aldous')">Edit</button>
+              <button class="btn btn-ghost btn-sm" onclick="viewMemory('aldous')">🧠 Memory</button>
+              <button class="btn btn-danger btn-sm" style="margin-left:auto;">Delete</button>
+            </div>
+          </div>
+
+          <!-- Scout -->
+          <div class="persona-card" data-persona="scout">
+            <div class="persona-card-top">
+              <div class="persona-avatar-wrap">
+                <div class="persona-avatar">🧠</div>
+              </div>
+              <div style="flex:1;min-width:0;">
+                <div class="persona-card-name">
+                  Scout
+                  <span class="memory-count-badge">🧠 12</span>
+                </div>
+                <div class="persona-card-model">GPT-4o-mini · OpenAI</div>
+              </div>
+            </div>
+            <div class="persona-card-prompt">
+              You are Scout, a quick and organized assistant. You specialize in research, planning, and summarizing complex information concisely…
+            </div>
+            <div class="persona-card-actions">
+              <button class="btn btn-ghost btn-sm" onclick="editPersona('scout')">Edit</button>
+              <button class="btn btn-ghost btn-sm">🧠 Memory</button>
+              <button class="btn btn-danger btn-sm" style="margin-left:auto;">Delete</button>
+            </div>
+          </div>
+
+          <!-- Muse -->
+          <div class="persona-card" data-persona="muse">
+            <div class="persona-card-top">
+              <div class="persona-avatar-wrap">
+                <div class="persona-avatar">🎨</div>
+              </div>
+              <div style="flex:1;min-width:0;">
+                <div class="persona-card-name">
+                  Muse
+                  <span class="memory-count-badge">🧠 8</span>
+                </div>
+                <div class="persona-card-model">Claude 3.5 Sonnet · Anthropic</div>
+              </div>
+            </div>
+            <div class="persona-card-prompt">
+              You are Muse, a creative and expressive assistant. You help with writing, brainstorming, design thinking, and imaginative problem solving…
+            </div>
+            <div class="persona-card-actions">
+              <button class="btn btn-ghost btn-sm">Edit</button>
+              <button class="btn btn-ghost btn-sm">🧠 Memory</button>
+              <button class="btn btn-danger btn-sm" style="margin-left:auto;">Delete</button>
+            </div>
+          </div>
+
+          <!-- Add new card -->
+          <div class="persona-card" style="border-style:dashed;cursor:pointer;display:flex;align-items:center;justify-content:center;min-height:160px;gap:10px;color:var(--text-tertiary);font-size:13px;transition:border-color 0.15s,color 0.15s;" id="addPersonaCard">
+            <span style="font-size:22px;">＋</span>
+            <span>New Persona</span>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- ══════ MEMORY VIEWER TAB ══════ -->
+      <div class="tab-panel" id="tab-memory">
+
+        <!-- Persona selector -->
+        <div class="persona-selector">
+          <button class="persona-pill active" data-persona="aldous">
+            <span class="emoji">🦉</span> Aldous
+            <span style="margin-left:4px;font-size:10px;color:var(--text-tertiary);">47</span>
+          </button>
+          <button class="persona-pill" data-persona="scout">
+            <span class="emoji">🧠</span> Scout
+            <span style="margin-left:4px;font-size:10px;color:var(--text-tertiary);">12</span>
+          </button>
+          <button class="persona-pill" data-persona="muse">
+            <span class="emoji">🎨</span> Muse
+            <span style="margin-left:4px;font-size:10px;color:var(--text-tertiary);">8</span>
+          </button>
+        </div>
+
+        <!-- Toolbar -->
+        <div class="memory-toolbar">
+          <input class="memory-search" type="text" placeholder="Search memories…" id="memorySearch" />
+          <div class="memory-stats">
+            Showing <strong></strong>20</strong> of <strong>47</strong> memories for Aldous
+          </div>
+        </div>
+
+        <!-- Memory list -->
+        <div class="memory-list" id="memoryList">
+
+          <div class="memory-entry">
+            <div class="memory-entry-content">
+              <div class="memory-text">User prefers TypeScript over JavaScript for all new projects. Finds strict typing significantly reduces debugging time.</div>
+              <div class="memory-meta">
+                <span class="memory-meta-item">📅 Jan 15, 2025</span>
+                <span class="memory-meta-item">·</span>
+                <a class="memory-thread-link" href="#">Coding session — Atlas project</a>
+              </div>
+            </div>
+            <button class="memory-delete-btn" title="Delete memory">✕</button>
+          </div>
+
+          <div class="memory-entry">
+            <div class="memory-entry-content">
+              <div class="memory-text">Prefers concise explanations with code examples over lengthy prose. Gets frustrated with over-explanation.</div>
+              <div class="memory-meta">
+                <span class="memory-meta-item">📅 Jan 14, 2025</span>
+                <span class="memory-meta-item">·</span>
+                <a class="memory-thread-link" href="#">Rust async discussion</a>
+              </div>
+            </div>
+            <button class="memory-delete-btn" title="Delete memory">✕</button>
+          </div>
+
+          <div class="memory-entry">
+            <div class="memory-entry-content">
+              <div class="memory-text">Working on a self-hosted AI platform called agent-deck. Rust server + React SPA + React Native Android app. Personal project on Mac mini.</div>
+              <div class="memory-meta">
+                <span class="memory-meta-item">📅 Jan 13, 2025</span>
+                <span class="memory-meta-item">·</span>
+                <a class="memory-thread-link" href="#">agent-deck architecture</a>
+              </div>
+            </div>
+            <button class="memory-delete-btn" title="Delete memory">✕</button>
+          </div>
+
+          <div class="memory-entry">
+            <div class="memory-entry-content">
+              <div class="memory-text">Uses Tailscale for private network access. Pixel 4a as primary Android device. Mac mini as always-on server.</div>
+              <div class="memory-meta">
+                <span class="memory-meta-item">📅 Jan 12, 2025</span>
+                <span class="memory-meta-item">·</span>
+                <a class="memory-thread-link" href="#">Setup and infrastructure</a>
+              </div>
+            </div>
+            <button class="memory-delete-btn" title="Delete memory">✕</button>
+          </div>
+
+          <div class="memory-entry">
+            <div class="memory-entry-content">
+              <div class="memory-text">Prefers olive/dark color schemes with high contrast text. Finds bright UIs tiring during long work sessions.</div>
+              <div class="memory-meta">
+                <span class="memory-meta-item">📅 Jan 11, 2025</span>
+                <span class="memory-meta-item">·</span>
+                <span class="memory-meta-item" style="font-style:italic;">Manual entry</span>
+              </div>
+            </div>
+            <button class="memory-delete-btn" title="Delete memory">✕</button>
+          </div>
+
+          <div class="memory-entry">
+            <div class="memory-entry-content">
+              <div class="memory-text">Deep interest in systems programming. Has been learning Rust for ~8 months. Comfortable with async/await but still learning lifetimes.</div>
+              <div class="memory-meta">
+                <span class="memory-meta-item">📅 Jan 10, 2025</span>
+                <span class="memory-meta-item">·</span>
+                <a class="memory-thread-link" href="#">Rust learning path</a>
+              </div>
+            </div>
+            <button class="memory-delete-btn" title="Delete memory">✕</button>
+          </div>
+
+        </div>
+
+        <!-- Load more -->
+        <div style="text-align:center;margin-top:20px;">
+          <button class="btn btn-ghost">Load more (27 remaining)</button>
+        </div>
+
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+  // ── Tab switching ──────────────────────────────────────────────────────────
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('visible'));
+      tab.classList.add('active');
+      document.getElementById('tab-' + tab.dataset.tab).classList.add('visible');
+    });
+  });
+
+  // ── Persona form open/close ────────────────────────────────────────────────
+  const personaForm = document.getElementById('personaForm');
+  const formTitle   = document.getElementById('formTitle');
+
+  function showForm(title) {
+    formTitle.textContent = title;
+    personaForm.style.display = 'block';
+    personaForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  document.getElementById('addPersonaBtn').addEventListener('click', () => showForm('New Persona'));
+  document.getElementById('addPersonaCard').addEventListener('click', () => showForm('New Persona'));
+  document.getElementById('closeFormBtn').addEventListener('click', () => personaForm.style.display = 'none');
+  document.getElementById('cancelFormBtn').addEventListener('click', () => personaForm.style.display = 'none');
+
+  function editPersona(id) {
+    showForm('Edit Persona');
+    if (id === 'aldous') {
+      document.getElementById('personaName').value = 'Aldous';
+      document.getElementById('systemPrompt').value =
+        'You are Aldous, a thoughtful and precise assistant. You excel at deep analysis, technical problems, and careful reasoning. Prefer concrete answers backed by examples.';
+      document.getElementById('defaultModel').value = 'gpt4o';
+      document.querySelector('[data-emoji="🦉"]').click();
+    } else if (id === 'scout') {
+      document.getElementById('personaName').value = 'Scout';
+      document.getElementById('systemPrompt').value =
+        'You are Scout, a quick and organized assistant. You specialize in research, planning, and summarizing complex information concisely.';
+    }
+  }
+
+  function viewMemory(id) {
+    document.querySelector('[data-tab="memory"]').click();
+    document.querySelector('[data-persona="' + id + '"]').click();
+  }
+
+  // ── Persona card selection ──────────────────────────────────────────────────
+  document.querySelectorAll('#personaGrid .persona-card:not(#addPersonaCard)').forEach(card => {
+    card.addEventListener('click', e => {
+      if (e.target.closest('.persona-card-actions')) return;
+      document.querySelectorAll('#personaGrid .persona-card').forEach(c => c.classList.remove('selected'));
+      card.classList.add('selected');
+    });
+  });
+
+  // ── Emoji picker ───────────────────────────────────────────────────────────
+  document.querySelectorAll('.emoji-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.emoji-btn').forEach(b => b.classList.remove('selected'));
+      btn.classList.add('selected');
+      document.getElementById('avatarPreview').textContent = btn.dataset.emoji;
+    });
+  });
+
+  // ── Avatar upload ──────────────────────────────────────────────────────────
+  const uploadBtn   = document.getElementById('uploadAvatarBtn');
+  const removeBtn   = document.getElementById('removeAvatarBtn');
+  const avatarInput = document.getElementById('avatarInput');
+  const avatarPreview = document.getElementById('avatarPreview');
+
+  uploadBtn.addEventListener('click', () => avatarInput.click());
+  avatarInput.addEventListener('change', function() {
+    const file = this.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = e => {
+      avatarPreview.innerHTML = `<img src="${e.target.result}" alt="avatar" />`;
+      removeBtn.style.display = 'block';
+    };
+    reader.readAsDataURL(file);
+  });
+  removeBtn.addEventListener('click', () => {
+    avatarPreview.innerHTML = '🦉';
+    avatarInput.value = '';
+    removeBtn.style.display = 'none';
+  });
+
+  // ── Memory: persona selector ───────────────────────────────────────────────
+  document.querySelectorAll('#tab-memory .persona-pill').forEach(pill => {
+    pill.addEventListener('click', () => {
+      document.querySelectorAll('#tab-memory .persona-pill').forEach(p => p.classList.remove('active'));
+      pill.classList.add('active');
+    });
+  });
+
+  // ── Memory: delete animation ───────────────────────────────────────────────
+  document.querySelectorAll('.memory-delete-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const entry = btn.closest('.memory-entry');
+      entry.style.transition = 'opacity 0.2s, transform 0.2s, max-height 0.25s';
+      entry.style.opacity = '0';
+      entry.style.transform = 'translateX(12px)';
+      setTimeout(() => entry.remove(), 220);
+    });
+  });
+
+  // ── Memory: search filter ──────────────────────────────────────────────────
+  document.getElementById('memorySearch').addEventListener('input', function() {
+    const q = this.value.toLowerCase();
+    document.querySelectorAll('.memory-entry').forEach(entry => {
+      const text = entry.querySelector('.memory-text').textContent.toLowerCase();
+      entry.style.display = text.includes(q) ? '' : 'none';
+    });
+  });
+</script>
+</body>
+</html>
