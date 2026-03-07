@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>agent-deck — Mobile: Thread List</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-primary:      #1C1C1A;
+      --bg-secondary:    #242422;
+      --bg-tertiary:     #2E2E2B;
+      --bg-elevated:     #383835;
+      --accent-primary:  #7C8C5A;
+      --accent-secondary:#9AAD6E;
+      --accent-muted:    #4A5235;
+      --text-primary:    #F0EDE4;
+      --text-secondary:  #B8B4A8;
+      --text-tertiary:   #7A7870;
+      --text-inverse:    #1C1C1A;
+      --success:         #6A9E5B;
+      --warning:         #C4A24A;
+      --error:           #C45A5A;
+      --info:            #5A82C4;
+      --border-subtle:   #333330;
+      --border-default:  #444440;
+      --border-strong:   #666660;
+      --bubble-user:     #4A5235;
+      --bubble-agent:    #2E2E2B;
+      --bubble-routine:  #2A3545;
+    }
+
+    html, body {
+      height: 100%;
+      background: #111110;
+      color: var(--text-primary);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 24px 16px 40px;
+    }
+
+    /* ── Phone frame ── */
+    .phone-frame {
+      width: 375px;
+      min-height: 812px;
+      background: var(--bg-primary);
+      border-radius: 44px;
+      overflow: hidden;
+      position: relative;
+      box-shadow:
+        0 0 0 1px rgba(255,255,255,0.08),
+        0 24px 80px rgba(0,0,0,0.7),
+        inset 0 0 0 1px rgba(255,255,255,0.04);
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Status bar ── */
+    .status-bar {
+      height: 44px;
+      background: var(--bg-primary);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 26px 0 28px;
+      flex-shrink: 0;
+    }
+    .status-time {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text-primary);
+      letter-spacing: -0.01em;
+    }
+    .status-icons {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .status-icons svg {
+      fill: var(--text-primary);
+    }
+
+    /* ── Navigation bar ── */
+    .nav-bar {
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border-subtle);
+      padding: 10px 20px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+    .nav-title {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--text-primary);
+      letter-spacing: -0.02em;
+    }
+    .nav-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .nav-icon-btn {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background: var(--bg-tertiary);
+      border: none;
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+    .nav-icon-btn:hover { background: var(--bg-elevated); color: var(--text-primary); }
+
+    /* ── Search bar ── */
+    .search-bar {
+      padding: 10px 16px;
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border-subtle);
+      flex-shrink: 0;
+    }
+    .search-input-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-subtle);
+      border-radius: 11px;
+      padding: 8px 12px;
+    }
+    .search-icon { font-size: 13px; color: var(--text-tertiary); flex-shrink: 0; }
+    .search-input-fake {
+      flex: 1;
+      font-size: 15px;
+      color: var(--text-tertiary);
+    }
+
+    /* ── Section headers ── */
+    .section-header {
+      padding: 10px 16px 4px;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-tertiary);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      background: var(--bg-primary);
+    }
+
+    /* ── Thread list ── */
+    .thread-list {
+      flex: 1;
+      overflow-y: auto;
+      background: var(--bg-primary);
+    }
+    .thread-list::-webkit-scrollbar { display: none; }
+
+    .thread-item {
+      display: flex;
+      align-items: center;
+      gap: 13px;
+      padding: 11px 16px;
+      cursor: pointer;
+      position: relative;
+      transition: background 0.12s;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .thread-item:hover { background: var(--bg-secondary); }
+    .thread-item.active { background: var(--accent-muted); }
+    .thread-item:last-child { border-bottom: none; }
+
+    /* Unread indicator */
+    .thread-item.unread::before {
+      content: '';
+      position: absolute;
+      left: 5px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent-primary);
+    }
+
+    /* Avatar */
+    .thread-avatar-wrap {
+      position: relative;
+      flex-shrink: 0;
+    }
+    .thread-avatar {
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      background: var(--bg-elevated);
+      border: 2px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      overflow: hidden;
+    }
+    .thread-avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    /* Routine badge on avatar */
+    .avatar-routine-dot {
+      position: absolute;
+      bottom: 1px;
+      right: 1px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--info);
+      border: 2px solid var(--bg-primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 7px;
+    }
+
+    /* Thread content */
+    .thread-content {
+      flex: 1;
+      min-width: 0;
+    }
+    .thread-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 3px;
+    }
+    .thread-name {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .thread-item.unread .thread-name {
+      font-weight: 700;
+    }
+    .thread-time {
+      font-size: 12px;
+      color: var(--text-tertiary);
+      flex-shrink: 0;
+      margin-left: 8px;
+    }
+    .thread-item.unread .thread-time {
+      color: var(--accent-secondary);
+      font-weight: 600;
+    }
+
+    .thread-bottom {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .thread-preview {
+      flex: 1;
+      font-size: 13px;
+      color: var(--text-tertiary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .thread-item.unread .thread-preview {
+      color: var(--text-secondary);
+      font-weight: 500;
+    }
+
+    /* Unread count badge */
+    .unread-badge {
+      flex-shrink: 0;
+      min-width: 20px;
+      height: 20px;
+      padding: 0 6px;
+      background: var(--accent-primary);
+      border-radius: 10px;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-inverse);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* Routine tag in preview */
+    .routine-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--info);
+      background: rgba(90,130,196,0.12);
+      padding: 1px 5px;
+      border-radius: 4px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    /* ── Swipe hint overlay ── */
+    .swipe-hint {
+      background: rgba(196,90,90,0.15);
+      border: 1px solid rgba(196,90,90,0.3);
+      position: absolute;
+      right: 0; top: 0; bottom: 0;
+      width: 80px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      border-radius: 0;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    .thread-item:hover .swipe-hint { opacity: 1; }
+
+    /* ── FAB ── */
+    .fab {
+      position: absolute;
+      bottom: 100px;
+      right: 22px;
+      width: 56px;
+      height: 56px;
+      border-radius: 18px;
+      background: var(--accent-primary);
+      border: none;
+      color: var(--text-inverse);
+      font-size: 26px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: 0 4px 20px rgba(124,140,90,0.45), 0 2px 8px rgba(0,0,0,0.35);
+      transition: background 0.15s, transform 0.15s, box-shadow 0.15s;
+      z-index: 10;
+    }
+    .fab:hover {
+      background: var(--accent-secondary);
+      transform: scale(1.06);
+      box-shadow: 0 6px 24px rgba(124,140,90,0.5), 0 3px 10px rgba(0,0,0,0.4);
+    }
+    .fab:active { transform: scale(0.97); }
+
+    /* ── Bottom navigation ── */
+    .bottom-nav {
+      height: 83px;
+      background: var(--bg-secondary);
+      border-top: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-around;
+      padding: 10px 0 0;
+      flex-shrink: 0;
+    }
+    .bottom-nav-item {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+      padding: 4px 0;
+      transition: opacity 0.15s;
+    }
+    .bottom-nav-item:hover { opacity: 0.75; }
+    .bottom-nav-icon {
+      font-size: 22px;
+      line-height: 1;
+    }
+    .bottom-nav-label {
+      font-size: 10px;
+      font-weight: 500;
+      color: var(--text-tertiary);
+    }
+    .bottom-nav-item.active .bottom-nav-label {
+      color: var(--accent-secondary);
+      font-weight: 600;
+    }
+    .bottom-nav-item.active .bottom-nav-icon {
+      filter: none;
+    }
+    .bottom-nav-dot {
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: var(--accent-primary);
+      margin-top: -2px;
+    }
+
+    /* ── Home indicator ── */
+    .home-indicator {
+      height: 0;
+    }
+
+    /* ── Demo hint ── */
+    .demo-hint {
+      position: fixed;
+      top: 16px;
+      right: 20px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-default);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 11px;
+      color: var(--text-tertiary);
+      pointer-events: none;
+    }
+    .demo-hint strong { color: var(--text-secondary); }
+  </style>
+</head>
+<body>
+
+  <div class="phone-frame">
+
+    <!-- Status bar -->
+    <div class="status-bar">
+      <span class="status-time">9:41</span>
+      <div class="status-icons">
+        <!-- Signal bars -->
+        <svg width="17" height="12" viewBox="0 0 17 12">
+          <rect x="0"  y="8"  width="3" height="4" rx="0.5" opacity="1"/>
+          <rect x="4.5" y="5" width="3" height="7" rx="0.5" opacity="1"/>
+          <rect x="9"  y="2"  width="3" height="10" rx="0.5" opacity="1"/>
+          <rect x="13.5" y="0" width="3" height="12" rx="0.5" opacity="0.3"/>
+        </svg>
+        <!-- WiFi -->
+        <svg width="16" height="12" viewBox="0 0 24 18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+          <path d="M1 6C5.5 1.5 18.5 1.5 23 6" opacity="0.3"/>
+          <path d="M4.5 10C7.5 7 16.5 7 19.5 10"/>
+          <path d="M8.5 14C10 12.5 14 12.5 15.5 14"/>
+          <circle cx="12" cy="17" r="1.5" fill="currentColor" stroke="none"/>
+        </svg>
+        <!-- Battery -->
+        <svg width="25" height="12" viewBox="0 0 25 12">
+          <rect x="0" y="1" width="21" height="10" rx="2.5" stroke="currentColor" stroke-width="1.2" fill="none" opacity="0.5"/>
+          <rect x="1.2" y="2.2" width="16" height="7.6" rx="1.5" fill="currentColor"/>
+          <path d="M22.5 4v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.4"/>
+        </svg>
+      </div>
+    </div>
+
+    <!-- Navigation bar -->
+    <div class="nav-bar">
+      <div class="nav-title">agent-deck</div>
+      <div class="nav-actions">
+        <button class="nav-icon-btn" title="Archived">🗂</button>
+        <button class="nav-icon-btn" title="Settings">⚙️</button>
+      </div>
+    </div>
+
+    <!-- Search bar -->
+    <div class="search-bar">
+      <div class="search-input-wrap">
+        <span class="search-icon">🔍</span>
+        <span class="search-input-fake">Search threads…</span>
+      </div>
+    </div>
+
+    <!-- Thread list -->
+    <div class="thread-list">
+
+      <div class="section-header">Pinned</div>
+
+      <!-- Pinned thread — unread, with routine indicator -->
+      <div class="thread-item unread" id="thread-daily">
+        <div class="thread-avatar-wrap">
+          <div class="thread-avatar">🦉</div>
+          <div class="avatar-routine-dot">⏱</div>
+        </div>
+        <div class="thread-content">
+          <div class="thread-top">
+            <span class="thread-name">Nexus</span>
+            <span class="thread-time">9:00 AM</span>
+          </div>
+          <div class="thread-bottom">
+            <span class="routine-tag">⏱ Routine</span>
+            <span class="thread-preview">Good morning! Here's your daily briefing for today…</span>
+            <span class="unread-badge">3</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-header">Today</div>
+
+      <!-- Thread — unread -->
+      <div class="thread-item unread">
+        <div class="thread-avatar-wrap">
+          <div class="thread-avatar">🧪</div>
+        </div>
+        <div class="thread-content">
+          <div class="thread-top">
+            <span class="thread-name">Rust async patterns</span>
+            <span class="thread-time">8:47 AM</span>
+          </div>
+          <div class="thread-bottom">
+            <span class="thread-preview">The key difference between tokio::select! and futures::select! is…</span>
+            <span class="unread-badge">1</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Thread — read, currently active -->
+      <div class="thread-item active">
+        <div class="thread-avatar-wrap">
+          <div class="thread-avatar">🧠</div>
+        </div>
+        <div class="thread-content">
+          <div class="thread-top">
+            <span class="thread-name">Research: AI frameworks</span>
+            <span class="thread-time">7:22 AM</span>
+          </div>
+          <div class="thread-bottom">
+            <span class="thread-preview">LangGraph's stateful orchestration looks promising for your use case</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Thread — read -->
+      <div class="thread-item">
+        <div class="thread-avatar-wrap">
+          <div class="thread-avatar">🌿</div>
+        </div>
+        <div class="thread-content">
+          <div class="thread-top">
+            <span class="thread-name">Trip planning</span>
+            <span class="thread-time">6:05 AM</span>
+          </div>
+          <div class="thread-bottom">
+            <span class="thread-preview">You: I'd like to go somewhere warm in March</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="section-header">Yesterday</div>
+
+      <!-- Thread — read, has emoji avatar with image placeholder -->
+      <div class="thread-item">
+        <div class="thread-avatar-wrap">
+          <div class="thread-avatar" style="background: linear-gradient(135deg, #2E3A28, #3A4A30);">🦊</div>
+        </div>
+        <div class="thread-content">
+          <div class="thread-top">
+            <span class="thread-name">Code review</span>
+            <span class="thread-time">Yesterday</span>
+          </div>
+          <div class="thread-bottom">
+            <span class="thread-preview">Looks solid — the only nit is the error handling in parse_config</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Thread — read -->
+      <div class="thread-item">
+        <div class="thread-avatar-wrap">
+          <div class="thread-avatar">🧪</div>
+        </div>
+        <div class="thread-content">
+          <div class="thread-top">
+            <span class="thread-name">Debugging SQLx query</span>
+            <span class="thread-time">Yesterday</span>
+          </div>
+          <div class="thread-bottom">
+            <span class="thread-preview">Try wrapping the query in a transaction to see if the FK…</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Thread — read, older -->
+      <div class="thread-item">
+        <div class="thread-avatar-wrap">
+          <div class="thread-avatar">🌿</div>
+        </div>
+        <div class="thread-content">
+          <div class="thread-top">
+            <span class="thread-name">Weekly goals</span>
+            <span class="thread-time">Mon</span>
+          </div>
+          <div class="thread-bottom">
+            <span class="thread-preview">You: Here's what I want to accomplish this week…</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Thread — older still -->
+      <div class="thread-item">
+        <div class="thread-avatar-wrap">
+          <div class="thread-avatar">🧠</div>
+        </div>
+        <div class="thread-content">
+          <div class="thread-top">
+            <span class="thread-name">Book recommendations</span>
+            <span class="thread-time">Sun</span>
+          </div>
+          <div class="thread-bottom">
+            <span class="thread-preview">Based on what you've enjoyed before, I'd suggest…</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Padding at the bottom so content isn't hidden behind FAB -->
+      <div style="height: 80px;"></div>
+
+    </div><!-- /thread-list -->
+
+    <!-- FAB -->
+    <button class="fab" id="fab-btn" title="New Chat">＋</button>
+
+    <!-- Bottom nav -->
+    <div class="bottom-nav">
+      <div class="bottom-nav-item active">
+        <span class="bottom-nav-icon">💬</span>
+        <span class="bottom-nav-label">Chats</span>
+        <div class="bottom-nav-dot"></div>
+      </div>
+      <div class="bottom-nav-item">
+        <span class="bottom-nav-icon">🔔</span>
+        <span class="bottom-nav-label">Activity</span>
+      </div>
+      <div class="bottom-nav-item">
+        <span class="bottom-nav-icon">⚙️</span>
+        <span class="bottom-nav-label">Settings</span>
+      </div>
+    </div>
+
+    <div class="home-indicator"></div>
+
+  </div><!-- /phone-frame -->
+
+  <div class="demo-hint"><strong>375px</strong> · Pixel 4a viewport</div>
+
+  <script>
+    // Thread tap → active state
+    document.querySelectorAll('.thread-item').forEach(item => {
+      item.addEventListener('click', function () {
+        document.querySelectorAll('.thread-item').forEach(i => {
+          i.classList.remove('active');
+          i.classList.remove('unread');
+        });
+        this.classList.add('active');
+        // Clear unread badge on tap
+        const badge = this.querySelector('.unread-badge');
+        if (badge) badge.remove();
+        // Flash to simulate opening chat
+        this.style.background = 'var(--accent-muted)';
+      });
+    });
+
+    // FAB
+    const fab = document.getElementById('fab-btn');
+    fab.addEventListener('click', () => {
+      fab.style.transform = 'scale(0.93) rotate(45deg)';
+      fab.style.background = 'var(--accent-secondary)';
+      setTimeout(() => {
+        fab.style.transform = '';
+        fab.style.background = '';
+      }, 300);
+    });
+
+    // Bottom nav
+    document.querySelectorAll('.bottom-nav-item').forEach(item => {
+      item.addEventListener('click', function () {
+        document.querySelectorAll('.bottom-nav-item').forEach(i => i.classList.remove('active'));
+        this.classList.add('active');
+      });
+    });
+
+    // Button press feedback
+    document.querySelectorAll('button').forEach(btn => {
+      btn.addEventListener('mousedown', () => {
+        if (!btn.classList.contains('fab')) btn.style.opacity = '0.7';
+      });
+      btn.addEventListener('mouseup',  () => { btn.style.opacity = ''; });
+      btn.addEventListener('mouseleave', () => { btn.style.opacity = ''; });
+    });
+  </script>
+</body>
+</html>

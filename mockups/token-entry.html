@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>agent-deck — Connect</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-primary:      #1C1C1A;
+      --bg-secondary:    #242422;
+      --bg-tertiary:     #2E2E2B;
+      --bg-elevated:     #383835;
+      --accent-primary:  #7C8C5A;
+      --accent-secondary:#9AAD6E;
+      --accent-muted:    #4A5235;
+      --text-primary:    #F0EDE4;
+      --text-secondary:  #B8B4A8;
+      --text-tertiary:   #7A7870;
+      --text-inverse:    #1C1C1A;
+      --success:         #6A9E5B;
+      --warning:         #C4A24A;
+      --error:           #C45A5A;
+      --info:            #5A82C4;
+      --border-subtle:   #333330;
+      --border-default:  #444440;
+      --border-strong:   #666660;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .page {
+      width: 100%;
+      max-width: 420px;
+      padding: 24px 20px;
+    }
+
+    /* Brand */
+    .brand {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      margin-bottom: 40px;
+    }
+    .brand-emoji { font-size: 28px; }
+    .brand-name {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--text-primary);
+    }
+
+    /* Card */
+    .card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-subtle);
+      border-radius: 14px;
+      padding: 28px 24px;
+    }
+
+    .card-title {
+      font-size: 17px;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin-bottom: 6px;
+      letter-spacing: -0.01em;
+    }
+
+    .card-subtitle {
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.55;
+      margin-bottom: 24px;
+    }
+
+    .card-subtitle a {
+      color: var(--accent-secondary);
+      text-decoration: none;
+    }
+    .card-subtitle a:hover { text-decoration: underline; }
+
+    /* Input group */
+    .input-group {
+      margin-bottom: 16px;
+    }
+
+    .input-label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 7px;
+    }
+
+    .input-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .token-input {
+      flex: 1;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-default);
+      border-radius: 8px;
+      padding: 10px 12px;
+      color: var(--text-primary);
+      font-size: 13px;
+      font-family: "SF Mono", "Fira Code", monospace;
+      outline: none;
+      letter-spacing: 0.04em;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .token-input::placeholder {
+      color: var(--text-tertiary);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      letter-spacing: 0;
+      font-size: 13px;
+    }
+    .token-input:focus {
+      border-color: var(--accent-primary);
+      box-shadow: 0 0 0 3px rgba(124, 140, 90, 0.15);
+    }
+
+    .token-input.error {
+      border-color: var(--error);
+      box-shadow: 0 0 0 3px rgba(196, 90, 90, 0.15);
+    }
+
+    .paste-btn {
+      padding: 10px 14px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-default);
+      border-radius: 8px;
+      color: var(--text-secondary);
+      font-size: 13px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.15s, color 0.15s;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .paste-btn:hover {
+      background: var(--border-default);
+      color: var(--text-primary);
+    }
+    .paste-btn:active {
+      transform: scale(0.97);
+    }
+
+    /* Error state */
+    .error-msg {
+      display: none;
+      margin-top: 7px;
+      font-size: 12px;
+      color: var(--error);
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .error-msg.visible { display: flex; }
+
+    /* Connect button */
+    .connect-btn {
+      width: 100%;
+      padding: 11px;
+      background: var(--accent-primary);
+      color: var(--text-inverse);
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, opacity 0.15s;
+      margin-top: 4px;
+    }
+    .connect-btn:hover:not(:disabled) { background: var(--accent-secondary); }
+    .connect-btn:disabled {
+      opacity: 0.45;
+      cursor: default;
+    }
+
+    /* Loading state */
+    .connect-btn.loading {
+      position: relative;
+      color: transparent;
+      pointer-events: none;
+    }
+    .connect-btn.loading::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 18px;
+      height: 18px;
+      border: 2px solid rgba(28,28,26,0.3);
+      border-top-color: var(--text-inverse);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: translate(-50%, -50%) rotate(360deg); } }
+
+    /* Success state */
+    .success-overlay {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      padding: 8px 0 4px;
+    }
+    .success-overlay.visible { display: flex; }
+
+    .success-icon {
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      background: var(--accent-muted);
+      border: 2px solid var(--accent-primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+      margin-bottom: 14px;
+      animation: popIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    @keyframes popIn {
+      from { transform: scale(0.6); opacity: 0; }
+      to   { transform: scale(1);   opacity: 1; }
+    }
+
+    .success-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin-bottom: 5px;
+    }
+    .success-subtitle {
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    /* How to find token help */
+    .help-section {
+      margin-top: 20px;
+      padding: 14px 16px;
+      background: var(--bg-tertiary);
+      border-radius: 9px;
+      border: 1px solid var(--border-subtle);
+    }
+
+    .help-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-tertiary);
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      margin-bottom: 10px;
+    }
+
+    .help-step {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 8px;
+      align-items: flex-start;
+    }
+    .help-step:last-child { margin-bottom: 0; }
+
+    .step-num {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--bg-elevated);
+      color: var(--text-tertiary);
+      font-size: 10px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .step-text {
+      font-size: 12px;
+      color: var(--text-secondary);
+      line-height: 1.45;
+    }
+    .step-text code {
+      font-family: "SF Mono", "Fira Code", monospace;
+      font-size: 11px;
+      background: var(--bg-elevated);
+      color: var(--accent-secondary);
+      padding: 1px 5px;
+      border-radius: 3px;
+    }
+
+    /* Footer */
+    .footer {
+      margin-top: 24px;
+      text-align: center;
+      font-size: 11px;
+      color: var(--text-tertiary);
+    }
+  </style>
+</head>
+<body>
+
+<div class="page">
+
+  <!-- Brand -->
+  <div class="brand">
+    <span class="brand-emoji">🤖</span>
+    <span class="brand-name">agent-deck</span>
+  </div>
+
+  <!-- Card -->
+  <div class="card">
+
+    <!-- Default state -->
+    <div id="formState">
+      <div class="card-title">Connect to your server</div>
+      <div class="card-subtitle">
+        You're accessing agent-deck from a remote device.<br />
+        Enter the auth token printed in your server's terminal output, or visible in
+        <a href="#">Settings → General</a> on localhost.
+      </div>
+
+      <div class="input-group">
+        <label class="input-label" for="tokenInput">Auth Token</label>
+        <div class="input-row">
+          <input
+            type="password"
+            id="tokenInput"
+            class="token-input"
+            placeholder="Paste your 64-character token…"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <button class="paste-btn" id="pasteBtn" title="Paste from clipboard">
+            📋 Paste
+          </button>
+        </div>
+        <div class="error-msg" id="errorMsg">
+          <span>⚠</span>
+          <span id="errorText">Invalid token. Check your terminal output and try again.</span>
+        </div>
+      </div>
+
+      <button class="connect-btn" id="connectBtn" disabled>Connect</button>
+    </div>
+
+    <!-- Success state (hidden by default) -->
+    <div class="success-overlay" id="successState">
+      <div class="success-icon">✓</div>
+      <div class="success-title">Connected!</div>
+      <div class="success-subtitle">Redirecting you to agent-deck…</div>
+    </div>
+
+    <!-- How to find your token -->
+    <div class="help-section" id="helpSection">
+      <div class="help-title">Where to find your token</div>
+      <div class="help-step">
+        <div class="step-num">1</div>
+        <div class="step-text">
+          On the machine running agent-deck, check the terminal where you started the server. Look for a line that reads <code>Auth token: …</code>
+        </div>
+      </div>
+      <div class="help-step">
+        <div class="step-num">2</div>
+        <div class="step-text">
+          Alternatively, open agent-deck in a browser on that machine (localhost) and go to <code>Settings → General</code> to view or copy the token.
+        </div>
+      </div>
+      <div class="help-step">
+        <div class="step-num">3</div>
+        <div class="step-text">
+          Paste the full 64-character token in the field above. You'll only need to do this once — it's stored as a cookie.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    Your data never leaves your network · Secured over Tailscale
+  </div>
+
+</div>
+
+<script>
+  const tokenInput = document.getElementById('tokenInput');
+  const connectBtn = document.getElementById('connectBtn');
+  const pasteBtn   = document.getElementById('pasteBtn');
+  const errorMsg   = document.getElementById('errorMsg');
+  const errorText  = document.getElementById('errorText');
+  const formState  = document.getElementById('formState');
+  const successState = document.getElementById('successState');
+  const helpSection  = document.getElementById('helpSection');
+
+  // Enable button when input has content
+  tokenInput.addEventListener('input', () => {
+    const val = tokenInput.value.trim();
+    connectBtn.disabled = val.length === 0;
+    // Clear error on change
+    tokenInput.classList.remove('error');
+    errorMsg.classList.remove('visible');
+  });
+
+  // Paste button
+  pasteBtn.addEventListener('click', async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      tokenInput.value = text.trim();
+      tokenInput.dispatchEvent(new Event('input'));
+      tokenInput.focus();
+      pasteBtn.textContent = '✓ Pasted';
+      setTimeout(() => { pasteBtn.innerHTML = '📋 Paste'; }, 1500);
+    } catch {
+      tokenInput.focus();
+    }
+  });
+
+  // Show/hide password toggle via double-click
+  tokenInput.addEventListener('dblclick', () => {
+    tokenInput.type = tokenInput.type === 'password' ? 'text' : 'password';
+  });
+
+  // Connect action
+  connectBtn.addEventListener('click', () => {
+    const val = tokenInput.value.trim();
+    if (!val) return;
+
+    // Simulate loading state
+    connectBtn.classList.add('loading');
+    connectBtn.disabled = true;
+
+    // Simulate async token validation (1.2s)
+    setTimeout(() => {
+      connectBtn.classList.remove('loading');
+
+      // Simulate: treat any 64-char hex string as valid for demo purposes
+      const isValid = /^[0-9a-f]{64}$/i.test(val);
+
+      if (isValid) {
+        // Success
+        formState.style.display = 'none';
+        helpSection.style.display = 'none';
+        successState.classList.add('visible');
+      } else {
+        // Error
+        tokenInput.classList.add('error');
+        errorMsg.classList.add('visible');
+        errorText.textContent = 'Invalid token. Tokens are 64 hex characters. Check your server terminal and try again.';
+        connectBtn.disabled = false;
+      }
+    }, 1200);
+  });
+
+  // Submit on Enter
+  tokenInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !connectBtn.disabled) connectBtn.click();
+  });
+</script>
+</body>
+</html>
