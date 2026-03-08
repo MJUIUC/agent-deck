@@ -1,809 +1,1099 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>agent-deck — Settings: Providers</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>agent-deck — Settings: Providers</title>
+        <style>
+            *,
+            *::before,
+            *::after {
+                box-sizing: border-box;
+                margin: 0;
+                padding: 0;
+            }
 
-    :root {
-      --bg-primary:      #1C1C1A;
-      --bg-secondary:    #242422;
-      --bg-tertiary:     #2E2E2B;
-      --bg-elevated:     #383835;
-      --accent-primary:  #7C8C5A;
-      --accent-secondary:#9AAD6E;
-      --accent-muted:    #4A5235;
-      --text-primary:    #F0EDE4;
-      --text-secondary:  #B8B4A8;
-      --text-tertiary:   #7A7870;
-      --text-inverse:    #1C1C1A;
-      --success:         #6A9E5B;
-      --warning:         #C4A24A;
-      --error:           #C45A5A;
-      --info:            #5A82C4;
-      --border-subtle:   #333330;
-      --border-default:  #444440;
-      --border-strong:   #666660;
-    }
+            :root {
+                --bg-primary: #1c1c1a;
+                --bg-secondary: #242422;
+                --bg-tertiary: #2e2e2b;
+                --bg-elevated: #383835;
+                --accent-primary: #7c8c5a;
+                --accent-secondary: #9aad6e;
+                --accent-muted: #4a5235;
+                --text-primary: #f0ede4;
+                --text-secondary: #b8b4a8;
+                --text-tertiary: #7a7870;
+                --text-inverse: #1c1c1a;
+                --success: #6a9e5b;
+                --warning: #c4a24a;
+                --error: #c45a5a;
+                --info: #5a82c4;
+                --border-subtle: #333330;
+                --border-default: #444440;
+                --border-strong: #666660;
+            }
 
-    html, body {
-      height: 100%;
-      background: var(--bg-primary);
-      color: var(--text-primary);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      font-size: 14px;
-      line-height: 1.5;
-      overflow: hidden;
-    }
+            html,
+            body {
+                height: 100%;
+                background: var(--bg-primary);
+                color: var(--text-primary);
+                font-family:
+                    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                    sans-serif;
+                font-size: 14px;
+                line-height: 1.5;
+                overflow: hidden;
+            }
 
-    /* ── Layout ── */
-    .app { display: flex; height: 100vh; }
+            /* ── Layout ── */
+            .app {
+                display: flex;
+                height: 100vh;
+            }
 
-    /* ── Sidebar ── */
-    .sidebar {
-      width: 220px;
-      min-width: 220px;
-      background: var(--bg-secondary);
-      border-right: 1px solid var(--border-subtle);
-      display: flex;
-      flex-direction: column;
-      padding: 20px 0;
-    }
+            /* ── Sidebar ── */
+            .sidebar {
+                width: 220px;
+                min-width: 220px;
+                background: var(--bg-secondary);
+                border-right: 1px solid var(--border-subtle);
+                display: flex;
+                flex-direction: column;
+                padding: 20px 0;
+            }
 
-    .sidebar-brand {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 0 16px 20px;
-      border-bottom: 1px solid var(--border-subtle);
-      margin-bottom: 12px;
-    }
-    .sidebar-brand .emoji { font-size: 18px; }
-    .sidebar-brand .name {
-      font-size: 14px;
-      font-weight: 700;
-      color: var(--text-primary);
-      letter-spacing: -0.01em;
-    }
+            .sidebar-brand {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                padding: 0 16px 20px;
+                border-bottom: 1px solid var(--border-subtle);
+                margin-bottom: 12px;
+            }
+            .sidebar-brand .emoji {
+                font-size: 18px;
+            }
+            .sidebar-brand .name {
+                font-size: 14px;
+                font-weight: 700;
+                color: var(--text-primary);
+                letter-spacing: -0.01em;
+            }
 
-    .back-link {
-      display: flex;
-      align-items: center;
-      gap: 7px;
-      padding: 7px 16px;
-      margin: 0 8px 12px;
-      border-radius: 6px;
-      font-size: 13px;
-      color: var(--text-secondary);
-      cursor: pointer;
-      transition: background 0.15s, color 0.15s;
-      background: none;
-      border: none;
-    }
-    .back-link:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+            .back-link {
+                display: flex;
+                align-items: center;
+                gap: 7px;
+                padding: 7px 16px;
+                margin: 0 8px 12px;
+                border-radius: 6px;
+                font-size: 13px;
+                color: var(--text-secondary);
+                cursor: pointer;
+                transition:
+                    background 0.15s,
+                    color 0.15s;
+                background: none;
+                border: none;
+            }
+            .back-link:hover {
+                background: var(--bg-tertiary);
+                color: var(--text-primary);
+            }
 
-    .nav-section-label {
-      padding: 4px 16px 6px;
-      font-size: 10px;
-      font-weight: 600;
-      color: var(--text-tertiary);
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-    }
+            .nav-section-label {
+                padding: 4px 16px 6px;
+                font-size: 10px;
+                font-weight: 600;
+                color: var(--text-tertiary);
+                text-transform: uppercase;
+                letter-spacing: 0.08em;
+            }
 
-    .nav-item {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 16px;
-      margin: 0 8px 2px;
-      border-radius: 7px;
-      font-size: 13px;
-      color: var(--text-secondary);
-      cursor: pointer;
-      transition: background 0.15s, color 0.15s;
-      background: none;
-      border: none;
-      width: calc(100% - 16px);
-      text-align: left;
-    }
-    .nav-item:hover { background: var(--bg-tertiary); color: var(--text-primary); }
-    .nav-item.active {
-      background: var(--accent-muted);
-      color: var(--text-primary);
-    }
-    .nav-item .icon { font-size: 15px; }
+            .nav-item {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                padding: 8px 16px;
+                margin: 0 8px 2px;
+                border-radius: 7px;
+                font-size: 13px;
+                color: var(--text-secondary);
+                cursor: pointer;
+                transition:
+                    background 0.15s,
+                    color 0.15s;
+                background: none;
+                border: none;
+                width: calc(100% - 16px);
+                text-align: left;
+            }
+            .nav-item:hover {
+                background: var(--bg-tertiary);
+                color: var(--text-primary);
+            }
+            .nav-item.active {
+                background: var(--accent-muted);
+                color: var(--text-primary);
+            }
+            .nav-item .icon {
+                font-size: 15px;
+            }
 
-    /* ── Main Content ── */
-    .main {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
+            /* ── Main Content ── */
+            .main {
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+                overflow: hidden;
+            }
 
-    .page-header {
-      padding: 20px 28px 16px;
-      border-bottom: 1px solid var(--border-subtle);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      background: var(--bg-primary);
-    }
+            .page-header {
+                padding: 20px 28px 16px;
+                border-bottom: 1px solid var(--border-subtle);
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                background: var(--bg-primary);
+            }
 
-    .page-title { font-size: 18px; font-weight: 700; letter-spacing: -0.01em; }
-    .page-subtitle { font-size: 13px; color: var(--text-tertiary); margin-top: 2px; }
+            .page-title {
+                font-size: 18px;
+                font-weight: 700;
+                letter-spacing: -0.01em;
+            }
+            .page-subtitle {
+                font-size: 13px;
+                color: var(--text-tertiary);
+                margin-top: 2px;
+            }
 
-    .page-body {
-      flex: 1;
-      overflow-y: auto;
-      padding: 24px 28px;
-    }
-    .page-body::-webkit-scrollbar { width: 4px; }
-    .page-body::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: 2px; }
+            .page-body {
+                flex: 1;
+                overflow-y: auto;
+                padding: 24px 28px;
+            }
+            .page-body::-webkit-scrollbar {
+                width: 4px;
+            }
+            .page-body::-webkit-scrollbar-thumb {
+                background: var(--border-default);
+                border-radius: 2px;
+            }
 
-    /* ── Buttons ── */
-    .btn {
-      padding: 8px 16px;
-      border-radius: 7px;
-      font-size: 13px;
-      font-weight: 500;
-      cursor: pointer;
-      border: none;
-      transition: background 0.15s, color 0.15s;
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-    }
-    .btn-primary { background: var(--accent-primary); color: var(--text-inverse); }
-    .btn-primary:hover { background: var(--accent-secondary); }
-    .btn-ghost {
-      background: transparent;
-      color: var(--text-secondary);
-      border: 1px solid var(--border-default);
-    }
-    .btn-ghost:hover { background: var(--bg-elevated); color: var(--text-primary); }
-    .btn-danger { background: transparent; color: var(--error); border: 1px solid rgba(196,90,90,0.35); }
-    .btn-danger:hover { background: rgba(196,90,90,0.1); }
-    .btn-sm { padding: 5px 11px; font-size: 12px; }
+            /* ── Buttons ── */
+            .btn {
+                padding: 8px 16px;
+                border-radius: 7px;
+                font-size: 13px;
+                font-weight: 500;
+                cursor: pointer;
+                border: none;
+                transition:
+                    background 0.15s,
+                    color 0.15s;
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+            }
+            .btn-primary {
+                background: var(--accent-primary);
+                color: var(--text-inverse);
+            }
+            .btn-primary:hover {
+                background: var(--accent-secondary);
+            }
+            .btn-ghost {
+                background: transparent;
+                color: var(--text-secondary);
+                border: 1px solid var(--border-default);
+            }
+            .btn-ghost:hover {
+                background: var(--bg-elevated);
+                color: var(--text-primary);
+            }
+            .btn-danger {
+                background: transparent;
+                color: var(--error);
+                border: 1px solid rgba(196, 90, 90, 0.35);
+            }
+            .btn-danger:hover {
+                background: rgba(196, 90, 90, 0.1);
+            }
+            .btn-sm {
+                padding: 5px 11px;
+                font-size: 12px;
+            }
 
-    /* ── Provider Cards ── */
-    .provider-list { display: flex; flex-direction: column; gap: 12px; margin-bottom: 24px; }
+            /* ── Provider Cards ── */
+            .provider-list {
+                display: flex;
+                flex-direction: column;
+                gap: 12px;
+                margin-bottom: 24px;
+            }
 
-    .provider-card {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border-subtle);
-      border-radius: 11px;
-      padding: 16px 18px;
-      transition: border-color 0.15s;
-    }
-    .provider-card:hover { border-color: var(--border-default); }
+            .provider-card {
+                background: var(--bg-secondary);
+                border: 1px solid var(--border-subtle);
+                border-radius: 11px;
+                padding: 16px 18px;
+                transition: border-color 0.15s;
+            }
+            .provider-card:hover {
+                border-color: var(--border-default);
+            }
 
-    .provider-card-header {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      margin-bottom: 12px;
-    }
+            .provider-card-header {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                margin-bottom: 12px;
+            }
 
-    .provider-icon {
-      width: 40px;
-      height: 40px;
-      border-radius: 9px;
-      background: var(--bg-elevated);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 20px;
-      flex-shrink: 0;
-    }
+            .provider-icon {
+                width: 40px;
+                height: 40px;
+                border-radius: 9px;
+                background: var(--bg-elevated);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 20px;
+                flex-shrink: 0;
+            }
 
-    .provider-meta { flex: 1; min-width: 0; }
-    .provider-name {
-      font-size: 15px;
-      font-weight: 600;
-      color: var(--text-primary);
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .provider-kind {
-      font-size: 11px;
-      color: var(--text-tertiary);
-      margin-top: 1px;
-    }
-    .provider-url {
-      font-size: 12px;
-      color: var(--text-tertiary);
-      font-family: "SF Mono", "Fira Code", monospace;
-      margin-top: 2px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
+            .provider-meta {
+                flex: 1;
+                min-width: 0;
+            }
+            .provider-name {
+                font-size: 15px;
+                font-weight: 600;
+                color: var(--text-primary);
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            .provider-kind {
+                font-size: 11px;
+                color: var(--text-tertiary);
+                margin-top: 1px;
+            }
+            .provider-url {
+                font-size: 12px;
+                color: var(--text-tertiary);
+                font-family: "SF Mono", "Fira Code", monospace;
+                margin-top: 2px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
 
-    .status-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      padding: 2px 9px 2px 6px;
-      border-radius: 20px;
-      font-size: 11px;
-      font-weight: 600;
-      flex-shrink: 0;
-    }
-    .status-badge .dot {
-      width: 6px; height: 6px;
-      border-radius: 50%;
-    }
-    .badge-connected { background: rgba(106,158,91,0.15); color: var(--success); }
-    .badge-connected .dot { background: var(--success); }
-    .badge-error { background: rgba(196,90,90,0.12); color: var(--error); }
-    .badge-error .dot { background: var(--error); }
-    .badge-pending { background: rgba(196,162,74,0.12); color: var(--warning); }
-    .badge-pending .dot { background: var(--warning); animation: blink 1.5s infinite; }
-    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+            .status-badge {
+                display: inline-flex;
+                align-items: center;
+                gap: 4px;
+                padding: 2px 9px 2px 6px;
+                border-radius: 20px;
+                font-size: 11px;
+                font-weight: 600;
+                flex-shrink: 0;
+            }
+            .status-badge .dot {
+                width: 6px;
+                height: 6px;
+                border-radius: 50%;
+            }
+            .badge-connected {
+                background: rgba(106, 158, 91, 0.15);
+                color: var(--success);
+            }
+            .badge-connected .dot {
+                background: var(--success);
+            }
+            .badge-error {
+                background: rgba(196, 90, 90, 0.12);
+                color: var(--error);
+            }
+            .badge-error .dot {
+                background: var(--error);
+            }
+            .badge-pending {
+                background: rgba(196, 162, 74, 0.12);
+                color: var(--warning);
+            }
+            .badge-pending .dot {
+                background: var(--warning);
+                animation: blink 1.5s infinite;
+            }
+            @keyframes blink {
+                0%,
+                100% {
+                    opacity: 1;
+                }
+                50% {
+                    opacity: 0.3;
+                }
+            }
 
-    .provider-actions {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding-top: 10px;
-      border-top: 1px solid var(--border-subtle);
-    }
+            .provider-actions {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                padding-top: 10px;
+                border-top: 1px solid var(--border-subtle);
+            }
 
-    .provider-model-count {
-      flex: 1;
-      font-size: 12px;
-      color: var(--text-tertiary);
-    }
+            .provider-model-count {
+                flex: 1;
+                font-size: 12px;
+                color: var(--text-tertiary);
+            }
 
-    /* ── Test Result ── */
-    .test-result {
-      display: none;
-      background: var(--bg-tertiary);
-      border: 1px solid var(--border-subtle);
-      border-radius: 8px;
-      padding: 12px 14px;
-      margin-top: 10px;
-    }
-    .test-result.visible { display: block; }
-    .test-result-title {
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--text-tertiary);
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      margin-bottom: 8px;
-    }
-    .model-chip {
-      display: inline-flex;
-      align-items: center;
-      background: var(--bg-elevated);
-      border: 1px solid var(--border-subtle);
-      border-radius: 5px;
-      padding: 3px 9px;
-      font-size: 12px;
-      color: var(--text-secondary);
-      margin: 3px 3px 3px 0;
-      font-family: "SF Mono", "Fira Code", monospace;
-    }
+            /* ── Test Result ── */
+            .test-result {
+                display: none;
+                background: var(--bg-tertiary);
+                border: 1px solid var(--border-subtle);
+                border-radius: 8px;
+                padding: 12px 14px;
+                margin-top: 10px;
+            }
+            .test-result.visible {
+                display: block;
+            }
+            .test-result-title {
+                font-size: 11px;
+                font-weight: 600;
+                color: var(--text-tertiary);
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+                margin-bottom: 8px;
+            }
+            .model-chip {
+                display: inline-flex;
+                align-items: center;
+                background: var(--bg-elevated);
+                border: 1px solid var(--border-subtle);
+                border-radius: 5px;
+                padding: 3px 9px;
+                font-size: 12px;
+                color: var(--text-secondary);
+                margin: 3px 3px 3px 0;
+                font-family: "SF Mono", "Fira Code", monospace;
+            }
 
-    /* ── Add/Edit Form ── */
-    .form-card {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border-default);
-      border-radius: 12px;
-      padding: 22px 24px;
-      margin-bottom: 24px;
-    }
-    .form-title {
-      font-size: 15px;
-      font-weight: 600;
-      margin-bottom: 18px;
-      color: var(--text-primary);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
+            /* ── Add/Edit Form ── */
+            .form-card {
+                background: var(--bg-secondary);
+                border: 1px solid var(--border-default);
+                border-radius: 12px;
+                padding: 22px 24px;
+                margin-bottom: 24px;
+            }
+            .form-title {
+                font-size: 15px;
+                font-weight: 600;
+                margin-bottom: 18px;
+                color: var(--text-primary);
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+            }
 
-    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-    .form-full { grid-column: 1 / -1; }
+            .form-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 14px;
+            }
+            .form-full {
+                grid-column: 1 / -1;
+            }
 
-    .field { display: flex; flex-direction: column; gap: 6px; }
-    .field-label {
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--text-secondary);
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-    }
-    .field-input, .field-select {
-      background: var(--bg-tertiary);
-      border: 1px solid var(--border-default);
-      border-radius: 7px;
-      padding: 9px 12px;
-      color: var(--text-primary);
-      font-size: 13px;
-      font-family: inherit;
-      outline: none;
-      transition: border-color 0.15s, box-shadow 0.15s;
-    }
-    .field-input::placeholder { color: var(--text-tertiary); }
-    .field-input:focus, .field-select:focus {
-      border-color: var(--accent-primary);
-      box-shadow: 0 0 0 3px rgba(124,140,90,0.15);
-    }
-    .field-input.monospace { font-family: "SF Mono","Fira Code",monospace; font-size: 12px; letter-spacing: 0.03em; }
-    .field-hint { font-size: 11px; color: var(--text-tertiary); }
+            .field {
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+            }
+            .field-label {
+                font-size: 11px;
+                font-weight: 600;
+                color: var(--text-secondary);
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+            }
+            .field-input,
+            .field-select {
+                background: var(--bg-tertiary);
+                border: 1px solid var(--border-default);
+                border-radius: 7px;
+                padding: 9px 12px;
+                color: var(--text-primary);
+                font-size: 13px;
+                font-family: inherit;
+                outline: none;
+                transition:
+                    border-color 0.15s,
+                    box-shadow 0.15s;
+            }
+            .field-input::placeholder {
+                color: var(--text-tertiary);
+            }
+            .field-input:focus,
+            .field-select:focus {
+                border-color: var(--accent-primary);
+                box-shadow: 0 0 0 3px rgba(124, 140, 90, 0.15);
+            }
+            .field-input.monospace {
+                font-family: "SF Mono", "Fira Code", monospace;
+                font-size: 12px;
+                letter-spacing: 0.03em;
+            }
+            .field-hint {
+                font-size: 11px;
+                color: var(--text-tertiary);
+            }
 
-    .form-actions {
-      display: flex;
-      justify-content: flex-end;
-      gap: 8px;
-      margin-top: 18px;
-      padding-top: 16px;
-      border-top: 1px solid var(--border-subtle);
-    }
+            .form-actions {
+                display: flex;
+                justify-content: flex-end;
+                gap: 8px;
+                margin-top: 18px;
+                padding-top: 16px;
+                border-top: 1px solid var(--border-subtle);
+            }
 
-    /* ── Copilot Auth Modal ── */
-    .modal-overlay {
-      position: fixed; inset: 0;
-      background: rgba(0,0,0,0.65);
-      display: flex; align-items: center; justify-content: center;
-      z-index: 100;
-      opacity: 0; pointer-events: none;
-      transition: opacity 0.2s;
-    }
-    .modal-overlay.open { opacity: 1; pointer-events: auto; }
+            /* ── Copilot Auth Modal ── */
+            .modal-overlay {
+                position: fixed;
+                inset: 0;
+                background: rgba(0, 0, 0, 0.65);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                z-index: 100;
+                opacity: 0;
+                pointer-events: none;
+                transition: opacity 0.2s;
+            }
+            .modal-overlay.open {
+                opacity: 1;
+                pointer-events: auto;
+            }
 
-    .modal {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border-default);
-      border-radius: 13px;
-      width: 420px;
-      max-width: calc(100vw - 40px);
-      padding: 24px;
-      transform: scale(0.97);
-      transition: transform 0.2s;
-    }
-    .modal-overlay.open .modal { transform: scale(1); }
+            .modal {
+                background: var(--bg-secondary);
+                border: 1px solid var(--border-default);
+                border-radius: 13px;
+                width: 420px;
+                max-width: calc(100vw - 40px);
+                padding: 24px;
+                transform: scale(0.97);
+                transition: transform 0.2s;
+            }
+            .modal-overlay.open .modal {
+                transform: scale(1);
+            }
 
-    .modal-title {
-      font-size: 16px; font-weight: 700;
-      margin-bottom: 6px;
-      color: var(--text-primary);
-    }
-    .modal-subtitle {
-      font-size: 13px; color: var(--text-secondary);
-      margin-bottom: 20px; line-height: 1.55;
-    }
+            .modal-title {
+                font-size: 16px;
+                font-weight: 700;
+                margin-bottom: 6px;
+                color: var(--text-primary);
+            }
+            .modal-subtitle {
+                font-size: 13px;
+                color: var(--text-secondary);
+                margin-bottom: 20px;
+                line-height: 1.55;
+            }
 
-    .device-code-box {
-      background: var(--bg-primary);
-      border: 2px dashed var(--border-default);
-      border-radius: 10px;
-      padding: 18px;
-      text-align: center;
-      margin-bottom: 18px;
-    }
-    .device-code-label {
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--text-tertiary);
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      margin-bottom: 10px;
-    }
-    .device-code {
-      font-size: 28px;
-      font-weight: 700;
-      font-family: "SF Mono","Fira Code",monospace;
-      color: var(--accent-secondary);
-      letter-spacing: 0.12em;
-    }
-    .device-code-expires {
-      font-size: 11px;
-      color: var(--text-tertiary);
-      margin-top: 8px;
-    }
+            .device-code-box {
+                background: var(--bg-primary);
+                border: 2px dashed var(--border-default);
+                border-radius: 10px;
+                padding: 18px;
+                text-align: center;
+                margin-bottom: 18px;
+            }
+            .device-code-label {
+                font-size: 11px;
+                font-weight: 600;
+                color: var(--text-tertiary);
+                text-transform: uppercase;
+                letter-spacing: 0.08em;
+                margin-bottom: 10px;
+            }
+            .device-code {
+                font-size: 28px;
+                font-weight: 700;
+                font-family: "SF Mono", "Fira Code", monospace;
+                color: var(--accent-secondary);
+                letter-spacing: 0.12em;
+            }
+            .device-code-expires {
+                font-size: 11px;
+                color: var(--text-tertiary);
+                margin-top: 8px;
+            }
 
-    .github-link-row {
-      display: flex;
-      gap: 10px;
-      align-items: center;
-      margin-bottom: 16px;
-    }
-    .github-url-input {
-      flex: 1;
-      background: var(--bg-tertiary);
-      border: 1px solid var(--border-default);
-      border-radius: 7px;
-      padding: 8px 11px;
-      color: var(--accent-secondary);
-      font-size: 13px;
-      font-family: "SF Mono","Fira Code",monospace;
-      outline: none;
-    }
+            .github-link-row {
+                display: flex;
+                gap: 10px;
+                align-items: center;
+                margin-bottom: 16px;
+            }
+            .github-url-input {
+                flex: 1;
+                background: var(--bg-tertiary);
+                border: 1px solid var(--border-default);
+                border-radius: 7px;
+                padding: 8px 11px;
+                color: var(--accent-secondary);
+                font-size: 13px;
+                font-family: "SF Mono", "Fira Code", monospace;
+                outline: none;
+            }
 
-    .auth-status {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 10px 14px;
-      border-radius: 8px;
-      font-size: 13px;
-      margin-bottom: 16px;
-    }
-    .auth-status.waiting {
-      background: rgba(196,162,74,0.1);
-      color: var(--warning);
-      border: 1px solid rgba(196,162,74,0.25);
-    }
-    .auth-status.success {
-      background: rgba(106,158,91,0.1);
-      color: var(--success);
-      border: 1px solid rgba(106,158,91,0.25);
-    }
+            .auth-status {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                padding: 10px 14px;
+                border-radius: 8px;
+                font-size: 13px;
+                margin-bottom: 16px;
+            }
+            .auth-status.waiting {
+                background: rgba(196, 162, 74, 0.1);
+                color: var(--warning);
+                border: 1px solid rgba(196, 162, 74, 0.25);
+            }
+            .auth-status.success {
+                background: rgba(106, 158, 91, 0.1);
+                color: var(--success);
+                border: 1px solid rgba(106, 158, 91, 0.25);
+            }
 
-    .spinner {
-      width: 14px; height: 14px;
-      border: 2px solid rgba(196,162,74,0.3);
-      border-top-color: var(--warning);
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-      flex-shrink: 0;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
+            .spinner {
+                width: 14px;
+                height: 14px;
+                border: 2px solid rgba(196, 162, 74, 0.3);
+                border-top-color: var(--warning);
+                border-radius: 50%;
+                animation: spin 0.8s linear infinite;
+                flex-shrink: 0;
+            }
+            @keyframes spin {
+                to {
+                    transform: rotate(360deg);
+                }
+            }
 
-    .modal-actions {
-      display: flex; justify-content: flex-end; gap: 8px;
-      padding-top: 16px;
-      border-top: 1px solid var(--border-subtle);
-    }
+            .modal-actions {
+                display: flex;
+                justify-content: flex-end;
+                gap: 8px;
+                padding-top: 16px;
+                border-top: 1px solid var(--border-subtle);
+            }
 
-    /* ── Section heading ── */
-    .section-heading {
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--text-tertiary);
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      margin-bottom: 10px;
-    }
-  </style>
-</head>
-<body>
+            /* ── Section heading ── */
+            .section-heading {
+                font-size: 11px;
+                font-weight: 600;
+                color: var(--text-tertiary);
+                text-transform: uppercase;
+                letter-spacing: 0.08em;
+                margin-bottom: 10px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="app">
+            <!-- ── Settings Sidebar ── -->
+            <div class="sidebar">
+                <div class="sidebar-brand">
+                    <span class="emoji">🤖</span>
+                    <span class="name">agent-deck</span>
+                </div>
 
-<div class="app">
+                <button class="back-link">← Back to Chats</button>
 
-  <!-- ── Settings Sidebar ── -->
-  <div class="sidebar">
-    <div class="sidebar-brand">
-      <span class="emoji">🤖</span>
-      <span class="name">agent-deck</span>
-    </div>
-
-    <button class="back-link">← Back to Chats</button>
-
-    <div class="nav-section-label">Settings</div>
-    <button class="nav-item active"><span class="icon">🔌</span> Providers</button>
-    <button class="nav-item"><span class="icon">🎭</span> Personas</button>
-    <button class="nav-item"><span class="icon">🛠</span> Skills</button>
-    <button class="nav-item"><span class="icon">⚙</span> MCP Servers</button>
-    <button class="nav-item"><span class="icon">📱</span> Mobile Pairing</button>
-    <button class="nav-item"><span class="icon">⚙</span> General</button>
-  </div>
-
-  <!-- ── Main ── -->
-  <div class="main">
-    <div class="page-header">
-      <div>
-        <div class="page-title">Providers</div>
-        <div class="page-subtitle">Configure AI model providers and manage API keys</div>
-      </div>
-      <button class="btn btn-primary" id="addProviderBtn">＋ Add Provider</button>
-    </div>
-
-    <div class="page-body">
-
-      <!-- ── Add/Edit Form (hidden by default) ── -->
-      <div class="form-card" id="providerForm" style="display:none;">
-        <div class="form-title">
-          <span id="formTitle">Add Provider</span>
-          <button class="btn btn-ghost btn-sm" id="closeFormBtn">✕ Cancel</button>
-        </div>
-
-        <div class="form-grid">
-          <div class="field">
-            <label class="field-label">Name</label>
-            <input type="text" class="field-input" placeholder="e.g. My OpenAI" id="providerName" />
-          </div>
-
-          <div class="field">
-            <label class="field-label">Kind</label>
-            <select class="field-select" id="providerKind">
-              <option value="">Select provider type…</option>
-              <option value="openai">OpenAI</option>
-              <option value="anthropic">Anthropic</option>
-              <option value="copilot">GitHub Copilot</option>
-              <option value="custom">Custom / Local</option>
-            </select>
-          </div>
-
-          <div class="field form-full">
-            <label class="field-label">Base URL</label>
-            <input type="text" class="field-input monospace" placeholder="https://api.openai.com/v1" id="providerUrl" />
-            <span class="field-hint">OpenAI-compatible endpoint URL. Include /v1 if required by the provider.</span>
-          </div>
-
-          <div class="field form-full" id="apiKeyField">
-            <label class="field-label">API Key</label>
-            <input type="password" class="field-input monospace" placeholder="sk-…  (leave blank to keep existing)" id="providerKey" />
-            <span class="field-hint">Encrypted at rest. Never returned in API responses.</span>
-          </div>
-        </div>
-
-        <div class="form-actions">
-          <button class="btn btn-ghost" id="testConnectionBtn">⚡ Test Connection</button>
-          <button class="btn btn-primary" id="saveProviderBtn">Save Provider</button>
-        </div>
-
-        <!-- Test result -->
-        <div class="test-result" id="testResult">
-          <div class="test-result-title">Available Models</div>
-          <div id="testModelList"></div>
-        </div>
-      </div>
-
-      <!-- ── Provider List ── -->
-      <div class="section-heading">Connected Providers</div>
-      <div class="provider-list">
-
-        <!-- OpenAI — connected -->
-        <div class="provider-card">
-          <div class="provider-card-header">
-            <div class="provider-icon">🤖</div>
-            <div class="provider-meta">
-              <div class="provider-name">
-                OpenAI
-                <span class="status-badge badge-connected"><span class="dot"></span>Connected</span>
-              </div>
-              <div class="provider-kind">openai</div>
-              <div class="provider-url">https://api.openai.com/v1</div>
+                <div class="nav-section-label">Settings</div>
+                <button class="nav-item active">
+                    <span class="icon">🔌</span> Providers
+                </button>
+                <button class="nav-item">
+                    <span class="icon">🎭</span> Personas
+                </button>
+                <button class="nav-item">
+                    <span class="icon">🛠</span> Skills
+                </button>
+                <button class="nav-item">
+                    <span class="icon">🔧</span> MCP Servers
+                </button>
+                <button class="nav-item">
+                    <span class="icon">📱</span> Mobile Pairing
+                </button>
+                <button class="nav-item">
+                    <span class="icon">⚙</span> General
+                </button>
             </div>
-          </div>
-          <div class="provider-actions">
-            <span class="provider-model-count">12 models synced</span>
-            <button class="btn btn-ghost btn-sm" onclick="showTestResult('openai')">⚡ Test</button>
-            <button class="btn btn-ghost btn-sm" onclick="editProvider('openai')">Edit</button>
-            <button class="btn btn-danger btn-sm">Delete</button>
-          </div>
-          <div class="test-result" id="result-openai">
-            <div class="test-result-title">Available Models — 3 returned</div>
-            <div>
-              <span class="model-chip">gpt-4o</span>
-              <span class="model-chip">gpt-4o-mini</span>
-              <span class="model-chip">gpt-4-turbo</span>
-              <span class="model-chip">o1-preview</span>
-              <span class="model-chip">o1-mini</span>
-            </div>
-          </div>
-        </div>
 
-        <!-- Copilot — pending auth -->
-        <div class="provider-card">
-          <div class="provider-card-header">
-            <div class="provider-icon">🐙</div>
-            <div class="provider-meta">
-              <div class="provider-name">
-                GitHub Copilot
-                <span class="status-badge badge-pending"><span class="dot"></span>Auth required</span>
-              </div>
-              <div class="provider-kind">copilot</div>
-              <div class="provider-url">http://localhost:4141/v1</div>
-            </div>
-          </div>
-          <div class="provider-actions">
-            <span class="provider-model-count">0 models — not authenticated</span>
-            <button class="btn btn-ghost btn-sm" id="copilotAuthBtn">Authenticate →</button>
-            <button class="btn btn-ghost btn-sm">Edit</button>
-            <button class="btn btn-danger btn-sm">Delete</button>
-          </div>
-        </div>
+            <!-- ── Main ── -->
+            <div class="main">
+                <div class="page-header">
+                    <div>
+                        <div class="page-title">Providers</div>
+                        <div class="page-subtitle">
+                            Configure AI model providers and manage API keys
+                        </div>
+                    </div>
+                    <button class="btn btn-primary" id="addProviderBtn">
+                        ＋ Add Provider
+                    </button>
+                </div>
 
-        <!-- Anthropic — error -->
-        <div class="provider-card">
-          <div class="provider-card-header">
-            <div class="provider-icon">✦</div>
-            <div class="provider-meta">
-              <div class="provider-name">
-                Anthropic
-                <span class="status-badge badge-error"><span class="dot"></span>Auth error</span>
-              </div>
-              <div class="provider-kind">anthropic</div>
-              <div class="provider-url">https://api.anthropic.com/v1</div>
-            </div>
-          </div>
-          <div class="provider-actions">
-            <span class="provider-model-count" style="color:var(--error);">API key invalid or expired</span>
-            <button class="btn btn-ghost btn-sm">⚡ Test</button>
-            <button class="btn btn-ghost btn-sm" onclick="editProvider('anthropic')">Edit</button>
-            <button class="btn btn-danger btn-sm">Delete</button>
-          </div>
-        </div>
+                <div class="page-body">
+                    <!-- ── Add/Edit Form (hidden by default) ── -->
+                    <div
+                        class="form-card"
+                        id="providerForm"
+                        style="display: none"
+                    >
+                        <div class="form-title">
+                            <span id="formTitle">Add Provider</span>
+                            <button
+                                class="btn btn-ghost btn-sm"
+                                id="closeFormBtn"
+                            >
+                                ✕ Cancel
+                            </button>
+                        </div>
 
-      </div>
+                        <div class="form-grid">
+                            <div class="field">
+                                <label class="field-label">Name</label>
+                                <input
+                                    type="text"
+                                    class="field-input"
+                                    placeholder="e.g. My OpenAI"
+                                    id="providerName"
+                                />
+                            </div>
 
-      <!-- ── Empty state (shown when no providers) ── -->
-      <!--
+                            <div class="field">
+                                <label class="field-label">Kind</label>
+                                <select class="field-select" id="providerKind">
+                                    <option value="">
+                                        Select provider type…
+                                    </option>
+                                    <option value="openai">OpenAI</option>
+                                    <option value="anthropic">Anthropic</option>
+                                    <option value="copilot">
+                                        GitHub Copilot
+                                    </option>
+                                    <option value="custom">
+                                        Custom / Local
+                                    </option>
+                                </select>
+                            </div>
+
+                            <div class="field form-full">
+                                <label class="field-label">Base URL</label>
+                                <input
+                                    type="text"
+                                    class="field-input monospace"
+                                    placeholder="https://api.openai.com/v1"
+                                    id="providerUrl"
+                                />
+                                <span class="field-hint"
+                                    >OpenAI-compatible endpoint URL. Include /v1
+                                    if required by the provider.</span
+                                >
+                            </div>
+
+                            <div class="field form-full" id="apiKeyField">
+                                <label class="field-label">API Key</label>
+                                <input
+                                    type="password"
+                                    class="field-input monospace"
+                                    placeholder="sk-…  (leave blank to keep existing)"
+                                    id="providerKey"
+                                />
+                                <span class="field-hint"
+                                    >Encrypted at rest. Never returned in API
+                                    responses.</span
+                                >
+                            </div>
+                        </div>
+
+                        <div class="form-actions">
+                            <button
+                                class="btn btn-ghost"
+                                id="testConnectionBtn"
+                            >
+                                ⚡ Test Connection
+                            </button>
+                            <button
+                                class="btn btn-primary"
+                                id="saveProviderBtn"
+                            >
+                                Save Provider
+                            </button>
+                        </div>
+
+                        <!-- Test result -->
+                        <div class="test-result" id="testResult">
+                            <div class="test-result-title">
+                                Available Models
+                            </div>
+                            <div id="testModelList"></div>
+                        </div>
+                    </div>
+
+                    <!-- ── Provider List ── -->
+                    <div class="section-heading">Connected Providers</div>
+                    <div class="provider-list">
+                        <!-- OpenAI — connected -->
+                        <div class="provider-card">
+                            <div class="provider-card-header">
+                                <div class="provider-icon">🤖</div>
+                                <div class="provider-meta">
+                                    <div class="provider-name">
+                                        OpenAI
+                                        <span
+                                            class="status-badge badge-connected"
+                                            ><span class="dot"></span
+                                            >Connected</span
+                                        >
+                                    </div>
+                                    <div class="provider-kind">openai</div>
+                                    <div class="provider-url">
+                                        https://api.openai.com/v1
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="provider-actions">
+                                <span class="provider-model-count"
+                                    >12 models synced</span
+                                >
+                                <button
+                                    class="btn btn-ghost btn-sm"
+                                    onclick="showTestResult('openai')"
+                                >
+                                    ⚡ Test
+                                </button>
+                                <button
+                                    class="btn btn-ghost btn-sm"
+                                    onclick="editProvider('openai')"
+                                >
+                                    Edit
+                                </button>
+                                <button class="btn btn-danger btn-sm">
+                                    Delete
+                                </button>
+                            </div>
+                            <div class="test-result" id="result-openai">
+                                <div class="test-result-title">
+                                    Available Models — 3 returned
+                                </div>
+                                <div>
+                                    <span class="model-chip">gpt-4o</span>
+                                    <span class="model-chip">gpt-4o-mini</span>
+                                    <span class="model-chip">gpt-4-turbo</span>
+                                    <span class="model-chip">o1-preview</span>
+                                    <span class="model-chip">o1-mini</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Copilot — pending auth -->
+                        <div class="provider-card">
+                            <div class="provider-card-header">
+                                <div class="provider-icon">🐙</div>
+                                <div class="provider-meta">
+                                    <div class="provider-name">
+                                        GitHub Copilot
+                                        <span class="status-badge badge-pending"
+                                            ><span class="dot"></span>Auth
+                                            required</span
+                                        >
+                                    </div>
+                                    <div class="provider-kind">copilot</div>
+                                    <div class="provider-url">
+                                        http://localhost:4141/v1
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="provider-actions">
+                                <span class="provider-model-count"
+                                    >0 models — not authenticated</span
+                                >
+                                <button
+                                    class="btn btn-ghost btn-sm"
+                                    id="copilotAuthBtn"
+                                >
+                                    Authenticate →
+                                </button>
+                                <button class="btn btn-ghost btn-sm">
+                                    Edit
+                                </button>
+                                <button class="btn btn-danger btn-sm">
+                                    Delete
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Anthropic — error -->
+                        <div class="provider-card">
+                            <div class="provider-card-header">
+                                <div class="provider-icon">✦</div>
+                                <div class="provider-meta">
+                                    <div class="provider-name">
+                                        Anthropic
+                                        <span class="status-badge badge-error"
+                                            ><span class="dot"></span>Auth
+                                            error</span
+                                        >
+                                    </div>
+                                    <div class="provider-kind">anthropic</div>
+                                    <div class="provider-url">
+                                        https://api.anthropic.com/v1
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="provider-actions">
+                                <span
+                                    class="provider-model-count"
+                                    style="color: var(--error)"
+                                    >API key invalid or expired</span
+                                >
+                                <button class="btn btn-ghost btn-sm">
+                                    ⚡ Test
+                                </button>
+                                <button
+                                    class="btn btn-ghost btn-sm"
+                                    onclick="editProvider('anthropic')"
+                                >
+                                    Edit
+                                </button>
+                                <button class="btn btn-danger btn-sm">
+                                    Delete
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ── Empty state (shown when no providers) ── -->
+                    <!--
       <div style="text-align:center;padding:60px 20px;color:var(--text-tertiary);">
         <div style="font-size:40px;margin-bottom:14px;">🔌</div>
         <div style="font-size:15px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">No providers yet</div>
         <div style="font-size:13px;">Add an AI provider to start using agent-deck.</div>
       </div>
       -->
+                </div>
+            </div>
+        </div>
 
-    </div>
-  </div>
-</div>
+        <!-- ── Copilot Auth Modal ── -->
+        <div class="modal-overlay" id="copilotModal">
+            <div class="modal">
+                <div class="modal-title">Authenticate GitHub Copilot</div>
+                <div class="modal-subtitle">
+                    Visit GitHub and enter the code below to authorize
+                    agent-deck to use your Copilot subscription.
+                </div>
 
-<!-- ── Copilot Auth Modal ── -->
-<div class="modal-overlay" id="copilotModal">
-  <div class="modal">
-    <div class="modal-title">Authenticate GitHub Copilot</div>
-    <div class="modal-subtitle">
-      Visit GitHub and enter the code below to authorize agent-deck to use your Copilot subscription.
-    </div>
+                <div class="device-code-box">
+                    <div class="device-code-label">Your device code</div>
+                    <div class="device-code" id="deviceCode">A4F3-8C2E</div>
+                    <div class="device-code-expires">
+                        Expires in <span id="countdown">14:58</span>
+                    </div>
+                </div>
 
-    <div class="device-code-box">
-      <div class="device-code-label">Your device code</div>
-      <div class="device-code" id="deviceCode">A4F3-8C2E</div>
-      <div class="device-code-expires">Expires in <span id="countdown">14:58</span></div>
-    </div>
+                <div class="github-link-row">
+                    <input
+                        class="github-url-input"
+                        type="text"
+                        readonly
+                        value="https://github.com/login/device"
+                    />
+                    <button class="btn btn-ghost btn-sm" id="copyUrlBtn">
+                        Copy
+                    </button>
+                    <button
+                        class="btn btn-primary btn-sm"
+                        onclick="window.open('https://github.com/login/device','_blank')"
+                    >
+                        Open →
+                    </button>
+                </div>
 
-    <div class="github-link-row">
-      <input class="github-url-input" type="text" readonly value="https://github.com/login/device" />
-      <button class="btn btn-ghost btn-sm" id="copyUrlBtn">Copy</button>
-      <button class="btn btn-primary btn-sm" onclick="window.open('https://github.com/login/device','_blank')">Open →</button>
-    </div>
+                <div class="auth-status waiting" id="authStatus">
+                    <div class="spinner"></div>
+                    <span>Waiting for you to enter the code at GitHub…</span>
+                </div>
 
-    <div class="auth-status waiting" id="authStatus">
-      <div class="spinner"></div>
-      <span>Waiting</span> for you to enter the code at GitHub…</span>
-    </div>
+                <div class="modal-actions">
+                    <button class="btn btn-ghost" id="closeCopilotModal">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        </div>
 
-    <div class="modal-actions">
-      <button class="btn btn-ghost" id="closeCopilotModal">Cancel</button>
-    </div>
-  </div>
-</div>
+        <script>
+            // ── Provider form ─────────────────────────────────────────────────────────
+            const providerForm = document.getElementById("providerForm");
+            const addBtn = document.getElementById("addProviderBtn");
+            const closeFormBtn = document.getElementById("closeFormBtn");
+            const testBtn = document.getElementById("testConnectionBtn");
+            const testResult = document.getElementById("testResult");
+            const testModelList = document.getElementById("testModelList");
+            const formTitle = document.getElementById("formTitle");
 
-<script>
-  // ── Provider form ─────────────────────────────────────────────────────────
-  const providerForm  = document.getElementById('providerForm');
-  const addBtn        = document.getElementById('addProviderBtn');
-  const closeFormBtn  = document.getElementById('closeFormBtn');
-  const testBtn       = document.getElementById('testConnectionBtn');
-  const testResult    = document.getElementById('testResult');
-  const testModelList = document.getElementById('testModelList');
-  const formTitle     = document.getElementById('formTitle');
+            addBtn.addEventListener("click", () => {
+                formTitle.textContent = "Add Provider";
+                providerForm.style.display = "block";
+                providerForm.scrollIntoView({
+                    behavior: "smooth",
+                    block: "start",
+                });
+            });
 
-  addBtn.addEventListener('click', () => {
-    formTitle.textContent = 'Add Provider';
-    providerForm.style.display = 'block';
-    providerForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  });
+            closeFormBtn.addEventListener("click", () => {
+                providerForm.style.display = "none";
+                testResult.classList.remove("visible");
+            });
 
-  closeFormBtn.addEventListener('click', () => {
-    providerForm.style.display = 'none';
-    testResult.classList.remove('visible');
-  });
+            function editProvider(id) {
+                formTitle.textContent = "Edit Provider";
+                providerForm.style.display = "block";
+                // Prefill with fake data
+                if (id === "openai") {
+                    document.getElementById("providerName").value = "OpenAI";
+                    document.getElementById("providerKind").value = "openai";
+                    document.getElementById("providerUrl").value =
+                        "https://api.openai.com/v1";
+                    document.getElementById("providerKey").value = "";
+                    document.getElementById("providerKey").placeholder =
+                        "••••••••  (leave blank to keep existing)";
+                } else if (id === "anthropic") {
+                    document.getElementById("providerName").value = "Anthropic";
+                    document.getElementById("providerKind").value = "anthropic";
+                    document.getElementById("providerUrl").value =
+                        "https://api.anthropic.com/v1";
+                    document.getElementById("providerKey").value = "";
+                }
+                providerForm.scrollIntoView({
+                    behavior: "smooth",
+                    block: "start",
+                });
+            }
 
-  function editProvider(id) {
-    formTitle.textContent = 'Edit Provider';
-    providerForm.style.display = 'block';
-    // Prefill with fake data
-    if (id === 'openai') {
-      document.getElementById('providerName').value = 'OpenAI';
-      document.getElementById('providerKind').value = 'openai';
-      document.getElementById('providerUrl').value  = 'https://api.openai.com/v1';
-      document.getElementById('providerKey').value  = '';
-      document.getElementById('providerKey').placeholder = '••••••••  (leave blank to keep existing)';
-    } else if (id === 'anthropic') {
-      document.getElementById('providerName').value = 'Anthropic';
-      document.getElementById('providerKind').value = 'anthropic';
-      document.getElementById('providerUrl').value  = 'https://api.anthropic.com/v1';
-      document.getElementById('providerKey').value  = '';
-    }
-    providerForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }
+            // ── Test connection ───────────────────────────────────────────────────────
+            testBtn.addEventListener("click", () => {
+                testBtn.textContent = "⏳ Testing…";
+                testBtn.disabled = true;
+                testResult.classList.remove("visible");
 
-  // ── Test connection ───────────────────────────────────────────────────────
-  testBtn.addEventListener('click', () => {
-    testBtn.textContent = '⏳ Testing…';
-    testBtn.disabled = true;
-    testResult.classList.remove('visible');
-
-    setTimeout(() => {
-      testBtn.textContent = '⚡ Test Connection';
-      testBtn.disabled = false;
-      testModelList.innerHTML = `
+                setTimeout(() => {
+                    testBtn.textContent = "⚡ Test Connection";
+                    testBtn.disabled = false;
+                    testModelList.innerHTML = `
         <span class="model-chip">gpt-4o</span>
         <span class="model-chip">gpt-4o-mini</span>
         <span class="model-chip">gpt-4-turbo</span>
         <span class="model-chip">o1-preview</span>
         <span class="model-chip">o1-mini</span>
       `;
-      testResult.classList.add('visible');
-    }, 1400);
-  });
+                    testResult.classList.add("visible");
+                }, 1400);
+            });
 
-  // ── Inline test result toggle ─────────────────────────────────────────────
-  function showTestResult(id) {
-    const el = document.getElementById('result-' + id);
-    if (el) el.classList.toggle('visible');
-  }
+            // ── Inline test result toggle ─────────────────────────────────────────────
+            function showTestResult(id) {
+                const el = document.getElementById("result-" + id);
+                if (el) el.classList.toggle("visible");
+            }
 
-  // ── Copilot auth modal ────────────────────────────────────────────────────
-  const copilotModal  = document.getElementById('copilotModal');
-  const copilotAuthBtn = document.getElementById('copilotAuthBtn');
-  const closeCopilotModal = document.getElementById('closeCopilotModal');
-  const authStatus    = document.getElementById('authStatus');
-  let countdownTimer  = null;
-  let countdownSecs   = 898; // ~15 min
+            // ── Copilot auth modal ────────────────────────────────────────────────────
+            const copilotModal = document.getElementById("copilotModal");
+            const copilotAuthBtn = document.getElementById("copilotAuthBtn");
+            const closeCopilotModal =
+                document.getElementById("closeCopilotModal");
+            const authStatus = document.getElementById("authStatus");
+            let countdownTimer = null;
+            let countdownSecs = 898; // ~15 min
 
-  copilotAuthBtn.addEventListener('click', () => {
-    copilotModal.classList.add('open');
-    startCountdown();
-    // Simulate success after 8 seconds for demo
-    setTimeout(simulateAuthSuccess, 8000);
-  });
+            copilotAuthBtn.addEventListener("click", () => {
+                copilotModal.classList.add("open");
+                startCountdown();
+                // Simulate success after 8 seconds for demo
+                setTimeout(simulateAuthSuccess, 8000);
+            });
 
-  closeCopilotModal.addEventListener('click', () => {
-    copilotModal.classList.remove('open');
-    clearInterval(countdownTimer);
-    authStatus.className = 'auth-status waiting';
-    authStatus.innerHTML = '<div class="spinner"></div><span>Waiting for you to enter the code at GitHub…</span>';
-  });
+            closeCopilotModal.addEventListener("click", () => {
+                copilotModal.classList.remove("open");
+                clearInterval(countdownTimer);
+                authStatus.className = "auth-status waiting";
+                authStatus.innerHTML =
+                    '<div class="spinner"></div><span>Waiting for you to enter the code at GitHub…</span>';
+            });
 
-  copilotModal.addEventListener('click', e => {
-    if (e.target === copilotModal) closeCopilotModal.click();
-  });
+            copilotModal.addEventListener("click", (e) => {
+                if (e.target === copilotModal) closeCopilotModal.click();
+            });
 
-  function startCountdown() {
-    clearInterval(countdownTimer);
-    countdownSecs = 898;
-    updateCountdown();
-    countdownTimer = setInterval(() => {
-      countdownSecs--;
-      if (countdownSecs <= 0) { clearInterval(countdownTimer); }
-      updateCountdown();
-    }, 1000);
-  }
+            function startCountdown() {
+                clearInterval(countdownTimer);
+                countdownSecs = 898;
+                updateCountdown();
+                countdownTimer = setInterval(() => {
+                    countdownSecs--;
+                    if (countdownSecs <= 0) {
+                        clearInterval(countdownTimer);
+                    }
+                    updateCountdown();
+                }, 1000);
+            }
 
-  function updateCountdown() {
-    const m = String(Math.floor(countdownSecs / 60)).padStart(2, '0');
-    const s = String(countdownSecs % 60).padStart(2, '0');
-    const el = document.getElementById('countdown');
-    if (el) el.textContent = m + ':' + s;
-  }
+            function updateCountdown() {
+                const m = String(Math.floor(countdownSecs / 60)).padStart(
+                    2,
+                    "0",
+                );
+                const s = String(countdownSecs % 60).padStart(2, "0");
+                const el = document.getElementById("countdown");
+                if (el) el.textContent = m + ":" + s;
+            }
 
-  function simulateAuthSuccess() {
-    clearInterval(countdownTimer);
-    authStatus.className = 'auth-status success';
-    authStatus.innerHTML = '✓ Authenticated! Closing…';
-    setTimeout(() => closeCopilotModal.click(), 1800);
-  }
+            function simulateAuthSuccess() {
+                clearInterval(countdownTimer);
+                authStatus.className = "auth-status success";
+                authStatus.innerHTML = "✓ Authenticated! Closing…";
+                setTimeout(() => closeCopilotModal.click(), 1800);
+            }
 
-  // ── Copy URL ─────────────────────────────────────────────────────────────
-  document.getElementById('copyUrlBtn').addEventListener('click', function() {
-    navigator.clipboard.writeText('https://github.com/login/device').catch(() => {});
-    this.textContent = '✓';
-    setTimeout(() => { this.textContent = 'Copy'; }, 1500);
-  });
-</script>
-</body>
+            // ── Copy URL ─────────────────────────────────────────────────────────────
+            document
+                .getElementById("copyUrlBtn")
+                .addEventListener("click", function () {
+                    navigator.clipboard
+                        .writeText("https://github.com/login/device")
+                        .catch(() => {});
+                    this.textContent = "✓";
+                    setTimeout(() => {
+                        this.textContent = "Copy";
+                    }, 1500);
+                });
+        </script>
+    </body>
 </html>

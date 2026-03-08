@@ -1,9 +1,41 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>agent-deck — Slash Commands</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            'bg-primary':       '#1C1C1A',
+            'bg-secondary':     '#242422',
+            'bg-tertiary':      '#2E2E2B',
+            'bg-elevated':      '#383835',
+            'accent-primary':   '#7C8C5A',
+            'accent-secondary': '#9AAD6E',
+            'accent-muted':     '#4A5235',
+            'text-primary':     '#F0EDE4',
+            'text-secondary':   '#B8B4A8',
+            'text-tertiary':    '#7A7870',
+            'text-inverse':     '#1C1C1A',
+            'success':          '#6A9E5B',
+            'warning':          '#C4A24A',
+            'error':            '#C45A5A',
+            'info':             '#5A82C4',
+            'border-subtle':    '#333330',
+            'border-default':   '#444440',
+            'border-strong':    '#666660',
+            'bubble-user':      '#4A5235',
+            'bubble-agent':     '#2E2E2B',
+            'bubble-routine':   '#2A3545',
+          }
+        }
+      }
+    }
+  </script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -933,7 +965,7 @@
 </div>
 
 <script>
-  /* ── Slash</script> dropdown interaction ─────────────── */
+  /* ── Slash dropdown interaction ─────────────── */
   const input       = document.getElementById('chat-input');
   const inputWrap   = document.getElementById('input-wrap');
   const dropdown    = document.getElementById('slash-dropdown');

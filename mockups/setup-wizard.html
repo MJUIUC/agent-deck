@@ -1,787 +1,960 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>agent-deck — Setup</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>agent-deck — Setup</title>
+        <style>
+            *,
+            *::before,
+            *::after {
+                box-sizing: border-box;
+                margin: 0;
+                padding: 0;
+            }
 
-    :root {
-      --bg-primary:      #1C1C1A;
-      --bg-secondary:    #242422;
-      --bg-tertiary:     #2E2E2B;
-      --bg-elevated:     #383835;
-      --accent-primary:  #7C8C5A;
-      --accent-secondary:#9AAD6E;
-      --accent-muted:    #4A5235;
-      --text-primary:    #F0EDE4;
-      --text-secondary:  #B8B4A8;
-      --text-tertiary:   #7A7870;
-      --text-inverse:    #1C1C1A;
-      --success:         #6A9E5B;
-      --warning:         #C4A24A;
-      --error:           #C45A5A;
-      --info:            #5A82C4;
-      --border-subtle:   #333330;
-      --border-default:  #444440;
-      --border-strong:   #666660;
-    }
+            :root {
+                --bg-primary: #1c1c1a;
+                --bg-secondary: #242422;
+                --bg-tertiary: #2e2e2b;
+                --bg-elevated: #383835;
+                --accent-primary: #7c8c5a;
+                --accent-secondary: #9aad6e;
+                --accent-muted: #4a5235;
+                --text-primary: #f0ede4;
+                --text-secondary: #b8b4a8;
+                --text-tertiary: #7a7870;
+                --text-inverse: #1c1c1a;
+                --success: #6a9e5b;
+                --warning: #c4a24a;
+                --error: #c45a5a;
+                --info: #5a82c4;
+                --border-subtle: #333330;
+                --border-default: #444440;
+                --border-strong: #666660;
+            }
 
-    html, body {
-      height: 100%;
-      background: var(--bg-primary);
-      color: var(--text-primary);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      font-size: 14px;
-      line-height: 1.5;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
+            html,
+            body {
+                height: 100%;
+                background: var(--bg-primary);
+                color: var(--text-primary);
+                font-family:
+                    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                    sans-serif;
+                font-size: 14px;
+                line-height: 1.5;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
 
-    .wizard {
-      width: 100%;
-      max-width: 520px;
-      padding: 24px 20px;
-    }
+            .wizard {
+                width: 100%;
+                max-width: 520px;
+                padding: 24px 20px;
+            }
 
-    /* Brand */
-    .brand {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 10px;
-      margin-bottom: 32px;
-    }
-    .brand-emoji { font-size: 26px; }
-    .brand-name {
-      font-size: 20px;
-      font-weight: 700;
-      letter-spacing: -0.02em;
-      color: var(--text-primary);
-    }
+            /* Brand */
+            .brand {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 10px;
+                margin-bottom: 32px;
+            }
+            .brand-emoji {
+                font-size: 26px;
+            }
+            .brand-name {
+                font-size: 20px;
+                font-weight: 700;
+                letter-spacing: -0.02em;
+                color: var(--text-primary);
+            }
 
-    /* Step indicator */
-    .step-indicator {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0;
-      margin-bottom: 28px;
-    }
+            /* Step indicator */
+            .step-indicator {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 0;
+                margin-bottom: 28px;
+            }
 
-    .step-dot {
-      width: 28px;
-      height: 28px;
-      border-radius: 50%;
-      background: var(--bg-elevated);
-      border: 2px solid var(--border-default);
-      color: var(--text-tertiary);
-      font-size: 11px;
-      font-weight: 700;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: all 0.25s;
-      position: relative;
-      z-index: 1;
-      flex-shrink: 0;
-    }
-    .step-dot.active {
-      background: var(--accent-muted);
-      border-color: var(--accent-primary);
-      color: var(--accent-secondary);
-    }
-    .step-dot.done {
-      background: var(--accent-primary);
-      border-color: var(--accent-primary);
-      color: var(--text-inverse);
-    }
+            .step-dot {
+                width: 28px;
+                height: 28px;
+                border-radius: 50%;
+                background: var(--bg-elevated);
+                border: 2px solid var(--border-default);
+                color: var(--text-tertiary);
+                font-size: 11px;
+                font-weight: 700;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                transition: all 0.25s;
+                position: relative;
+                z-index: 1;
+                flex-shrink: 0;
+            }
+            .step-dot.active {
+                background: var(--accent-muted);
+                border-color: var(--accent-primary);
+                color: var(--accent-secondary);
+            }
+            .step-dot.done {
+                background: var(--accent-primary);
+                border-color: var(--accent-primary);
+                color: var(--text-inverse);
+            }
 
-    .step-line {
-      flex: 1;
-      height: 2px;
-      background: var(--border-subtle);
-      max-width: 60px;
-      transition: background 0.25s;
-    }
-    .step-line.done { background: var(--accent-primary); }
+            .step-line {
+                flex: 1;
+                height: 2px;
+                background: var(--border-subtle);
+                max-width: 60px;
+                transition: background 0.25s;
+            }
+            .step-line.done {
+                background: var(--accent-primary);
+            }
 
-    .step-label {
-      position: absolute;
-      top: calc(100% + 6px);
-      left: 50%;
-      transform: translateX(-50%);
-      font-size: 10px;
-      white-space: nowrap;
-      color: var(--text-tertiary);
-    }
-    .step-dot.active .step-label { color: var(--accent-secondary); }
-    .step-dot.done .step-label { color: var(--accent-primary); }
+            .step-label {
+                position: absolute;
+                top: calc(100% + 6px);
+                left: 50%;
+                transform: translateX(-50%);
+                font-size: 10px;
+                white-space: nowrap;
+                color: var(--text-tertiary);
+            }
+            .step-dot.active .step-label {
+                color: var(--accent-secondary);
+            }
+            .step-dot.done .step-label {
+                color: var(--accent-primary);
+            }
 
-    /* Card */
-    .card {
-      background: var(--bg-secondary);
-      border: 1px solid var(--border-subtle);
-      border-radius: 14px;
-      padding: 32px 28px;
-      margin-top: 16px;
-    }
+            /* Card */
+            .card {
+                background: var(--bg-secondary);
+                border: 1px solid var(--border-subtle);
+                border-radius: 14px;
+                padding: 32px 28px;
+                margin-top: 16px;
+            }
 
-    /* Steps (each is a panel) */
-    .step-panel {
-      display: none;
-    }
-    .step-panel.visible { display: block; }
+            /* Steps (each is a panel) */
+            .step-panel {
+                display: none;
+            }
+            .step-panel.visible {
+                display: block;
+            }
 
-    /* Step: Welcome */
-    .welcome-hero {
-      text-align: center;
-      padding: 8px 0 24px;
-    }
-    .welcome-icon { font-size: 52px; margin-bottom: 18px; }
-    .welcome-title {
-      font-size: 22px;
-      font-weight: 700;
-      letter-spacing: -0.02em;
-      margin-bottom: 10px;
-    }
-    .welcome-desc {
-      font-size: 14px;
-      color: var(--text-secondary);
-      line-height: 1.65;
-      max-width: 380px;
-      margin: 0 auto;
-    }
+            /* Step: Welcome */
+            .welcome-hero {
+                text-align: center;
+                padding: 8px 0 24px;
+            }
+            .welcome-icon {
+                font-size: 52px;
+                margin-bottom: 18px;
+            }
+            .welcome-title {
+                font-size: 22px;
+                font-weight: 700;
+                letter-spacing: -0.02em;
+                margin-bottom: 10px;
+            }
+            .welcome-desc {
+                font-size: 14px;
+                color: var(--text-secondary);
+                line-height: 1.65;
+                max-width: 380px;
+                margin: 0 auto;
+            }
 
-    .feature-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-      margin: 24px 0;
-    }
-    .feature-item {
-      background: var(--bg-tertiary);
-      border-radius: 9px;
-      padding: 13px;
-      display: flex;
-      align-items: flex-start;
-      gap: 10px;
-    }
-    .feature-icon { font-size: 18px; flex-shrink: 0; }
-    .feature-text .title {
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text-primary);
-    }
-    .feature-text .desc {
-      font-size: 11px;
-      color: var(--text-tertiary);
-      margin-top: 2px;
-    }
+            .feature-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 10px;
+                margin: 24px 0;
+            }
+            .feature-item {
+                background: var(--bg-tertiary);
+                border-radius: 9px;
+                padding: 13px;
+                display: flex;
+                align-items: flex-start;
+                gap: 10px;
+            }
+            .feature-icon {
+                font-size: 18px;
+                flex-shrink: 0;
+            }
+            .feature-text .title {
+                font-size: 12px;
+                font-weight: 600;
+                color: var(--text-primary);
+            }
+            .feature-text .desc {
+                font-size: 11px;
+                color: var(--text-tertiary);
+                margin-top: 2px;
+            }
 
-    /* Step: Name */
-    .step-title {
-      font-size: 18px;
-      font-weight: 700;
-      letter-spacing: -0.01em;
-      margin-bottom: 6px;
-    }
-    .step-desc {
-      font-size: 13px;
-      color: var(--text-secondary);
-      margin-bottom: 24px;
-      line-height: 1.55;
-    }
+            /* Step: Name */
+            .step-title {
+                font-size: 18px;
+                font-weight: 700;
+                letter-spacing: -0.01em;
+                margin-bottom: 6px;
+            }
+            .step-desc {
+                font-size: 13px;
+                color: var(--text-secondary);
+                margin-bottom: 24px;
+                line-height: 1.55;
+            }
 
-    .field {
-      margin-bottom: 18px;
-    }
-    .field-label {
-      display: block;
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text-secondary);
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      margin-bottom: 7px;
-    }
-    .field-input {
-      width: 100%;
-      background: var(--bg-tertiary);
-      border: 1px solid var(--border-default);
-      border-radius: 8px;
-      padding: 10px 13px;
-      color: var(--text-primary);
-      font-size: 14px;
-      font-family: inherit;
-      outline: none;
-      transition: border-color 0.15s, box-shadow 0.15s;
-    }
-    .field-input::placeholder { color: var(--text-tertiary); }
-    .field-input:focus {
-      border-color: var(--accent-primary);
-      box-shadow: 0 0 0 3px rgba(124,140,90,0.15);
-    }
-    .field-hint {
-      font-size: 11px;
-      color: var(--text-tertiary);
-      margin-top: 5px;
-    }
+            .field {
+                margin-bottom: 18px;
+            }
+            .field-label {
+                display: block;
+                font-size: 12px;
+                font-weight: 600;
+                color: var(--text-secondary);
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+                margin-bottom: 7px;
+            }
+            .field-input {
+                width: 100%;
+                background: var(--bg-tertiary);
+                border: 1px solid var(--border-default);
+                border-radius: 8px;
+                padding: 10px 13px;
+                color: var(--text-primary);
+                font-size: 14px;
+                font-family: inherit;
+                outline: none;
+                transition:
+                    border-color 0.15s,
+                    box-shadow 0.15s;
+            }
+            .field-input::placeholder {
+                color: var(--text-tertiary);
+            }
+            .field-input:focus {
+                border-color: var(--accent-primary);
+                box-shadow: 0 0 0 3px rgba(124, 140, 90, 0.15);
+            }
+            .field-hint {
+                font-size: 11px;
+                color: var(--text-tertiary);
+                margin-top: 5px;
+            }
 
-    /* Step: Provider */
-    .provider-options {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      margin-bottom: 20px;
-    }
-    .provider-card {
-      background: var(--bg-tertiary);
-      border: 2px solid transparent;
-      border-radius: 10px;
-      padding: 14px 16px;
-      cursor: pointer;
-      transition: border-color 0.15s, background 0.15s;
-      display: flex;
-      align-items: center;
-      gap: 14px;
-    }
-    .provider-card:hover { background: var(--bg-elevated); }
-    .provider-card.selected {
-      border-color: var(--accent-primary);
-      background: rgba(74, 82, 53, 0.2);
-    }
+            /* Step: Provider */
+            .provider-options {
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+                margin-bottom: 20px;
+            }
+            .provider-card {
+                background: var(--bg-tertiary);
+                border: 2px solid transparent;
+                border-radius: 10px;
+                padding: 14px 16px;
+                cursor: pointer;
+                transition:
+                    border-color 0.15s,
+                    background 0.15s;
+                display: flex;
+                align-items: center;
+                gap: 14px;
+            }
+            .provider-card:hover {
+                background: var(--bg-elevated);
+            }
+            .provider-card.selected {
+                border-color: var(--accent-primary);
+                background: rgba(74, 82, 53, 0.2);
+            }
 
-    .provider-icon { font-size: 22px; flex-shrink: 0; }
-    .provider-info { flex: 1; }
-    .provider-name {
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--text-primary);
-    }
-    .provider-desc {
-      font-size: 12px;
-      color: var(--text-tertiary);
-      margin-top: 2px;
-    }
-    .provider-badge {
-      font-size: 10px;
-      font-weight: 600;
-      padding: 2px 7px;
-      border-radius: 4px;
-      flex-shrink: 0;
-    }
-    .badge-free {
-      background: rgba(106,158,91,0.2);
-      color: var(--success);
-    }
-    .badge-api {
-      background: rgba(196, 162, 74, 0.15);
-      color: var(--warning);
-    }
+            .provider-icon {
+                font-size: 22px;
+                flex-shrink: 0;
+            }
+            .provider-info {
+                flex: 1;
+            }
+            .provider-name {
+                font-size: 14px;
+                font-weight: 600;
+                color: var(--text-primary);
+            }
+            .provider-desc {
+                font-size: 12px;
+                color: var(--text-tertiary);
+                margin-top: 2px;
+            }
+            .provider-badge {
+                font-size: 10px;
+                font-weight: 600;
+                padding: 2px 7px;
+                border-radius: 4px;
+                flex-shrink: 0;
+            }
+            .badge-free {
+                background: rgba(106, 158, 91, 0.2);
+                color: var(--success);
+            }
+            .badge-api {
+                background: rgba(196, 162, 74, 0.15);
+                color: var(--warning);
+            }
 
-    /* Provider config panel */
-    .provider-config {
-      display: none;
-      padding: 14px;
-      background: var(--bg-tertiary);
-      border-radius: 9px;
-      margin-top: -4px;
-      margin-bottom: 16px;
-      border: 1px solid var(--border-subtle);
-    }
-    .provider-config.visible { display: block; }
+            /* Provider config panel */
+            .provider-config {
+                display: none;
+                padding: 14px;
+                background: var(--bg-tertiary);
+                border-radius: 9px;
+                margin-top: -4px;
+                margin-bottom: 16px;
+                border: 1px solid var(--border-subtle);
+            }
+            .provider-config.visible {
+                display: block;
+            }
 
-    /* Step: Persona */
-    .persona-options {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-      margin-bottom: 20px;
-    }
-    .persona-card {
-      background: var(--bg-tertiary);
-      border: 2px solid transparent;
-      border-radius: 10px;
-      padding: 16px 14px;
-      cursor: pointer;
-      transition: border-color 0.15s, background 0.15s;
-    }
-    .persona-card:hover { background: var(--bg-elevated); }
-    .persona-card.selected {
-      border-color: var(--accent-primary);
-      background: rgba(74, 82, 53, 0.2);
-    }
-    .persona-emoji { font-size: 28px; margin-bottom: 8px; }
-    .persona-name {
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--text-primary);
-    }
-    .persona-tagline {
-      font-size: 11px;
-      color: var(--text-tertiary);
-      margin-top: 3px;
-      line-height: 1.4;
-    }
+            /* Step: Persona */
+            .persona-options {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 10px;
+                margin-bottom: 20px;
+            }
+            .persona-card {
+                background: var(--bg-tertiary);
+                border: 2px solid transparent;
+                border-radius: 10px;
+                padding: 16px 14px;
+                cursor: pointer;
+                transition:
+                    border-color 0.15s,
+                    background 0.15s;
+            }
+            .persona-card:hover {
+                background: var(--bg-elevated);
+            }
+            .persona-card.selected {
+                border-color: var(--accent-primary);
+                background: rgba(74, 82, 53, 0.2);
+            }
+            .persona-emoji {
+                font-size: 28px;
+                margin-bottom: 8px;
+            }
+            .persona-name {
+                font-size: 13px;
+                font-weight: 600;
+                color: var(--text-primary);
+            }
+            .persona-tagline {
+                font-size: 11px;
+                color: var(--text-tertiary);
+                margin-top: 3px;
+                line-height: 1.4;
+            }
 
-    /* Step: Done */
-    .done-hero {
-      text-align: center;
-      padding: 12px 0 20px;
-    }
-    .done-icon {
-      width: 64px;
-      height: 64px;
-      border-radius: 50%;
-      background: var(--accent-muted);
-      border: 2px solid var(--accent-primary);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 28px;
-      margin: 0 auto 20px;
-      animation: popIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-    }
-    @keyframes popIn {
-      from { transform: scale(0.5); opacity: 0; }
-      to   { transform: scale(1);   opacity: 1; }
-    }
-    .done-title {
-      font-size: 20px;
-      font-weight: 700;
-      letter-spacing: -0.015em;
-      margin-bottom: 8px;
-    }
-    .done-subtitle {
-      font-size: 13px;
-      color: var(--text-secondary);
-      line-height: 1.6;
-      max-width: 360px;
-      margin: 0 auto 24px;
-    }
+            /* Step: Done */
+            .done-hero {
+                text-align: center;
+                padding: 12px 0 20px;
+            }
+            .done-icon {
+                width: 64px;
+                height: 64px;
+                border-radius: 50%;
+                background: var(--accent-muted);
+                border: 2px solid var(--accent-primary);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 28px;
+                margin: 0 auto 20px;
+                animation: popIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+            }
+            @keyframes popIn {
+                from {
+                    transform: scale(0.5);
+                    opacity: 0;
+                }
+                to {
+                    transform: scale(1);
+                    opacity: 1;
+                }
+            }
+            .done-title {
+                font-size: 20px;
+                font-weight: 700;
+                letter-spacing: -0.015em;
+                margin-bottom: 8px;
+            }
+            .done-subtitle {
+                font-size: 13px;
+                color: var(--text-secondary);
+                line-height: 1.6;
+                max-width: 360px;
+                margin: 0 auto 24px;
+            }
 
-    .summary-list {
-      background: var(--bg-tertiary);
-      border-radius: 9px;
-      padding: 14px 16px;
-      margin-bottom: 24px;
-      text-align: left;
-    }
-    .summary-row {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-size: 13px;
-      padding: 5px 0;
-    }
-    .summary-row:not(:last-child) {
-      border-bottom: 1px solid var(--border-subtle);
-      padding-bottom: 8px;
-      margin-bottom: 3px;
-    }
-    .summary-check {
-      color: var(--success);
-      font-size: 14px;
-      flex-shrink: 0;
-    }
-    .summary-label { color: var(--text-secondary); }
-    .summary-value {
-      margin-left: auto;
-      color: var(--text-primary);
-      font-weight: 500;
-    }
+            .summary-list {
+                background: var(--bg-tertiary);
+                border-radius: 9px;
+                padding: 14px 16px;
+                margin-bottom: 24px;
+                text-align: left;
+            }
+            .summary-row {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                font-size: 13px;
+                padding: 5px 0;
+            }
+            .summary-row:not(:last-child) {
+                border-bottom: 1px solid var(--border-subtle);
+                padding-bottom: 8px;
+                margin-bottom: 3px;
+            }
+            .summary-check {
+                color: var(--success);
+                font-size: 14px;
+                flex-shrink: 0;
+            }
+            .summary-label {
+                color: var(--text-secondary);
+            }
+            .summary-value {
+                margin-left: auto;
+                color: var(--text-primary);
+                font-weight: 500;
+            }
 
-    /* Navigation */
-    .nav-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-top: 24px;
-      gap: 10px;
-    }
+            /* Navigation */
+            .nav-row {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                margin-top: 24px;
+                gap: 10px;
+            }
 
-    .btn {
-      padding: 10px 20px;
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: 500;
-      cursor: pointer;
-      border: none;
-      transition: background 0.15s, opacity 0.15s;
-    }
-    .btn-ghost {
-      background: transparent;
-      color: var(--text-secondary);
-      border: 1px solid var(--border-default);
-    }
-    .btn-ghost:hover {
-      background: var(--bg-elevated);
-      color: var(--text-primary);
-    }
-    .btn-primary {
-      background: var(--accent-primary);
-      color: var(--text-inverse);
-      padding: 10px 24px;
-    }
-    .btn-primary:hover { background: var(--accent-secondary); }
-    .btn-primary:disabled {
-      opacity: 0.4;
-      cursor: default;
-    }
-    .btn-large {
-      padding: 12px 32px;
-      font-size: 15px;
-      font-weight: 600;
-    }
+            .btn {
+                padding: 10px 20px;
+                border-radius: 8px;
+                font-size: 14px;
+                font-weight: 500;
+                cursor: pointer;
+                border: none;
+                transition:
+                    background 0.15s,
+                    opacity 0.15s;
+            }
+            .btn-ghost {
+                background: transparent;
+                color: var(--text-secondary);
+                border: 1px solid var(--border-default);
+            }
+            .btn-ghost:hover {
+                background: var(--bg-elevated);
+                color: var(--text-primary);
+            }
+            .btn-primary {
+                background: var(--accent-primary);
+                color: var(--text-inverse);
+                padding: 10px 24px;
+            }
+            .btn-primary:hover {
+                background: var(--accent-secondary);
+            }
+            .btn-primary:disabled {
+                opacity: 0.4;
+                cursor: default;
+            }
+            .btn-large {
+                padding: 12px 32px;
+                font-size: 15px;
+                font-weight: 600;
+            }
 
-    .skip-link {
-      font-size: 12px;
-      color: var(--text-tertiary);
-      cursor: pointer;
-      background: none;
-      border: none;
-      text-decoration: underline;
-      text-decoration-style: dotted;
-    }
-    .skip-link:hover { color: var(--text-secondary); }
-  </style>
-</head>
-<body>
+            .skip-link {
+                font-size: 12px;
+                color: var(--text-tertiary);
+                cursor: pointer;
+                background: none;
+                border: none;
+                text-decoration: underline;
+                text-decoration-style: dotted;
+            }
+            .skip-link:hover {
+                color: var(--text-secondary);
+            }
+        </style>
+    </head>
+    <body>
+        <div class="wizard">
+            <!-- Brand -->
+            <div class="brand">
+                <span class="brand-emoji">🤖</span>
+                <span class="brand-name">agent-deck</span>
+            </div>
 
-<div class="wizard">
+            <!-- Step Indicator (hidden on step 1) -->
+            <div
+                class="step-indicator"
+                id="stepIndicator"
+                style="display: none; position: relative; padding-bottom: 20px"
+            >
+                <div class="step-dot done" id="dot1">
+                    <span>✓</span><span class="step-label">Welcome</span>
+                </div>
+                <div class="step-line done" id="line1"></div>
+                <div class="step-dot active" id="dot2">
+                    <span>2</span><span class="step-label">Your name</span>
+                </div>
+                <div class="step-line" id="line2"></div>
+                <div class="step-dot" id="dot3">
+                    <span>3</span><span class="step-label">Provider</span>
+                </div>
+                <div class="step-line" id="line3"></div>
+                <div class="step-dot" id="dot4">
+                    <span>4</span><span class="step-label">Persona</span>
+                </div>
+                <div class="step-line" id="line4"></div>
+                <div class="step-dot" id="dot5">
+                    <span>5</span><span class="step-label">Done</span>
+                </div>
+            </div>
 
-  <!-- Brand -->
-  <div class="brand">
-    <span class="brand-emoji">🤖</span>
-    <span class="brand-name">agent-deck</span>
-  </div>
+            <!-- Card -->
+            <div class="card">
+                <!-- ── Step 1: Welcome ── -->
+                <div class="step-panel visible" id="step1">
+                    <div class="welcome-hero">
+                        <div class="welcome-icon">🤖</div>
+                        <div class="welcome-title">Welcome to agent-deck</div>
+                        <div class="welcome-desc">
+                            Your self-hosted AI agent platform. Private,
+                            configurable, and always on. Let's get you set up in
+                            about a minute.
+                        </div>
+                    </div>
 
-  <!-- Step Indicator (hidden on step 1) -->
-  <div class="step-indicator" id="stepIndicator" style="display:none; position:relative; padding-bottom:20px;">
-    <div class="step-dot done" id="dot1"><span>✓</span><span class="step-label">Welcome</span></div>
-    <div class="step-line done" id="line1"></div>
-    <div class="step-dot active" id="dot2"><span>2</span><span class="step-label">Your name</span></div>
-    <div class="step-line" id="line2"></div>
-    <div class="step-dot" id="dot3"><span>3</span><span class="step-label">Provider</span></div>
-    <div class="step-line" id="line3"></div>
-    <div class="step-dot" id="dot4"><span>4</span><span class="step-label">Persona</span></div>
-    <div class="step-line" id="line4"></div>
-    <div class="step-dot" id="dot5"><span>5</span><span class="step-label">Done</span></div>
-  </div>
+                    <div class="feature-grid">
+                        <div class="feature-item">
+                            <span class="feature-icon">🧠</span>
+                            <div class="feature-text">
+                                <div class="title">Persistent Memory</div>
+                                <div class="desc">
+                                    Agents remember across sessions
+                                </div>
+                            </div>
+                        </div>
+                        <div class="feature-item">
+                            <span class="feature-icon">⚡</span>
+                            <div class="feature-text">
+                                <div class="title">Routines</div>
+                                <div class="desc">
+                                    Scheduled automated prompts
+                                </div>
+                            </div>
+                        </div>
+                        <div class="feature-item">
+                            <span class="feature-icon">🎭</span>
+                            <div class="feature-text">
+                                <div class="title">Agent Personas</div>
+                                <div class="desc">
+                                    Different agents for different tasks
+                                </div>
+                            </div>
+                        </div>
+                        <div class="feature-item">
+                            <span class="feature-icon">🔒</span>
+                            <div class="feature-text">
+                                <div class="title">Private by Design</div>
+                                <div class="desc">
+                                    All data stays on your hardware
+                                </div>
+                            </div>
+                        </div>
+                    </div>
 
-  <!-- Card -->
-  <div class="card">
+                    <div class="nav-row" style="justify-content: center">
+                        <button class="btn btn-primary btn-large" id="startBtn">
+                            Get Started →
+                        </button>
+                    </div>
+                </div>
 
-    <!-- ── Step 1: Welcome ── -->
-    <div class="step-panel visible" id="step1">
-      <div class="welcome-hero">
-        <div class="welcome-icon">🤖</div>
-        <div class="welcome-title">Welcome to agent-deck</div>
-        <div class="welcome-desc">
-          Your self-hosted AI agent platform. Private, configurable, and always on.
-          Let's get you set up in about a minute.
+                <!-- ── Step 2: Your Name ── -->
+                <div class="step-panel" id="step2">
+                    <div class="step-title">What should we call you?</div>
+                    <div class="step-desc">
+                        This is used to personalize your experience. It's stored
+                        locally and never shared.
+                    </div>
+
+                    <div class="field">
+                        <label class="field-label" for="displayName"
+                            >Your Name</label
+                        >
+                        <input
+                            type="text"
+                            id="displayName"
+                            class="field-input"
+                            placeholder="e.g. Marcus"
+                            autocomplete="off"
+                        />
+                        <div class="field-hint">
+                            Just a first name or nickname is fine.
+                        </div>
+                    </div>
+
+                    <div class="nav-row">
+                        <button class="btn btn-ghost" id="backToStep1">
+                            ← Back
+                        </button>
+                        <button
+                            class="btn btn-primary"
+                            id="nextToStep3"
+                            disabled
+                        >
+                            Next →
+                        </button>
+                    </div>
+                </div>
+
+                <!-- ── Step 3: Provider ── -->
+                <div class="step-panel" id="step3">
+                    <div class="step-title">Connect an AI provider</div>
+                    <div class="step-desc">
+                        Choose where your AI models come from. You can add more
+                        providers later in Settings.
+                    </div>
+
+                    <div class="provider-options">
+                        <div class="provider-card" data-provider="copilot">
+                            <span class="provider-icon">🐙</span>
+                            <div class="provider-info">
+                                <div class="provider-name">GitHub Copilot</div>
+                                <div class="provider-desc">
+                                    Use your existing Copilot subscription
+                                </div>
+                            </div>
+                            <span class="provider-badge badge-free"
+                                >No API key</span
+                            >
+                        </div>
+
+                        <div class="provider-card" data-provider="openai">
+                            <span class="provider-icon">🤖</span>
+                            <div class="provider-info">
+                                <div class="provider-name">OpenAI</div>
+                                <div class="provider-desc">
+                                    GPT-4o, GPT-4o-mini, and more
+                                </div>
+                            </div>
+                            <span class="provider-badge badge-api"
+                                >API key</span
+                            >
+                        </div>
+
+                        <div class="provider-card" data-provider="anthropic">
+                            <span class="provider-icon">✦</span>
+                            <div class="provider-info">
+                                <div class="provider-name">Anthropic</div>
+                                <div class="provider-desc">
+                                    Claude 3.5 Sonnet, Haiku, and more
+                                </div>
+                            </div>
+                            <span class="provider-badge badge-api"
+                                >API key</span
+                            >
+                        </div>
+
+                        <div class="provider-card" data-provider="custom">
+                            <span class="provider-icon">⚙</span>
+                            <div class="provider-info">
+                                <div class="provider-name">Custom / Local</div>
+                                <div class="provider-desc">
+                                    Any OpenAI-compatible endpoint
+                                </div>
+                            </div>
+                            <span class="provider-badge badge-api"
+                                >Custom URL</span
+                            >
+                        </div>
+                    </div>
+
+                    <!-- Dynamic config panel based on selection -->
+                    <div class="provider-config" id="providerConfig">
+                        <!-- Filled by JS -->
+                    </div>
+
+                    <div class="nav-row">
+                        <button class="btn btn-ghost" id="backToStep2">
+                            ← Back
+                        </button>
+                        <div
+                            style="
+                                display: flex;
+                                gap: 10px;
+                                align-items: center;
+                            "
+                        >
+                            <button class="skip-link" id="skipProvider">
+                                Skip for now
+                            </button>
+                            <button class="btn btn-primary" id="nextToStep4">
+                                Next →
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ── Step 4: Persona ── -->
+                <div class="step-panel" id="step4">
+                    <div class="step-title">
+                        Choose your first agent persona
+                    </div>
+                    <div class="step-desc">
+                        Personas define how your agent thinks and responds. You
+                        can create more in Settings.
+                    </div>
+
+                    <div class="persona-options">
+                        <div
+                            class="persona-card selected"
+                            data-persona="aldous"
+                        >
+                            <div class="persona-emoji">🦉</div>
+                            <div class="persona-name">Aldous</div>
+                            <div class="persona-tagline">
+                                Thoughtful, precise. Deep analysis and code.
+                            </div>
+                        </div>
+                        <div class="persona-card" data-persona="scout">
+                            <div class="persona-emoji">🧠</div>
+                            <div class="persona-name">Scout</div>
+                            <div class="persona-tagline">
+                                Quick, organized. Planning and research.
+                            </div>
+                        </div>
+                        <div class="persona-card" data-persona="muse">
+                            <div class="persona-emoji">🎨</div>
+                            <div class="persona-name">Muse</div>
+                            <div class="persona-tagline">
+                                Creative, expressive. Writing and ideas.
+                            </div>
+                        </div>
+                        <div class="persona-card" data-persona="custom">
+                            <div class="persona-emoji">⚒</div>
+                            <div class="persona-name">Custom</div>
+                            <div class="persona-tagline">
+                                Start from scratch with your own prompt.
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Custom persona name field (shown when "Custom" selected) -->
+                    <div
+                        id="customPersonaField"
+                        style="display: none; margin-bottom: 16px"
+                    >
+                        <div class="field" style="margin-bottom: 10px">
+                            <label class="field-label" for="personaName"
+                                >Persona Name</label
+                            >
+                            <input
+                                type="text"
+                                id="personaName"
+                                class="field-input"
+                                placeholder="e.g. Orion"
+                            />
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="personaPrompt"
+                                >System Prompt</label
+                            >
+                            <textarea
+                                id="personaPrompt"
+                                class="field-input"
+                                rows="3"
+                                style="resize: vertical"
+                                placeholder="You are a helpful assistant named Orion…"
+                            ></textarea>
+                        </div>
+                    </div>
+
+                    <div class="nav-row">
+                        <button class="btn btn-ghost" id="backToStep3">
+                            ← Back
+                        </button>
+                        <button class="btn btn-primary" id="nextToStep5">
+                            Finish Setup →
+                        </button>
+                    </div>
+                </div>
+
+                <!-- ── Step 5: Done ── -->
+                <div class="step-panel" id="step5">
+                    <div class="done-hero">
+                        <div class="done-icon">✓</div>
+                        <div class="done-title">
+                            You're all set,
+                            <span id="doneNamePlaceholder">Marcus</span>!
+                        </div>
+                        <div class="done-subtitle">
+                            agent-deck is ready. Here's a summary of what was
+                            configured.
+                        </div>
+
+                        <div class="summary-list">
+                            <div class="summary-row">
+                                <span class="summary-check">✓</span>
+                                <span class="summary-label">Your name</span>
+                                <span class="summary-value" id="summaryName"
+                                    >Marcus</span
+                                >
+                            </div>
+                            <div class="summary-row">
+                                <span class="summary-check">✓</span>
+                                <span class="summary-label">Provider</span>
+                                <span class="summary-value" id="summaryProvider"
+                                    >OpenAI</span
+                                >
+                            </div>
+                            <div class="summary-row">
+                                <span class="summary-check">✓</span>
+                                <span class="summary-label">First persona</span>
+                                <span class="summary-value" id="summaryPersona"
+                                    >🦉 Aldous</span
+                                >
+                            </div>
+                        </div>
+
+                        <button
+                            class="btn btn-primary btn-large"
+                            id="openAppBtn"
+                        >
+                            Open agent-deck →
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
-      </div>
 
-      <div class="feature-grid">
-        <div class="feature-item">
-          <span class="feature-icon">🧠</span>
-          <div class="feature-text">
-            <div class="title">Persistent Memory</div>
-            <div class="desc">Agents remember across sessions</div>
-          </div>
-        </div>
-        <div class="feature-item">
-          <span class="feature-icon">⚡</span>
-          <div class="feature-text">
-            <div class="title">Routines</div>
-            <div class="desc">Scheduled automated prompts</div>
-          </div>
-        </div>
-        <div class="feature-item">
-          <span class="feature-icon">🎭</span>
-          <div class="feature-text">
-            <div class="title">Agent Personas</div>
-            <div class="desc">Different agents for different tasks</div>
-          </div>
-        </div>
-        <div class="feature-item">
-          <span class="feature-icon">🔒</span>
-          <div class="feature-text">
-            <div class="title">Private by Design</div>
-            <div class="desc">All data stays on your hardware</div>
-          </div>
-        </div>
-      </div>
+        <script>
+            let currentStep = 1;
+            const totalSteps = 5;
 
-      <div class="nav-row" style="justify-content:center;">
-        <button class="btn btn-primary btn-large" id="startBtn">Get Started →</button>
-      </div>
-    </div>
+            let selectedProvider = null;
+            let selectedPersona = "aldous";
+            let displayName = "";
 
-    <!-- ── Step 2: Your Name ── -->
-    <div class="step-panel" id="step2">
-      <div class="step-title">What should we call you?</div>
-      <div class="step-desc">
-        This is used to personalize your experience. It's stored locally and never shared.
-      </div>
+            // ── Step navigation ──────────────────────────────────────────────────────
 
-      <div class="field">
-        <label class="field-label" for="displayName">Your Name</label>
-        <input
-          type="text"
-          id="displayName"
-          class="field-input"
-          placeholder="e.g. Marcus"
-          autocomplete="off"
-        />
-        <div class="field-hint">Just a first name or nickname is fine.</div>
-      </div>
+            function goToStep(n) {
+                document
+                    .querySelectorAll(".step-panel")
+                    .forEach((p) => p.classList.remove("visible"));
+                document.getElementById("step" + n).classList.add("visible");
+                currentStep = n;
 
-      <div class="nav-row">
-        <button class="btn btn-ghost" id="backToStep1">← Back</button>
-        <button class="btn btn-primary" id="nextToStep3" disabled>Next →</button>
-      </div>
-    </div>
+                const indicator = document.getElementById("stepIndicator");
+                if (n === 1) {
+                    indicator.style.display = "none";
+                } else {
+                    indicator.style.display = "flex";
+                    updateStepIndicator(n);
+                }
+            }
 
-    <!-- ── Step 3: Provider ── -->
-    <div class="step-panel" id="step3">
-      <div class="step-title">Connect an AI provider</div>
-      <div class="step-desc">
-        Choose where your AI models come from. You can add more providers later in Settings.
-      </div>
+            function updateStepIndicator(active) {
+                for (let i = 1; i <= totalSteps; i++) {
+                    const dot = document.getElementById("dot" + i);
+                    const line = document.getElementById("line" + i);
+                    dot.classList.remove("active", "done");
+                    if (i < active) {
+                        dot.classList.add("done");
+                        dot.querySelector("span:first-child").textContent = "✓";
+                        if (line) line.classList.add("done");
+                    } else if (i === active) {
+                        dot.classList.add("active");
+                        dot.querySelector("span:first-child").textContent =
+                            String(i);
+                        if (line) line.classList.remove("done");
+                    } else {
+                        dot.querySelector("span:first-child").textContent =
+                            String(i);
+                        if (line) line.classList.remove("done");
+                    }
+                }
+            }
 
-      <div class="provider-options">
+            // ── Step 1 → 2 ──────────────────────────────────────────────────────────
+            document
+                .getElementById("startBtn")
+                .addEventListener("click", () => goToStep(2));
 
-        <div class="provider-card" data-provider="copilot">
-          <span class="provider-icon">🐙</span>
-          <div class="provider-info">
-            <div class="provider-name">GitHub Copilot</div>
-            <div class="provider-desc">Use your existing Copilot subscription</div>
-          </div>
-          <span class="provider-badge badge-free">No API key</span>
-        </div>
+            // ── Step 2 ───────────────────────────────────────────────────────────────
+            const nameInput = document.getElementById("displayName");
+            const nextToStep3 = document.getElementById("nextToStep3");
 
-        <div class="provider-card" data-provider="openai">
-          <span class="provider-icon">🤖</span>
-          <div class="provider-info">
-            <div class="provider-name">OpenAI</div>
-            <div class="provider-desc">GPT-4o, GPT-4o-mini, and more</div>
-          </div>
-          <span class="provider-badge badge-api">API key</span>
-        </div>
+            nameInput.addEventListener("input", () => {
+                nextToStep3.disabled = !nameInput.value.trim();
+            });
 
-        <div class="provider-card" data-provider="anthropic">
-          <span class="provider-icon">✦</span>
-          <div class="provider-info">
-            <div class="provider-name">Anthropic</div>
-            <div class="provider-desc">Claude 3.5 Sonnet, Haiku, and more</div>
-          </div>
-          <span class="provider-badge badge-api">API key</span>
-        </div>
+            document
+                .getElementById("backToStep1")
+                .addEventListener("click", () => goToStep(1));
+            nextToStep3.addEventListener("click", () => {
+                displayName = nameInput.value.trim();
+                goToStep(3);
+            });
 
-        <div class="provider-card" data-provider="custom">
-          <span class="provider-icon">⚙</span>
-          <div class="provider-info">
-            <div class="provider-name">Custom / Local</div>
-            <div class="provider-desc">Any OpenAI-compatible endpoint</div>
-          </div>
-          <span class="provider-badge badge-api">Custom URL</span>
-        </div>
+            // ── Step 3 — Provider ────────────────────────────────────────────────────
+            const providerConfig = document.getElementById("providerConfig");
 
-      </div>
-
-      <!-- Dynamic config panel based on selection -->
-      <div class="provider-config" id="providerConfig">
-        <!-- Filled by JS -->
-      </div>
-
-      <div class="nav-row">
-        <button class="btn btn-ghost" id="backToStep2">← Back</button>
-        <div style="display:flex;gap:10px;align-items:center;">
-          <button class="skip-link" id="skipProvider">Skip for now</button>
-          <button class="btn btn-primary" id="nextToStep4">Next →</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- ── Step 4: Persona ── -->
-    <div class="step-panel" id="step4">
-      <div class="step-title">Choose your first agent persona</div>
-      <div class="step-desc">
-        Personas define how your agent thinks and responds. You can create more in Settings.
-      </div>
-
-      <div class="persona-options">
-        <div class="persona-card selected" data-persona="aldous">
-          <div class="persona-emoji">🦉</div>
-          <div class="persona-name">Aldous</div>
-          <div class="persona-tagline">Thoughtful, precise. Deep analysis and code.</div>
-        </div>
-        <div class="persona-card" data-persona="scout">
-          <div class="persona-emoji">🧠</div>
-          <div class="persona-name">Scout</div>
-          <div class="persona-tagline">Quick, organized. Planning and research.</div>
-        </div>
-        <div class="persona-card" data-persona="muse">
-          <div class="persona-emoji">🎨</div>
-          <div class="persona-name">Muse</div>
-          <div class="persona-tagline">Creative, expressive. Writing and ideas.</div>
-        </div>
-        <div class="persona-card" data-persona="custom">
-          <div class="persona-emoji">⚒</div>
-          <div class="persona-name">Custom</div>
-          <div class="persona-tagline">Start from scratch with your own prompt.</div>
-        </div>
-      </div>
-
-      <!-- Custom persona name field (shown when "Custom" selected) -->
-      <div id="customPersonaField" style="display:none; margin-bottom:16px;">
-        <div class="field" style="margin-bottom:10px;">
-          <label class="field-label" for="personaName">Persona Name</label>
-          <input type="text" id="personaName" class="field-input" placeholder="e.g. Orion" />
-        </div>
-        <div class="field">
-          <label class="field-label" for="personaPrompt">System Prompt</label>
-          <textarea
-            id="personaPrompt"
-            class="field-input"
-            rows="3"
-            style="resize:vertical;"
-            placeholder="You are a helpful assistant named Orion…"
-          ></textarea>
-        </div>
-      </div>
-
-      <div class="nav-row">
-        <button class="btn btn-ghost" id="backToStep3">← Back</button>
-        <button class="btn btn-primary" id="nextToStep5">Finish Setup →</button>
-      </div>
-    </div>
-
-    <!-- ── Step 5: Done ── -->
-    <div class="step-panel" id="step5">
-      <div class="done-hero">
-        <div class="done-icon">✓</div>
-        <div class="done-title">You're all set, <span id="doneNamePlaceholder">Marcus</span>!</div>
-        <div class="done-subtitle">
-          agent-deck is ready. Here's a summary of what was configured.
-        </div>
-
-        <div class="summary-list">
-          <div class="summary-row">
-            <span class="summary-check">✓</span>
-            <span class="summary-label">Your name</span>
-            <span class="summary-value" id="summaryName">Marcus</span>
-          </div>
-          <div class="summary-row">
-            <span class="summary-check">✓</span>
-            <span class="summary-label">Provider</span>
-            <span class="summary-value" id="summaryProvider">OpenAI</span>
-          </div>
-          <div class="summary-row">
-            <span class="summary-check">✓</span>
-            <span class="summary-label">First persona</span>
-            <span class="summary-value" id="summaryPersona">🦉 Aldous</span>
-          </div>
-        </div>
-
-        <button class="btn btn-primary btn-large" id="openAppBtn">
-          Open agent-deck →
-        </button>
-      </div>
-    </div>
-
-  </div>
-</div>
-
-<script>
-  let currentStep = 1;
-  const totalSteps = 5;
-
-  let selectedProvider = null;
-  let selectedPersona = 'aldous';
-  let displayName = '';
-
-  // ── Step navigation ──────────────────────────────────────────────────────
-
-  function goToStep(n) {
-    document.querySelectorAll('.step-panel').forEach(p => p.classList.remove('visible'));
-    document.getElementById('step' + n).classList.add('visible');
-    currentStep = n;
-
-    const indicator = document.getElementById('stepIndicator');
-    if (n === 1) {
-      indicator.style.display = 'none';
-    } else {
-      indicator.style.display = 'flex';
-      updateStepIndicator(n);
-    }
-  }
-
-  function updateStepIndicator(active) {
-    for (let i = 1; i <= totalSteps; i++) {
-      const dot = document.getElementById('dot' + i);
-      const line = document.getElementById('line' + i);
-      dot.classList.remove('active', 'done');
-      if (i < active) {
-        dot.classList.add('done');
-        dot.querySelector('span:first-child').textContent = '✓';
-        if (line) line.classList.add('done');
-      } else if (i === active) {
-        dot.classList.add('active');
-        dot.querySelector('span:first-child').textContent = String(i);
-        if (line) line.classList.remove('done');
-      } else {
-        dot.querySelector('span:first-child').textContent = String(i);
-        if (line) line.classList.remove('done');
-      }
-    }
-  }
-
-  // ── Step 1 → 2 ──────────────────────────────────────────────────────────
-  document.getElementById('startBtn').addEventListener('click', () => goToStep(2));
-
-  // ── Step 2 ───────────────────────────────────────────────────────────────
-  const nameInput = document.getElementById('displayName');
-  const nextToStep3 = document.getElementById('nextToStep3');
-
-  nameInput.addEventListener('input', () => {
-    nextToStep3.disabled = !nameInput.value.trim();
-  });
-
-  document.getElementById('backToStep1').addEventListener('click', () => goToStep(1));
-  nextToStep3.addEventListener('click', () => {
-    displayName = nameInput.value.trim();
-    goToStep(3);
-  });
-
-  // ── Step 3 — Provider ────────────────────────────────────────────────────
-  const providerConfig = document.getElementById('providerConfig');
-
-  const providerConfigs = {
-    copilot: `
+            const providerConfigs = {
+                copilot: `
       <div style="font-size:12px;color:var(--text-secondary);line-height:1.6;">
         GitHub Copilot is accessed via the <strong style="color:var(--text-primary);">copilot-api</strong> local proxy.
         After completing setup, go to <strong style="color:var(--text-primary);">Settings → Providers</strong> to
         authenticate with your GitHub account using a device code.
       </div>`,
-    openai: `
+                openai: `
       <div style="margin-bottom:10px;">
         <label style="font-size:11px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:6px;">OpenAI API Key</label>
         <input type="password" class="field-input" placeholder="sk-…" style="font-family:monospace;font-size:13px;" />
         <div style="font-size:11px;color:var(--text-tertiary);margin-top:5px;">Find yours at <span style="color:var(--accent-secondary);">platform.openai.com/api-keys</span></div>
       </div>`,
-    anthropic: `
+                anthropic: `
       <div style="margin-bottom:10px;">
         <label style="font-size:11px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:6px;">Anthropic API Key</label>
         <input type="password" class="field-input" placeholder="sk-ant-…" style="font-family:monospace;font-size:13px;" />
         <div style="font-size:11px;color:var(--text-tertiary);margin-top:5px;">Find yours at <span style="color:var(--accent-secondary);">console.anthropic.com/settings/keys</span></div>
       </div>`,
-    custom: `
+                custom: `
       <div style="margin-bottom:10px;">
         <label style="font-size:11px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:6px;">Base URL</label>
         <input type="text" class="field-input" placeholder="http://localhost:11434/v1" />
@@ -789,65 +962,89 @@
       <div>
         <label style="font-size:11px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.06em;display:block;margin-bottom:6px;">API Key (optional)</label>
         <input type="password" class="field-input" placeholder="Leave blank if not required" />
-      </div>`
-  };
+      </div>`,
+            };
 
-  document.querySelectorAll('.provider-card').forEach(card => {
-    card.addEventListener('click', () => {
-      document.querySelectorAll('.provider-card').forEach(c => c.classList.remove('selected'));
-      card.classList.add('selected');
-      selectedProvider = card.dataset.provider;
-      providerConfig.innerHTML = providerConfigs[selectedProvider] || '';
-      providerConfig.classList.add('visible');
-    });
-  });
+            document.querySelectorAll(".provider-card").forEach((card) => {
+                card.addEventListener("click", () => {
+                    document
+                        .querySelectorAll(".provider-card")
+                        .forEach((c) => c.classList.remove("selected"));
+                    card.classList.add("selected");
+                    selectedProvider = card.dataset.provider;
+                    providerConfig.innerHTML =
+                        providerConfigs[selectedProvider] || "";
+                    providerConfig.classList.add("visible");
+                });
+            });
 
-  document.getElementById('backToStep2').addEventListener('click', () => goToStep(2));
-  document.getElementById('skipProvider').addEventListener('click', () => {
-    selectedProvider = null;
-    goToStep(4);
-  });
-  document.getElementById('nextToStep4').addEventListener('click', () => goToStep(4));
+            document
+                .getElementById("backToStep2")
+                .addEventListener("click", () => goToStep(2));
+            document
+                .getElementById("skipProvider")
+                .addEventListener("click", () => {
+                    selectedProvider = null;
+                    goToStep(4);
+                });
+            document
+                .getElementById("nextToStep4")
+                .addEventListener("click", () => goToStep(4));
 
-  // ── Step 4 — Persona ─────────────────────────────────────────────────────
-  const personaLabels = {
-    aldous: '🦉 Aldous',
-    scout:  '🧠 Scout',
-    muse:   '🎨 Muse',
-    custom: '⚒ Custom'
-  };
+            // ── Step 4 — Persona ─────────────────────────────────────────────────────
+            const personaLabels = {
+                aldous: "🦉 Aldous",
+                scout: "🧠 Scout",
+                muse: "🎨 Muse",
+                custom: "⚒ Custom",
+            };
 
-  document.querySelectorAll('.persona-card').forEach(card => {
-    card.addEventListener('click', () => {
-      document.querySelectorAll('.persona-card').forEach(c => c.classList.remove('selected'));
-      card.classList.add('selected');
-      selectedPersona = card.dataset.persona;
-      document.getElementById('customPersonaField').style.display =
-        selectedPersona === 'custom' ? 'block' : 'none';
-    });
-  });
+            document.querySelectorAll(".persona-card").forEach((card) => {
+                card.addEventListener("click", () => {
+                    document
+                        .querySelectorAll(".persona-card")
+                        .forEach((c) => c.classList.remove("selected"));
+                    card.classList.add("selected");
+                    selectedPersona = card.dataset.persona;
+                    document.getElementById(
+                        "customPersonaField",
+                    ).style.display =
+                        selectedPersona === "custom" ? "block" : "none";
+                });
+            });
 
-  document.getElementById('backToStep3').addEventListener('click', () => goToStep(3));
-  document.getElementById('nextToStep5').addEventListener('click', () => {
-    // Populate summary
-    document.getElementById('doneNamePlaceholder').textContent = displayName || 'there';
-    document.getElementById('summaryName').textContent = displayName || '—';
-    document.getElementById('summaryProvider').textContent =
-      selectedProvider ? (selectedProvider.charAt(0).toUpperCase() + selectedProvider.slice(1)) : 'None (add later)';
-    document.getElementById('summaryPersona').textContent = personaLabels[selectedPersona] || '⚒ Custom';
-    goToStep(5);
-  });
+            document
+                .getElementById("backToStep3")
+                .addEventListener("click", () => goToStep(3));
+            document
+                .getElementById("nextToStep5")
+                .addEventListener("click", () => {
+                    // Populate summary
+                    document.getElementById("doneNamePlaceholder").textContent =
+                        displayName || "there";
+                    document.getElementById("summaryName").textContent =
+                        displayName || "—";
+                    document.getElementById("summaryProvider").textContent =
+                        selectedProvider
+                            ? selectedProvider.charAt(0).toUpperCase() +
+                              selectedProvider.slice(1)
+                            : "None (add later)";
+                    document.getElementById("summaryPersona").textContent =
+                        personaLabels[selectedPersona] || "⚒ Custom";
+                    goToStep(5);
+                });
 
-  document.getElementById('backToStep3').addEventListener('click', () => goToStep(3));
+            // ── Step 5 → App ─────────────────────────────────────────────────────────
+            document
+                .getElementById("openAppBtn")
+                .addEventListener("click", () => {
+                    // In production this redirects to the main app
+                    document.getElementById("openAppBtn").textContent =
+                        "✓ Ready!";
+                });
 
-  // ── Step 5 → App ─────────────────────────────────────────────────────────
-  document.getElementById('openAppBtn').addEventListener('click', () => {
-    // In production this redirects to the main app
-    document.getElementById('openAppBtn').textContent = '✓ Ready!';
-  });
-
-  // Init
-  goToStep(1);
-</script>
-</body>
+            // Init
+            goToStep(1);
+        </script>
+    </body>
 </html>

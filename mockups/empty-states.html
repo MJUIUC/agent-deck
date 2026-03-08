@@ -1,799 +1,1223 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>agent-deck — Empty States</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>agent-deck — Empty States</title>
+        <style>
+            *,
+            *::before,
+            *::after {
+                box-sizing: border-box;
+                margin: 0;
+                padding: 0;
+            }
 
-    :root {
-      --bg-primary:      #1C1C1A;
-      --bg-secondary:    #242422;
-      --bg-tertiary:     #2E2E2B;
-      --bg-elevated:     #383835;
-      --accent-primary:  #7C8C5A;
-      --accent-secondary:#9AAD6E;
-      --accent-muted:    #4A5235;
-      --text-primary:    #F0EDE4;
-      --text-secondary:  #B8B4A8;
-      --text-tertiary:   #7A7870;
-      --text-inverse:    #1C1C1A;
-      --success:         #6A9E5B;
-      --warning:         #C4A24A;
-      --error:           #C45A5A;
-      --info:            #5A82C4;
-      --border-subtle:   #333330;
-      --border-default:  #444440;
-      --border-strong:   #666660;
-      --bubble-user:     #4A5235;
-      --bubble-agent:    #2E2E2B;
-      --bubble-routine:  #2A3545;
-    }
+            :root {
+                --bg-primary: #1c1c1a;
+                --bg-secondary: #242422;
+                --bg-tertiary: #2e2e2b;
+                --bg-elevated: #383835;
+                --accent-primary: #7c8c5a;
+                --accent-secondary: #9aad6e;
+                --accent-muted: #4a5235;
+                --text-primary: #f0ede4;
+                --text-secondary: #b8b4a8;
+                --text-tertiary: #7a7870;
+                --text-inverse: #1c1c1a;
+                --success: #6a9e5b;
+                --warning: #c4a24a;
+                --error: #c45a5a;
+                --info: #5a82c4;
+                --border-subtle: #333330;
+                --border-default: #444440;
+                --border-strong: #666660;
+                --bubble-user: #4a5235;
+                --bubble-agent: #2e2e2b;
+                --bubble-routine: #2a3545;
+            }
 
-    html, body {
-      min-height: 100%;
-      background: var(--bg-primary);
-      color: var(--text-primary);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      font-size: 14px;
-      line-height: 1.5;
-    }
+            html,
+            body {
+                min-height: 100%;
+                background: var(--bg-primary);
+                color: var(--text-primary);
+                font-family:
+                    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                    sans-serif;
+                font-size: 14px;
+                line-height: 1.5;
+            }
 
-    /* ── Page layout ── */
-    .page {
-      max-width: 900px;
-      margin: 0 auto;
-      padding: 40px 32px 80px;
-    }
+            /* ── Page layout ── */
+            .page {
+                max-width: 900px;
+                margin: 0 auto;
+                padding: 40px 32px 80px;
+            }
 
-    .page-title {
-      font-size: 22px;
-      font-weight: 700;
-      color: var(--text-primary);
-      letter-spacing: -0.02em;
-      margin-bottom: 4px;
-    }
-    .page-subtitle {
-      font-size: 13px;
-      color: var(--text-tertiary);
-      margin-bottom: 40px;
-    }
+            .page-title {
+                font-size: 22px;
+                font-weight: 700;
+                color: var(--text-primary);
+                letter-spacing: -0.02em;
+                margin-bottom: 4px;
+            }
+            .page-subtitle {
+                font-size: 13px;
+                color: var(--text-tertiary);
+                margin-bottom: 40px;
+            }
 
-    /* ── Section headers ── */
-    .section-label {
-      font-size: 10px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-      color: var(--text-tertiary);
-      margin-bottom: 12px;
-      padding-bottom: 8px;
-      border-bottom: 1px solid var(--border-subtle);
-    }
+            /* ── Section headers ── */
+            .section-label {
+                font-size: 10px;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: 0.1em;
+                color: var(--text-tertiary);
+                margin-bottom: 12px;
+                padding-bottom: 8px;
+                border-bottom: 1px solid var(--border-subtle);
+            }
 
-    .section {
-      margin-bottom: 52px;
-    }
+            .section {
+                margin-bottom: 52px;
+            }
 
-    /* ── Buttons ── */
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 8px 16px;
-      border-radius: 7px;
-      font-size: 13px;
-      font-weight: 500;
-      cursor: pointer;
-      border: none;
-      font-family: inherit;
-      transition: background 0.15s, color 0.15s, box-shadow 0.15s;
-    }
-    .btn-primary {
-      background: var(--accent-primary);
-      color: var(--text-inverse);
-    }
-    .btn-primary:hover { background: var(--accent-secondary); }
+            /* ── Buttons ── */
+            .btn {
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                padding: 8px 16px;
+                border-radius: 7px;
+                font-size: 13px;
+                font-weight: 500;
+                cursor: pointer;
+                border: none;
+                font-family: inherit;
+                transition:
+                    background 0.15s,
+                    color 0.15s,
+                    box-shadow 0.15s;
+            }
+            .btn-primary {
+                background: var(--accent-primary);
+                color: var(--text-inverse);
+            }
+            .btn-primary:hover {
+                background: var(--accent-secondary);
+            }
 
-    .btn-ghost {
-      background: transparent;
-      color: var(--text-secondary);
-      border: 1px solid var(--border-default);
-    }
-    .btn-ghost:hover { background: var(--bg-elevated); color: var(--text-primary); }
+            .btn-ghost {
+                background: transparent;
+                color: var(--text-secondary);
+                border: 1px solid var(--border-default);
+            }
+            .btn-ghost:hover {
+                background: var(--bg-elevated);
+                color: var(--text-primary);
+            }
 
-    .btn-sm { padding: 6px 13px; font-size: 12px; }
+            .btn-sm {
+                padding: 6px 13px;
+                font-size: 12px;
+            }
 
-    /* ── Empty thread list ── */
-    .thread-shell {
-      display: flex;
-      height: 420px;
-      border: 1px solid var(--border-subtle);
-      border-radius: 12px;
-      overflow: hidden;
-      background: var(--bg-secondary);
-    }
+            /* ── Empty thread list ── */
+            .thread-shell {
+                display: flex;
+                height: 420px;
+                border: 1px solid var(--border-subtle);
+                border-radius: 12px;
+                overflow: hidden;
+                background: var(--bg-secondary);
+            }
 
-    .thread-sidebar {
-      width: 260px;
-      min-width: 260px;
-      background: var(--bg-secondary);
-      border-right: 1px solid var(--border-subtle);
-      display: flex;
-      flex-direction: column;
-    }
+            .thread-sidebar {
+                width: 260px;
+                min-width: 260px;
+                background: var(--bg-secondary);
+                border-right: 1px solid var(--border-subtle);
+                display: flex;
+                flex-direction: column;
+            }
 
-    .thread-sidebar-header {
-      padding: 14px 14px 10px;
-      border-bottom: 1px solid var(--border-subtle);
-    }
+            .thread-sidebar-header {
+                padding: 14px 14px 10px;
+                border-bottom: 1px solid var(--border-subtle);
+            }
 
-    .app-brand {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 10px;
-    }
-    .app-brand .emoji { font-size: 17px; }
-    .app-brand .name {
-      font-size: 14px;
-      font-weight: 700;
-      color: var(--text-primary);
-      letter-spacing: -0.01em;
-    }
+            .app-brand {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                margin-bottom: 10px;
+            }
+            .app-brand .emoji {
+                font-size: 17px;
+            }
+            .app-brand .name {
+                font-size: 14px;
+                font-weight: 700;
+                color: var(--text-primary);
+                letter-spacing: -0.01em;
+            }
 
-    .new-chat-btn {
-      width: 100%;
-      padding: 8px 12px;
-      background: var(--accent-primary);
-      color: var(--text-inverse);
-      border: none;
-      border-radius: 7px;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-      transition: background 0.15s;
-      font-family: inherit;
-    }
-    .new-chat-btn:hover { background: var(--accent-secondary); }
+            .new-chat-btn {
+                width: 100%;
+                padding: 8px 12px;
+                background: var(--accent-primary);
+                color: var(--text-inverse);
+                border: none;
+                border-radius: 7px;
+                font-size: 13px;
+                font-weight: 600;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 6px;
+                transition: background 0.15s;
+                font-family: inherit;
+            }
+            .new-chat-btn:hover {
+                background: var(--accent-secondary);
+            }
 
-    .search-wrap {
-      padding: 8px 12px;
-      border-bottom: 1px solid var(--border-subtle);
-    }
-    .search-input {
-      width: 100%;
-      background: var(--bg-tertiary);
-      border: 1px solid var(--border-subtle);
-      border-radius: 6px;
-      padding: 6px 10px 6px 28px;
-      color: var(--text-primary);
-      font-size: 13px;
-      outline: none;
-      font-family: inherit;
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='13' height='13' viewBox='0 0 24 24' fill='none' stroke='%237A7870' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.35-4.35'/%3E%3C/svg%3E");
-      background-repeat: no-repeat;
-      background-position: 8px center;
-    }
-    .search-input::placeholder { color: var(--text-tertiary); }
+            .search-wrap {
+                padding: 8px 12px;
+                border-bottom: 1px solid var(--border-subtle);
+            }
+            .search-input {
+                width: 100%;
+                background: var(--bg-tertiary);
+                border: 1px solid var(--border-subtle);
+                border-radius: 6px;
+                padding: 6px 10px 6px 28px;
+                color: var(--text-primary);
+                font-size: 13px;
+                outline: none;
+                font-family: inherit;
+                background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='13' height='13' viewBox='0 0 24 24' fill='none' stroke='%237A7870' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.35-4.35'/%3E%3C/svg%3E");
+                background-repeat: no-repeat;
+                background-position: 8px center;
+            }
+            .search-input::placeholder {
+                color: var(--text-tertiary);
+            }
 
-    .thread-list-empty {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 10px;
-      padding: 24px 20px;
-    }
-    .thread-list-empty .icon {
-      font-size: 32px;
-      opacity: 0.35;
-      margin-bottom: 4px;
-    }
-    .thread-list-empty .title {
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--text-secondary);
-      text-align: center;
-    }
-    .thread-list-empty .hint {
-      font-size: 12px;
-      color: var(--text-tertiary);
-      text-align: center;
-      line-height: 1.5;
-    }
+            .thread-list-empty {
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                gap: 10px;
+                padding: 24px 20px;
+            }
+            .thread-list-empty .icon {
+                font-size: 32px;
+                opacity: 0.35;
+                margin-bottom: 4px;
+            }
+            .thread-list-empty .title {
+                font-size: 13px;
+                font-weight: 600;
+                color: var(--text-secondary);
+                text-align: center;
+            }
+            .thread-list-empty .hint {
+                font-size: 12px;
+                color: var(--text-tertiary);
+                text-align: center;
+                line-height: 1.5;
+            }
 
-    .thread-sidebar-footer {
-      padding: 10px 12px;
-      border-top: 1px solid var(--border-subtle);
-      display: flex;
-      gap: 6px;
-    }
-    .footer-link {
-      flex: 1;
-      padding: 6px 8px;
-      background: transparent;
-      border: 1px solid var(--border-subtle);
-      border-radius: 6px;
-      color: var(--text-tertiary);
-      font-size: 12px;
-      cursor: pointer;
-      text-align: center;
-      font-family: inherit;
-      transition: background 0.15s, color 0.15s;
-    }
-    .footer-link:hover { background: var(--bg-elevated); color: var(--text-primary); }
+            .thread-sidebar-footer {
+                padding: 10px 12px;
+                border-top: 1px solid var(--border-subtle);
+                display: flex;
+                gap: 6px;
+            }
+            .footer-link {
+                flex: 1;
+                padding: 6px 8px;
+                background: transparent;
+                border: 1px solid var(--border-subtle);
+                border-radius: 6px;
+                color: var(--text-tertiary);
+                font-size: 12px;
+                cursor: pointer;
+                text-align: center;
+                font-family: inherit;
+                transition:
+                    background 0.15s,
+                    color 0.15s;
+            }
+            .footer-link:hover {
+                background: var(--bg-elevated);
+                color: var(--text-primary);
+            }
 
-    /* Main chat area when empty */
-    .chat-empty-main {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 14px;
-      padding: 40px;
-    }
-    .chat-empty-main .big-icon {
-      font-size: 48px;
-      opacity: 0.18;
-    }
-    .chat-empty-main .headline {
-      font-size: 18px;
-      font-weight: 700;
-      color: var(--text-secondary);
-      letter-spacing: -0.01em;
-    }
-    .chat-empty-main .subtext {
-      font-size: 13px;
-      color: var(--text-tertiary);
-      text-align: center;
-      max-width: 320px;
-      line-height: 1.6;
-    }
-    .chat-empty-main .action-row {
-      display: flex;
-      gap: 10px;
-      margin-top: 6px;
-    }
+            /* Main chat area when empty */
+            .chat-empty-main {
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                gap: 14px;
+                padding: 40px;
+            }
+            .chat-empty-main .big-icon {
+                font-size: 48px;
+                opacity: 0.18;
+            }
+            .chat-empty-main .headline {
+                font-size: 18px;
+                font-weight: 700;
+                color: var(--text-secondary);
+                letter-spacing: -0.01em;
+            }
+            .chat-empty-main .subtext {
+                font-size: 13px;
+                color: var(--text-tertiary);
+                text-align: center;
+                max-width: 320px;
+                line-height: 1.6;
+            }
+            .chat-empty-main .action-row {
+                display: flex;
+                gap: 10px;
+                margin-top: 6px;
+            }
 
-    /* ── Banner styles ── */
-    .banner {
-      border-radius: 10px;
-      padding: 18px 20px;
-      display: flex;
-      align-items: flex-start;
-      gap: 14px;
-      border: 1px solid;
-    }
+            /* ── Banner styles ── */
+            .banner {
+                border-radius: 10px;
+                padding: 18px 20px;
+                display: flex;
+                align-items: flex-start;
+                gap: 14px;
+                border: 1px solid;
+            }
 
-    .banner-warning {
-      background: rgba(196, 162, 74, 0.07);
-      border-color: rgba(196, 162, 74, 0.28);
-    }
-    .banner-error {
-      background: rgba(196, 90, 90, 0.07);
-      border-color: rgba(196, 90, 90, 0.28);
-    }
-    .banner-info {
-      background: rgba(90, 130, 196, 0.07);
-      border-color: rgba(90, 130, 196, 0.28);
-    }
-    .banner-neutral {
-      background: var(--bg-secondary);
-      border-color: var(--border-subtle);
-    }
+            .banner-warning {
+                background: rgba(196, 162, 74, 0.07);
+                border-color: rgba(196, 162, 74, 0.28);
+            }
+            .banner-error {
+                background: rgba(196, 90, 90, 0.07);
+                border-color: rgba(196, 90, 90, 0.28);
+            }
+            .banner-info {
+                background: rgba(90, 130, 196, 0.07);
+                border-color: rgba(90, 130, 196, 0.28);
+            }
+            .banner-neutral {
+                background: var(--bg-secondary);
+                border-color: var(--border-subtle);
+            }
 
-    .banner-icon {
-      font-size: 22px;
-      flex-shrink: 0;
-      margin-top: 1px;
-    }
+            .banner-icon {
+                font-size: 22px;
+                flex-shrink: 0;
+                margin-top: 1px;
+            }
 
-    .banner-content { flex: 1; min-width: 0; }
-    .banner-title {
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--text-primary);
-      margin-bottom: 4px;
-    }
-    .banner-desc {
-      font-size: 13px;
-      color: var(--text-secondary);
-      line-height: 1.55;
-      margin-bottom: 12px;
-    }
-    .banner-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+            .banner-content {
+                flex: 1;
+                min-width: 0;
+            }
+            .banner-title {
+                font-size: 14px;
+                font-weight: 600;
+                color: var(--text-primary);
+                margin-bottom: 4px;
+            }
+            .banner-desc {
+                font-size: 13px;
+                color: var(--text-secondary);
+                line-height: 1.55;
+                margin-bottom: 12px;
+            }
+            .banner-actions {
+                display: flex;
+                gap: 8px;
+                flex-wrap: wrap;
+            }
 
-    /* ── No-provider inline widget ── */
-    .provider-widget {
-      border: 1px solid var(--border-subtle);
-      border-radius: 12px;
-      overflow: hidden;
-    }
-    .provider-widget-header {
-      background: var(--bg-secondary);
-      padding: 16px 20px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      border-bottom: 1px solid var(--border-subtle);
-    }
-    .provider-widget-title {
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--text-primary);
-    }
-    .provider-widget-body {
-      background: var(--bg-primary);
-      padding: 32px 20px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 12px;
-    }
-    .provider-widget-icon {
-      font-size: 36px;
-      opacity: 0.25;
-    }
-    .provider-widget-msg {
-      font-size: 13px;
-      color: var(--text-tertiary);
-      text-align: center;
-      max-width: 300px;
-      line-height: 1.6;
-    }
+            /* ── No-provider inline widget ── */
+            .provider-widget {
+                border: 1px solid var(--border-subtle);
+                border-radius: 12px;
+                overflow: hidden;
+            }
+            .provider-widget-header {
+                background: var(--bg-secondary);
+                padding: 16px 20px;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                border-bottom: 1px solid var(--border-subtle);
+            }
+            .provider-widget-title {
+                font-size: 14px;
+                font-weight: 600;
+                color: var(--text-primary);
+            }
+            .provider-widget-body {
+                background: var(--bg-primary);
+                padding: 32px 20px;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 12px;
+            }
+            .provider-widget-icon {
+                font-size: 36px;
+                opacity: 0.25;
+            }
+            .provider-widget-msg {
+                font-size: 13px;
+                color: var(--text-tertiary);
+                text-align: center;
+                max-width: 300px;
+                line-height: 1.6;
+            }
 
-    /* ── Empty routines list ── */
-    .routines-widget {
-      border: 1px solid var(--border-subtle);
-      border-radius: 12px;
-      overflow: hidden;
-      background: var(--bg-secondary);
-    }
-    .routines-widget-header {
-      padding: 14px 18px;
-      border-bottom: 1px solid var(--border-subtle);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-    .routines-widget-title {
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--text-primary);
-    }
-    .routines-add-btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      padding: 5px 11px;
-      background: var(--bg-tertiary);
-      border: 1px solid var(--border-default);
-      border-radius: 6px;
-      font-size: 12px;
-      font-weight: 500;
-      color: var(--text-secondary);
-      cursor: pointer;
-      font-family: inherit;
-      transition: background 0.15s, color 0.15s;
-    }
-    .routines-add-btn:hover { background: var(--bg-elevated); color: var(--text-primary); }
+            /* ── Empty routines list ── */
+            .routines-widget {
+                border: 1px solid var(--border-subtle);
+                border-radius: 12px;
+                overflow: hidden;
+                background: var(--bg-secondary);
+            }
+            .routines-widget-header {
+                padding: 14px 18px;
+                border-bottom: 1px solid var(--border-subtle);
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+            }
+            .routines-widget-title {
+                font-size: 13px;
+                font-weight: 600;
+                color: var(--text-primary);
+            }
+            .routines-add-btn {
+                display: inline-flex;
+                align-items: center;
+                gap: 5px;
+                padding: 5px 11px;
+                background: var(--bg-tertiary);
+                border: 1px solid var(--border-default);
+                border-radius: 6px;
+                font-size: 12px;
+                font-weight: 500;
+                color: var(--text-secondary);
+                cursor: pointer;
+                font-family: inherit;
+                transition:
+                    background 0.15s,
+                    color 0.15s;
+            }
+            .routines-add-btn:hover {
+                background: var(--bg-elevated);
+                color: var(--text-primary);
+            }
 
-    .routines-empty-body {
-      padding: 36px 20px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 10px;
-    }
-    .routines-empty-icon {
-      font-size: 30px;
-      opacity: 0.25;
-    }
-    .routines-empty-title {
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--text-secondary);
-    }
-    .routines-empty-hint {
-      font-size: 12px;
-      color: var(--text-tertiary);
-      text-align: center;
-      max-width: 280px;
-      line-height: 1.55;
-    }
+            .routines-empty-body {
+                padding: 36px 20px;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 10px;
+            }
+            .routines-empty-icon {
+                font-size: 30px;
+                opacity: 0.25;
+            }
+            .routines-empty-title {
+                font-size: 13px;
+                font-weight: 600;
+                color: var(--text-secondary);
+            }
+            .routines-empty-hint {
+                font-size: 12px;
+                color: var(--text-tertiary);
+                text-align: center;
+                max-width: 280px;
+                line-height: 1.55;
+            }
 
-    /* ── No-personas widget ── */
-    .personas-empty-card {
-      border: 1px dashed var(--border-default);
-      border-radius: 12px;
-      padding: 36px 24px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 12px;
-      background: transparent;
-      transition: border-color 0.2s, background 0.2s;
-      cursor: pointer;
-    }
-    .personas-empty-card:hover {
-      border-color: var(--accent-primary);
-      background: rgba(124, 140, 90, 0.04);
-    }
-    .personas-empty-card .big-emoji {
-      font-size: 40px;
-      opacity: 0.35;
-    }
-    .personas-empty-card .pe-title {
-      font-size: 15px;
-      font-weight: 600;
-      color: var(--text-secondary);
-    }
-    .personas-empty-card .pe-hint {
-      font-size: 13px;
-      color: var(--text-tertiary);
-      text-align: center;
-      max-width: 300px;
-      line-height: 1.6;
-    }
-    .personas-empty-card .pe-btn {
-      margin-top: 4px;
-      padding: 8px 20px;
-      background: var(--accent-primary);
-      color: var(--text-inverse);
-      border: none;
-      border-radius: 7px;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-      font-family: inherit;
-      transition: background 0.15s;
-    }
-    .personas-empty-card .pe-btn:hover { background: var(--accent-secondary); }
+            /* ── No-personas widget ── */
+            .personas-empty-card {
+                border: 1px dashed var(--border-default);
+                border-radius: 12px;
+                padding: 36px 24px;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 12px;
+                background: transparent;
+                transition:
+                    border-color 0.2s,
+                    background 0.2s;
+                cursor: pointer;
+            }
+            .personas-empty-card:hover {
+                border-color: var(--accent-primary);
+                background: rgba(124, 140, 90, 0.04);
+            }
+            .personas-empty-card .big-emoji {
+                font-size: 40px;
+                opacity: 0.35;
+            }
+            .personas-empty-card .pe-title {
+                font-size: 15px;
+                font-weight: 600;
+                color: var(--text-secondary);
+            }
+            .personas-empty-card .pe-hint {
+                font-size: 13px;
+                color: var(--text-tertiary);
+                text-align: center;
+                max-width: 300px;
+                line-height: 1.6;
+            }
+            .personas-empty-card .pe-btn {
+                margin-top: 4px;
+                padding: 8px 20px;
+                background: var(--accent-primary);
+                color: var(--text-inverse);
+                border: none;
+                border-radius: 7px;
+                font-size: 13px;
+                font-weight: 600;
+                cursor: pointer;
+                font-family: inherit;
+                transition: background 0.15s;
+            }
+            .personas-empty-card .pe-btn:hover {
+                background: var(--accent-secondary);
+            }
 
-    /* ── Status badge ── */
-    .badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      padding: 3px 9px;
-      border-radius: 20px;
-      font-size: 11px;
-      font-weight: 600;
-    }
-    .badge-warning { background: rgba(196,162,74,0.15); color: var(--warning); }
-    .badge-error   { background: rgba(196,90,90,0.15);  color: var(--error); }
-    .badge-info    { background: rgba(90,130,196,0.15); color: var(--info); }
-    .badge::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+            /* ── Status badge ── */
+            .badge {
+                display: inline-flex;
+                align-items: center;
+                gap: 5px;
+                padding: 3px 9px;
+                border-radius: 20px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            .badge-warning {
+                background: rgba(196, 162, 74, 0.15);
+                color: var(--warning);
+            }
+            .badge-error {
+                background: rgba(196, 90, 90, 0.15);
+                color: var(--error);
+            }
+            .badge-info {
+                background: rgba(90, 130, 196, 0.15);
+                color: var(--info);
+            }
+            .badge::before {
+                content: "";
+                width: 6px;
+                height: 6px;
+                border-radius: 50%;
+                background: currentColor;
+            }
 
-    /* ── Two-col grid for smaller widgets ── */
-    .two-col {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 20px;
-    }
+            /* ── Two-col grid for smaller widgets ── */
+            .two-col {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 20px;
+            }
 
-    @media (max-width: 640px) {
-      .two-col { grid-template-columns: 1fr; }
-      .thread-shell { height: auto; flex-direction: column; }
-      .thread-sidebar { width: 100%; min-width: 0; border-right: none; border-bottom: 1px solid var(--border-subtle); }
-    }
-  </style>
-</head>
-<body>
-  <div class="page">
-
-    <div class="page-title">Empty States</div>
-    <div class="page-subtitle">All empty / zero-data states across the application — visual reference for placeholder UI.</div>
-
-    <!-- ══ 1. Empty thread list ══════════════════════════════════════ -->
-    <div class="section">
-      <div class="section-label">1 — Empty thread list (sidebar + main area)</div>
-      <div class="thread-shell">
-        <!-- Sidebar -->
-        <div class="thread-sidebar">
-          <div class="thread-sidebar-header">
-            <div class="app-brand">
-              <span class="emoji">🤖</span>
-              <span class="name">agent-deck</span>
+            @media (max-width: 640px) {
+                .two-col {
+                    grid-template-columns: 1fr;
+                }
+                .thread-shell {
+                    height: auto;
+                    flex-direction: column;
+                }
+                .thread-sidebar {
+                    width: 100%;
+                    min-width: 0;
+                    border-right: none;
+                    border-bottom: 1px solid var(--border-subtle);
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="page">
+            <div class="page-title">Empty States</div>
+            <div class="page-subtitle">
+                All empty / zero-data states across the application — visual
+                reference for placeholder UI.
             </div>
-            <button class="new-chat-btn">
-              <span>＋</span> New Chat
-            </button>
-          </div>
-          <div class="search-wrap">
-            <input class="search-input" type="text" placeholder="Search threads…" />
-          </div>
-          <div class="thread-list-empty">
-            <div class="icon">💬</div>
-            <div class="title">No threads yet</div>
-            <div class="hint">Start a new chat to begin a conversation with your agent.</div>
-          </div>
-          <div class="thread-sidebar-footer">
-            <button class="footer-link">⚙ Settings</button>
-            <button class="footer-link">🗂 Archived</button>
-          </div>
-        </div>
-        <!-- Main area when nothing is selected -->
-        <div class="chat-empty-main">
-          <div class="big-icon">🤖</div>
-          <div class="headline">No thread selected</div>
-          <div class="subtext">Choose a thread from the sidebar or start a new chat to begin talking with your agent.</div>
-          <div class="action-row">
-            <button class="btn btn-primary">＋ New Chat</button>
-          </div>
-        </div>
-      </div>
-    </div>
 
-    <!-- ══ 2. No providers connected ════════════════════════════════ -->
-    <div class="section">
-      <div class="section-label">2 — No provider connected</div>
-
-      <!-- Inline banner variant (shown in chat area) -->
-      <div class="banner banner-warning" style="margin-bottom:16px">
-        <div class="banner-icon">⚠️</div>
-        <div class="banner-content">
-          <div class="banner-title">No model provider connected</div>
-          <div class="banner-desc">
-            You need to connect at least one model provider before you can start a chat.
-            Add an OpenAI-compatible provider in Settings to get started.
-          </div>
-          <div class="banner-actions">
-            <button class="btn btn-primary btn-sm">Go to Settings →</button>
-            <button class="btn btn-ghost btn-sm">Learn more</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Widget variant (shown inside Settings → Providers when list is empty) -->
-      <div class="provider-widget">
-        <div class="provider-widget-header">
-          <span class="provider-widget-title">Providers</span>
-          <button class="btn btn-primary btn-sm">＋ Add Provider</button>
-        </div>
-        <div class="provider-widget-body">
-          <div class="provider-widget-icon">🔌</div>
-          <div class="provider-widget-msg">
-            No providers added yet. Connect an OpenAI-compatible API, GitHub Copilot, or any
-            other compatible endpoint to start using your agents.
-          </div>
-          <button class="btn btn-primary">＋ Add Your First Provider</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- ══ 3. No personas configured ════════════════════════════════ -->
-    <div class="section">
-      <div class="section-label">3 — No personas configured</div>
-
-      <!-- Banner variant (shown in thread list / new-chat flow) -->
-      <div class="banner banner-info" style="margin-bottom:16px">
-        <div class="banner-icon">🪪</div>
-        <div class="banner-content">
-          <div class="banner-title">No agent personas yet</div>
-          <div class="banner-desc">
-            Personas define the personality and system prompt for your agents.
-            Create at least one persona before starting a conversation.
-          </div>
-          <div class="banner-actions">
-            <button class="btn btn-primary btn-sm">Create a Persona →</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Dashed card variant (shown inside Settings → Personas grid) -->
-      <div class="personas-empty-card">
-        <div class="big-emoji">🤖</div>
-        <div class="pe-title">No personas yet</div>
-        <div class="pe-hint">
-          Personas give your agents a name, personality, and default system prompt.
-          Create one to get started.
-        </div>
-        <button class="pe-btn">＋ Create First Persona</button>
-      </div>
-    </div>
-
-    <!-- ══ 4. Empty routines list ════════════════════════════════════ -->
-    <div class="section">
-      <div class="section-label">4 — Empty routines list</div>
-
-      <div class="two-col">
-        <!-- Thread config pane variant -->
-        <div>
-          <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:10px">Thread config pane variant</div>
-          <div class="routines-widget">
-            <div class="routines-widget-header">
-              <span class="routines-widget-title">Routines</span>
-              <button class="routines-add-btn">＋ Add</button>
+            <!-- ══ 1. Empty thread list ══════════════════════════════════════ -->
+            <div class="section">
+                <div class="section-label">
+                    1 — Empty thread list (sidebar + main area)
+                </div>
+                <div class="thread-shell">
+                    <!-- Sidebar -->
+                    <div class="thread-sidebar">
+                        <div class="thread-sidebar-header">
+                            <div class="app-brand">
+                                <span class="emoji">🤖</span>
+                                <span class="name">agent-deck</span>
+                            </div>
+                            <button class="new-chat-btn">
+                                <span>＋</span> New Chat
+                            </button>
+                        </div>
+                        <div class="search-wrap">
+                            <input
+                                class="search-input"
+                                type="text"
+                                placeholder="Search threads…"
+                            />
+                        </div>
+                        <div class="thread-list-empty">
+                            <div class="icon">💬</div>
+                            <div class="title">No threads yet</div>
+                            <div class="hint">
+                                Start a new chat to begin a conversation with
+                                your agent.
+                            </div>
+                        </div>
+                        <div class="thread-sidebar-footer">
+                            <button class="footer-link">⚙ Settings</button>
+                            <button class="footer-link">🗂 Archived</button>
+                        </div>
+                    </div>
+                    <!-- Main area when nothing is selected -->
+                    <div class="chat-empty-main">
+                        <div class="big-icon">🤖</div>
+                        <div class="headline">No thread selected</div>
+                        <div class="subtext">
+                            Choose a thread from the sidebar or start a new chat
+                            to begin talking with your agent.
+                        </div>
+                        <div class="action-row">
+                            <button class="btn btn-primary">＋ New Chat</button>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <div class="routines-empty-body">
-              <div class="routines-empty-icon">⏱</div>
-              <div class="routines-empty-title">No routines</div>
-              <div class="routines-empty-hint">
-                Add a cron-based routine to have this agent run prompts automatically on a schedule.
-              </div>
+
+            <!-- ══ 2. No providers connected ════════════════════════════════ -->
+            <div class="section">
+                <div class="section-label">2 — No provider connected</div>
+
+                <!-- Inline banner variant (shown in chat area) -->
+                <div class="banner banner-warning" style="margin-bottom: 16px">
+                    <div class="banner-icon">⚠️</div>
+                    <div class="banner-content">
+                        <div class="banner-title">
+                            No model provider connected
+                        </div>
+                        <div class="banner-desc">
+                            You need to connect at least one model provider
+                            before you can start a chat. Add an
+                            OpenAI-compatible provider in Settings to get
+                            started.
+                        </div>
+                        <div class="banner-actions">
+                            <button class="btn btn-primary btn-sm">
+                                Go to Settings →
+                            </button>
+                            <button class="btn btn-ghost btn-sm">
+                                Learn more
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Widget variant (shown inside Settings → Providers when list is empty) -->
+                <div class="provider-widget">
+                    <div class="provider-widget-header">
+                        <span class="provider-widget-title">Providers</span>
+                        <button class="btn btn-primary btn-sm">
+                            ＋ Add Provider
+                        </button>
+                    </div>
+                    <div class="provider-widget-body">
+                        <div class="provider-widget-icon">🔌</div>
+                        <div class="provider-widget-msg">
+                            No providers added yet. Connect an OpenAI-compatible
+                            API, GitHub Copilot, or any other compatible
+                            endpoint to start using your agents.
+                        </div>
+                        <button class="btn btn-primary">
+                            ＋ Add Your First Provider
+                        </button>
+                    </div>
+                </div>
             </div>
-          </div>
-        </div>
 
-        <!-- Settings page variant -->
-        <div>
-          <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:10px">Settings page / full-width variant</div>
-          <div class="routines-widget">
-            <div class="routines-widget-header">
-              <span class="routines-widget-title">Thread Routines</span>
-              <button class="routines-add-btn">＋ New Routine</button>
+            <!-- ══ 3. No personas configured ════════════════════════════════ -->
+            <div class="section">
+                <div class="section-label">3 — No personas configured</div>
+
+                <!-- Banner variant (shown in thread list / new-chat flow) -->
+                <div class="banner banner-info" style="margin-bottom: 16px">
+                    <div class="banner-icon">🪪</div>
+                    <div class="banner-content">
+                        <div class="banner-title">No agent personas yet</div>
+                        <div class="banner-desc">
+                            Personas define the personality and system prompt
+                            for your agents. Create at least one persona before
+                            starting a conversation.
+                        </div>
+                        <div class="banner-actions">
+                            <button class="btn btn-primary btn-sm">
+                                Create a Persona →
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Dashed card variant (shown inside Settings → Personas grid) -->
+                <div class="personas-empty-card">
+                    <div class="big-emoji">🤖</div>
+                    <div class="pe-title">No personas yet</div>
+                    <div class="pe-hint">
+                        Personas give your agents a name, personality, and
+                        default system prompt. Create one to get started.
+                    </div>
+                    <button class="pe-btn">＋ Create First Persona</button>
+                </div>
             </div>
-            <div class="routines-empty-body" style="padding:48px 24px">
-              <div class="routines-empty-icon">⏱</div>
-              <div class="routines-empty-title">No routines scheduled</div>
-              <div class="routines-empty-hint">
-                Routines run cron-based prompts automatically. Create one to have your agent
-                check in, summarize, or run any scheduled task.
-              </div>
-              <button class="btn btn-primary" style="margin-top:6px">＋ Create Routine</button>
+
+            <!-- ══ 4. Empty routines list ════════════════════════════════════ -->
+            <div class="section">
+                <div class="section-label">4 — Empty routines list</div>
+
+                <div class="two-col">
+                    <!-- Thread config pane variant -->
+                    <div>
+                        <div
+                            style="
+                                font-size: 12px;
+                                color: var(--text-tertiary);
+                                margin-bottom: 10px;
+                            "
+                        >
+                            Thread config pane variant
+                        </div>
+                        <div class="routines-widget">
+                            <div class="routines-widget-header">
+                                <span class="routines-widget-title"
+                                    >Routines</span
+                                >
+                                <button class="routines-add-btn">＋ Add</button>
+                            </div>
+                            <div class="routines-empty-body">
+                                <div class="routines-empty-icon">⏱</div>
+                                <div class="routines-empty-title">
+                                    No routines
+                                </div>
+                                <div class="routines-empty-hint">
+                                    Add a cron-based routine to have this agent
+                                    run prompts automatically on a schedule.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Settings page variant -->
+                    <div>
+                        <div
+                            style="
+                                font-size: 12px;
+                                color: var(--text-tertiary);
+                                margin-bottom: 10px;
+                            "
+                        >
+                            Settings page / full-width variant
+                        </div>
+                        <div class="routines-widget">
+                            <div class="routines-widget-header">
+                                <span class="routines-widget-title"
+                                    >Thread Routines</span
+                                >
+                                <button class="routines-add-btn">
+                                    ＋ New Routine
+                                </button>
+                            </div>
+                            <div
+                                class="routines-empty-body"
+                                style="padding: 48px 24px"
+                            >
+                                <div class="routines-empty-icon">⏱</div>
+                                <div class="routines-empty-title">
+                                    No routines scheduled
+                                </div>
+                                <div class="routines-empty-hint">
+                                    Routines run cron-based prompts
+                                    automatically. Create one to have your agent
+                                    check in, summarize, or run any scheduled
+                                    task.
+                                </div>
+                                <button
+                                    class="btn btn-primary"
+                                    style="margin-top: 6px"
+                                >
+                                    ＋ Create Routine
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
-          </div>
-        </div>
-      </div>
-    </div>
 
-    <!-- ══ 5. Setup incomplete / first-run warning ════════════════════ -->
-    <div class="section">
-      <div class="section-label">5 — Setup incomplete (first-run state)</div>
+            <!-- ══ 5. Setup incomplete / first-run warning ════════════════════ -->
+            <div class="section">
+                <div class="section-label">
+                    5 — Setup incomplete (first-run state)
+                </div>
 
-      <div class="banner banner-neutral" style="margin-bottom:16px">
-        <div class="banner-icon">🚀</div>
-        <div class="banner-content">
-          <div class="banner-title">Welcome to agent-deck</div>
-          <div class="banner-desc">
-            A few things need to be set up before you can start chatting.
-            The setup wizard will walk you through connecting a provider and creating your first persona.
-          </div>
-          <div class="banner-actions">
-            <button class="btn btn-primary btn-sm">Start Setup Wizard →</button>
-          </div>
-        </div>
-      </div>
+                <div class="banner banner-neutral" style="margin-bottom: 16px">
+                    <div class="banner-icon">🚀</div>
+                    <div class="banner-content">
+                        <div class="banner-title">Welcome to agent-deck</div>
+                        <div class="banner-desc">
+                            A few things need to be set up before you can start
+                            chatting. The setup wizard will walk you through
+                            connecting a provider and creating your first
+                            persona.
+                        </div>
+                        <div class="banner-actions">
+                            <button class="btn btn-primary btn-sm">
+                                Start Setup Wizard →
+                            </button>
+                        </div>
+                    </div>
+                </div>
 
-      <!-- Checklist variant -->
-      <div style="background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:12px;padding:20px 22px;">
-        <div style="font-size:14px;font-weight:600;color:var(--text-primary);margin-bottom:14px">Getting started checklist</div>
-        <div style="display:flex;flex-direction:column;gap:10px;">
-          <!-- Incomplete item -->
-          <div style="display:flex;align-items:center;gap:12px;padding:11px 14px;background:var(--bg-tertiary);border:1px solid var(--border-subtle);border-radius:8px;">
-            <span style="width:20px;height:20px;border-radius:50%;border:2px solid var(--border-default);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;color:var(--text-tertiary)">1</span>
-            <div style="flex:1">
-              <div style="font-size:13px;font-weight:500;color:var(--text-primary)">Connect a model provider</div>
-              <div style="font-size:12px;color:var(--text-tertiary)">OpenAI, Ollama, GitHub Copilot, or any OpenAI-compatible API</div>
+                <!-- Checklist variant -->
+                <div
+                    style="
+                        background: var(--bg-secondary);
+                        border: 1px solid var(--border-subtle);
+                        border-radius: 12px;
+                        padding: 20px 22px;
+                    "
+                >
+                    <div
+                        style="
+                            font-size: 14px;
+                            font-weight: 600;
+                            color: var(--text-primary);
+                            margin-bottom: 14px;
+                        "
+                    >
+                        Getting started checklist
+                    </div>
+                    <div
+                        style="display: flex; flex-direction: column; gap: 10px"
+                    >
+                        <!-- Incomplete item -->
+                        <div
+                            style="
+                                display: flex;
+                                align-items: center;
+                                gap: 12px;
+                                padding: 11px 14px;
+                                background: var(--bg-tertiary);
+                                border: 1px solid var(--border-subtle);
+                                border-radius: 8px;
+                            "
+                        >
+                            <span
+                                style="
+                                    width: 20px;
+                                    height: 20px;
+                                    border-radius: 50%;
+                                    border: 2px solid var(--border-default);
+                                    display: flex;
+                                    align-items: center;
+                                    justify-content: center;
+                                    flex-shrink: 0;
+                                    font-size: 11px;
+                                    color: var(--text-tertiary);
+                                "
+                                >1</span
+                            >
+                            <div style="flex: 1">
+                                <div
+                                    style="
+                                        font-size: 13px;
+                                        font-weight: 500;
+                                        color: var(--text-primary);
+                                    "
+                                >
+                                    Connect a model provider
+                                </div>
+                                <div
+                                    style="
+                                        font-size: 12px;
+                                        color: var(--text-tertiary);
+                                    "
+                                >
+                                    OpenAI, Ollama, GitHub Copilot, or any
+                                    OpenAI-compatible API
+                                </div>
+                            </div>
+                            <button class="btn btn-primary btn-sm">
+                                Set up →
+                            </button>
+                        </div>
+                        <!-- Incomplete item -->
+                        <div
+                            style="
+                                display: flex;
+                                align-items: center;
+                                gap: 12px;
+                                padding: 11px 14px;
+                                background: var(--bg-tertiary);
+                                border: 1px solid var(--border-subtle);
+                                border-radius: 8px;
+                                opacity: 0.6;
+                            "
+                        >
+                            <span
+                                style="
+                                    width: 20px;
+                                    height: 20px;
+                                    border-radius: 50%;
+                                    border: 2px solid var(--border-default);
+                                    display: flex;
+                                    align-items: center;
+                                    justify-content: center;
+                                    flex-shrink: 0;
+                                    font-size: 11px;
+                                    color: var(--text-tertiary);
+                                "
+                                >2</span
+                            >
+                            <div style="flex: 1">
+                                <div
+                                    style="
+                                        font-size: 13px;
+                                        font-weight: 500;
+                                        color: var(--text-primary);
+                                    "
+                                >
+                                    Create your first persona
+                                </div>
+                                <div
+                                    style="
+                                        font-size: 12px;
+                                        color: var(--text-tertiary);
+                                    "
+                                >
+                                    Give your agent a name, emoji, and system
+                                    prompt
+                                </div>
+                            </div>
+                            <span class="badge badge-warning">Pending</span>
+                        </div>
+                        <!-- Complete item -->
+                        <div
+                            style="
+                                display: flex;
+                                align-items: center;
+                                gap: 12px;
+                                padding: 11px 14px;
+                                background: var(--bg-tertiary);
+                                border: 1px solid var(--border-subtle);
+                                border-radius: 8px;
+                                opacity: 0.55;
+                            "
+                        >
+                            <span
+                                style="
+                                    width: 20px;
+                                    height: 20px;
+                                    border-radius: 50%;
+                                    background: var(--success);
+                                    display: flex;
+                                    align-items: center;
+                                    justify-content: center;
+                                    flex-shrink: 0;
+                                    font-size: 12px;
+                                    color: var(--text-inverse);
+                                "
+                                >✓</span
+                            >
+                            <div style="flex: 1">
+                                <div
+                                    style="
+                                        font-size: 13px;
+                                        font-weight: 500;
+                                        color: var(--text-secondary);
+                                        text-decoration: line-through;
+                                        text-decoration-color: var(
+                                            --border-default
+                                        );
+                                    "
+                                >
+                                    Server set up &amp; running
+                                </div>
+                                <div
+                                    style="
+                                        font-size: 12px;
+                                        color: var(--text-tertiary);
+                                    "
+                                >
+                                    Auth token generated, database initialized
+                                </div>
+                            </div>
+                            <span
+                                class="badge"
+                                style="
+                                    background: rgba(106, 158, 91, 0.15);
+                                    color: var(--success);
+                                "
+                            >
+                                ✓ Done
+                            </span>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <button class="btn btn-primary btn-sm">Set up →</button>
-          </div>
-          <!-- Incomplete item -->
-          <div style="display:flex;align-items:center;gap:12px;padding:11px 14px;background:var(--bg-tertiary);border:1px solid var(--border-subtle);border-radius:8px;opacity:0.6;">
-            <span style="width:20px;height:20px;border-radius:50%;border:2px solid var(--border-default);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;color:var(--text-tertiary)">2</span>
-            <div style="flex:1">
-              <div style="font-size:13px;font-weight:500;color:var(--text-primary)">Create your first persona</div>
-              <div style="font-size:12px;color:var(--text-tertiary)">Give your agent a name, emoji, and system prompt</div>
+
+            <!-- ══ 6. Empty memory list ══════════════════════════════════════ -->
+            <div class="section">
+                <div class="section-label">
+                    6 — No memories (persona memory viewer)
+                </div>
+
+                <div
+                    style="
+                        background: var(--bg-secondary);
+                        border: 1px solid var(--border-subtle);
+                        border-radius: 12px;
+                        overflow: hidden;
+                    "
+                >
+                    <div
+                        style="
+                            padding: 14px 18px;
+                            border-bottom: 1px solid var(--border-subtle);
+                            display: flex;
+                            align-items: center;
+                            justify-content: space-between;
+                        "
+                    >
+                        <div>
+                            <span
+                                style="
+                                    font-size: 14px;
+                                    font-weight: 600;
+                                    color: var(--text-primary);
+                                "
+                                >Memory</span
+                            >
+                            <span
+                                style="
+                                    margin-left: 8px;
+                                    padding: 2px 8px;
+                                    background: var(--bg-elevated);
+                                    border-radius: 10px;
+                                    font-size: 11px;
+                                    color: var(--text-tertiary);
+                                "
+                                >0 entries</span
+                            >
+                        </div>
+                        <button
+                            class="btn btn-ghost btn-sm"
+                            style="opacity: 0.4; pointer-events: none"
+                        >
+                            Search
+                        </button>
+                    </div>
+                    <div
+                        style="
+                            padding: 48px 24px;
+                            display: flex;
+                            flex-direction: column;
+                            align-items: center;
+                            gap: 10px;
+                        "
+                    >
+                        <div style="font-size: 32px; opacity: 0.25">🧠</div>
+                        <div
+                            style="
+                                font-size: 13px;
+                                font-weight: 600;
+                                color: var(--text-secondary);
+                            "
+                        >
+                            No memories stored
+                        </div>
+                        <div
+                            style="
+                                font-size: 12px;
+                                color: var(--text-tertiary);
+                                text-align: center;
+                                max-width: 300px;
+                                line-height: 1.6;
+                            "
+                        >
+                            This persona hasn't stored any memories yet.
+                            Memories are saved automatically when the agent uses
+                            the
+                            <code
+                                style="
+                                    font-family: monospace;
+                                    background: var(--bg-elevated);
+                                    padding: 1px 5px;
+                                    border-radius: 3px;
+                                    font-size: 11px;
+                                "
+                                >save_memory</code
+                            >
+                            tool during a conversation.
+                        </div>
+                    </div>
+                </div>
             </div>
-            <span class="badge badge-warning">Pending</span>
-          </div>
-          <!-- Complete item -->
-          <div style="display:flex;align-items:center;gap:12px;padding:11px 14px;background:var(--bg-tertiary);border:1px solid var(--border-subtle);border-radius:8px;opacity:0.55;">
-            <span style="width:20px;height:20px;border-radius:50%;background:var(--success);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:12px;color:var(--text-inverse)">✓</span>
-            <div style="flex:1">
-              <div style="font-size:13px;font-weight:500;color:var(--text-secondary);text-decoration:line-through;text-decoration-color:var(--border-default)">Server set up &amp; running</div>
-              <div style="font-size:12px;color:var(--text-tertiary)">Auth token generated, database initialized</div>
+
+            <!-- ══ 7. Empty skills list ══════════════════════════════════════ -->
+            <div class="section">
+                <div class="section-label">7 — No skills configured</div>
+
+                <div class="banner banner-neutral">
+                    <div class="banner-icon">🛠</div>
+                    <div class="banner-content">
+                        <div class="banner-title">No skills added</div>
+                        <div class="banner-desc">
+                            Skills are experimental tool-call capabilities that
+                            can be attached to threads. Create a skill with a
+                            name and instructions, then attach it to any thread.
+                        </div>
+                        <div class="banner-actions">
+                            <button class="btn btn-primary btn-sm">
+                                ＋ Create Skill
+                            </button>
+                            <button class="btn btn-ghost btn-sm">
+                                Learn more
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <span class="badge" style="background:rgba(106,158,91,0.15);color:var(--success)">
-              ✓ Done
-            </span>
-          </div>
+
+            <!-- ══ 8. Empty archived threads ════════════════════════════════ -->
+            <div class="section">
+                <div class="section-label">8 — Empty archived threads list</div>
+
+                <div
+                    style="
+                        background: var(--bg-secondary);
+                        border: 1px solid var(--border-subtle);
+                        border-radius: 12px;
+                    "
+                >
+                    <div
+                        style="
+                            padding: 14px 18px;
+                            border-bottom: 1px solid var(--border-subtle);
+                            display: flex;
+                            align-items: center;
+                            justify-content: space-between;
+                        "
+                    >
+                        <span
+                            style="
+                                font-size: 14px;
+                                font-weight: 600;
+                                color: var(--text-primary);
+                            "
+                            >Archived Threads</span
+                        >
+                        <button class="btn btn-ghost btn-sm">
+                            ← Back to Chat
+                        </button>
+                    </div>
+                    <div
+                        style="
+                            padding: 56px 24px;
+                            display: flex;
+                            flex-direction: column;
+                            align-items: center;
+                            gap: 10px;
+                        "
+                    >
+                        <div style="font-size: 32px; opacity: 0.22">🗂</div>
+                        <div
+                            style="
+                                font-size: 13px;
+                                font-weight: 600;
+                                color: var(--text-secondary);
+                            "
+                        >
+                            No archived threads
+                        </div>
+                        <div
+                            style="
+                                font-size: 12px;
+                                color: var(--text-tertiary);
+                                text-align: center;
+                                max-width: 280px;
+                                line-height: 1.55;
+                            "
+                        >
+                            Archived threads will appear here. Archiving a
+                            thread hides it from the main list but keeps the
+                            full message history.
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
-      </div>
-    </div>
+        <!-- /page -->
 
-    <!-- ══ 6. Empty memory list ══════════════════════════════════════ -->
-    <div class="section">
-      <div class="section-label">6 — No memories (persona memory viewer)</div>
+        <script>
+            // Hover effects are handled purely by CSS :hover above.
+            // The only JS needed here is to make the new-chat-btn and pe-btn
+            // give a visual "click" pulse so the mockup feels interactive.
+            document.querySelectorAll("button").forEach((btn) => {
+                btn.addEventListener("mousedown", () => {
+                    btn.style.transform = "scale(0.97)";
+                });
+                btn.addEventListener("mouseup", () => {
+                    btn.style.transform = "";
+                });
+                btn.addEventListener("mouseleave", () => {
+                    btn.style.transform = "";
+                });
+            });
 
-      <div style="background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:12px;overflow:hidden;">
-        <div style="padding:14px 18px;border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:space-between;">
-          <div>
-            <span style="font-size:14px;font-weight:600;color:var(--text-primary)">Memory</span>
-            <span style="margin-left:8px;padding:2px 8px;background:var(--bg-elevated);border-radius:10px;font-size:11px;color:var(--text-tertiary)">0 entries</span>
-          </div>
-          <button class="btn btn-ghost btn-sm" style="opacity:0.4;pointer-events:none">Search</button>
-        </div>
-        <div style="padding:48px 24px;display:flex;flex-direction:column;align-items:center;gap:10px;">
-          <div style="font-size:32px;opacity:0.25">🧠</div>
-          <div style="font-size:13px;font-weight:600;color:var(--text-secondary)">No memories stored</div>
-          <div style="font-size:12px;color:var(--text-tertiary);text-align:center;max-width:300px;line-height:1.6">
-            This persona hasn't stored any memories yet. Memories are saved automatically
-            when the agent uses the <code style="font-family:monospace;background:var(--bg-elevated);padding:1px 5px;border-radius:3px;font-size:11px">save_memory</code> tool during a conversation.
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ══ 7. Empty skills list ══════════════════════════════════════ -->
-    <div class="section">
-      <div class="section-label">7 — No skills configured</div>
-
-      <div class="banner banner-neutral">
-        <div class="banner-icon">🛠</div>
-        <div class="banner-content">
-          <div class="banner-title">No skills added</div>
-          <div class="banner-desc">
-            Skills are experimental tool-call capabilities that can be attached to threads.
-            Create a skill with a name and instructions, then attach it to any thread.
-          </div>
-          <div class="banner-actions">
-            <button class="btn btn-primary btn-sm">＋ Create Skill</button>
-            <button class="btn btn-ghost btn-sm">Learn more</button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ══ 8. Empty archived threads ════════════════════════════════ -->
-    <div class="section">
-      <div class="section-label">8 — Empty archived threads list</div>
-
-      <div style="background:var(--bg-secondary);border:1px solid var(--border-subtle);border-radius:12px;">
-        <div style="padding:14px 18px;border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:space-between;">
-          <span style="font-size:14px;font-weight:600;color:var(--text-primary)">Archived Threads</span>
-          <button class="btn btn-ghost btn-sm">← Back to Chat</button>
-        </div>
-        <div style="padding:56px 24px;display:flex;flex-direction:column;align-items:center;gap:10px;">
-          <div style="font-size:32px;opacity:0.22">🗂</div>
-          <div style="font-size:13px;font-weight:600;color:var(--text-secondary)">No archived threads</div>
-          <div style="font-size:12px;color:var(--text-tertiary);text-align:center;max-width:280px;line-height:1.55">
-            Archived threads will appear here. Archiving a thread hides it from the main list
-            but keeps the full message history.
-          </div>
-        </div>
-      </div>
-    </div>
-
-  </div><!-- /page -->
-
-  <script>
-    // Hover effects are handled purely by CSS :hover above.
-    // The only JS needed here is to make the new-chat-btn and pe-btn
-    // give a visual "click" pulse so the mockup feels interactive.
-    document.querySelectorAll('button').forEach(btn => {
-      btn.addEventListener('mousedown', () => {
-        btn.style.transform = 'scale(0.97)';
-      });
-      btn.addEventListener('mouseup', () => {
-        btn.style.transform = '';
-      });
-      btn.addEventListener('mouseleave', () => {
-        btn.style.transform = '';
-      });
-    });
-
-    // Animate the personas empty card "create" click to a brief highlight
-    const peCard = document.querySelector('.personas-empty-card');
-    if (peCard) {
-      peCard.addEventListener('click', () => {
-        peCard.style.borderColor = 'var(--accent-secondary)';
-        peCard.style.background  = 'rgba(124,140,90,0.08)';
-        setTimeout(() => {
-          peCard.style.borderColor = '';
-          peCard.style.background  = '';
-        }, 400);
-      });
-    }
-  </script>
-</body>
+            // Animate the personas empty card "create" click to a brief highlight
+            const peCard = document.querySelector(".personas-empty-card");
+            if (peCard) {
+                peCard.addEventListener("click", () => {
+                    peCard.style.borderColor = "var(--accent-secondary)";
+                    peCard.style.background = "rgba(124,140,90,0.08)";
+                    setTimeout(() => {
+                        peCard.style.borderColor = "";
+                        peCard.style.background = "";
+                    }, 400);
+                });
+            }
+        </script>
+    </body>
 </html>
