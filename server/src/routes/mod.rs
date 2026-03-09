@@ -119,6 +119,7 @@ pub async fn build_router(pool: SqlitePool, config: Config) -> anyhow::Result<Ro
                 .put(tokens::update_mcp)
                 .delete(tokens::delete_mcp),
         )
+        .route("/api/mcp-servers/:id/tools", get(tokens::list_mcp_tools))
         // Threads
         .route("/api/threads", get(threads::list).post(threads::create))
         .route(
