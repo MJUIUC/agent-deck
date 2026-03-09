@@ -9,6 +9,8 @@ pub struct Message {
     pub content: String,
     pub source: String,
     pub routine_id: Option<String>,
+    pub visibility: String, // "visible" | "hidden"
+    pub execution_id: Option<String>,
     pub created_at: String,
 }
 
@@ -20,6 +22,9 @@ pub struct CreateMessage {
     #[serde(default = "default_source")]
     pub source: String,
     pub routine_id: Option<String>,
+    #[serde(default = "default_visibility")]
+    pub visibility: String,
+    pub execution_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -30,6 +35,8 @@ pub struct MessageResponse {
     pub content: String,
     pub source: String,
     pub routine_id: Option<String>,
+    pub visibility: String,
+    pub execution_id: Option<String>,
     pub created_at: String,
 }
 
@@ -41,6 +48,10 @@ fn default_source() -> String {
     "chat".to_string()
 }
 
+fn default_visibility() -> String {
+    "visible".to_string()
+}
+
 impl Message {
     pub fn new(thread_id: impl Into<String>, req: CreateMessage) -> Self {
         Self {
@@ -50,6 +61,8 @@ impl Message {
             content: req.content,
             source: req.source,
             routine_id: req.routine_id,
+            visibility: req.visibility,
+            execution_id: req.execution_id,
             created_at: chrono::Utc::now()
                 .format("%Y-%m-%dT%H:%M:%S%.3fZ")
                 .to_string(),
@@ -64,6 +77,8 @@ impl Message {
             content: content.into(),
             source: "chat".to_string(),
             routine_id: None,
+            visibility: "visible".to_string(),
+            execution_id: None,
             created_at: chrono::Utc::now()
                 .format("%Y-%m-%dT%H:%M:%S%.3fZ")
                 .to_string(),
@@ -78,6 +93,8 @@ impl Message {
             content: content.into(),
             source: "chat".to_string(),
             routine_id: None,
+            visibility: "visible".to_string(),
+            execution_id: None,
             created_at: chrono::Utc::now()
                 .format("%Y-%m-%dT%H:%M:%S%.3fZ")
                 .to_string(),
@@ -96,6 +113,8 @@ impl Message {
             content: content.into(),
             source: "routine".to_string(),
             routine_id: Some(routine_id.into()),
+            visibility: "visible".to_string(),
+            execution_id: None,
             created_at: chrono::Utc::now()
                 .format("%Y-%m-%dT%H:%M:%S%.3fZ")
                 .to_string(),
@@ -112,6 +131,8 @@ impl From<Message> for MessageResponse {
             content: m.content,
             source: m.source,
             routine_id: m.routine_id,
+            visibility: m.visibility,
+            execution_id: m.execution_id,
             created_at: m.created_at,
         }
     }

@@ -1,8 +1,22 @@
 # Agent-Deck — Project Plan
 
-**Version:** 1.3  
+**Version:** 1.4  
 **Project:** agent-deck  
 **Purpose:** A self-hosted, highly configurable personal AI agent platform designed to make working with LLMs accessible to non-engineers. Runs on a Mac mini, accessible privately over Tailscale, with a browser UI and Android mobile app.
+
+**v1.4 Changes:**
+- Removed Skills system entirely (`skills` table, `thread_skills`, `/api/skills`, Phase 7 skills stories, all related UI)
+- MCP is now the primary capability layer: local and remote server types, per-persona default MCP servers, tool inspector UI
+- Added credential system: encrypted credential store, OAuth2 provider framework (Google + GitHub), agent-owned persona credentials, modular provider pattern for future integrations
+- Routine execution revised to two-phase model: silent background execution → single synthesized output message; intermediate steps stored but hidden by default
+- Added `visibility` field to messages (`visible` | `hidden`); tool calls and MCP results hidden by default, optionally surfaced via Thread Config toggle
+- Added new tables: `credentials`, `persona_default_mcp_servers`, `routine_executions`
+- Removed tables: `skills`, `thread_skills`
+- Revised `mcp_servers` schema: added `server_type` (local/remote), `source_url`, unified `config` JSON column
+- Updated Phase 3: added credential store + OAuth stories (3.x, 3.y, 3.z); removed skills settings story
+- Replaced Phase 7 (Skills Experimental) with Phase 7 (MCP Depth): tool inspector, local process management
+- Updated Thread Config pane spec: removed Skills section, expanded MCP section with tool inspector and local/remote distinction
+- Updated Settings spec: removed skills page, added Accounts tab to global and persona settings
 
 **v1.3 Changes:**
 - Added full browser authentication model (section 6.0): localhost bypass, token entry screen for remote Tailscale devices, cookie-based session, auth endpoints
@@ -341,37 +355,37 @@ CREATE TABLE agent_personas (
 );
 ```
 
-#### `skills`
-Skill definitions. Stored locally, used as tool calls at runtime.
+#### `persona_default_mcp_servers`
+MCP servers that are automatically attached to every new thread created with a given persona.
 
 ```sql
-CREATE TABLE skills (
-  id           TEXT PRIMARY KEY,          -- UUID v4
-  user_id      TEXT NOT NULL,
-  name         TEXT NOT NULL,             -- slug, e.g. "weekly-report"
-  display_name TEXT NOT NULL,             -- human readable
-  description  TEXT NOT NULL,             -- what it does and when to use it (shown to model)
-  instructions TEXT NOT NULL,             -- full SKILL.md body content
-  enabled      INTEGER NOT NULL DEFAULT 1,
-  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
-  FOREIGN KEY (user_id) REFERENCES users(id)
+CREATE TABLE persona_default_mcp_servers (
+  persona_id    TEXT NOT NULL,
+  mcp_server_id TEXT NOT NULL,
+  PRIMARY KEY (persona_id, mcp_server_id),
+  FOREIGN KEY (persona_id) REFERENCES agent_personas(id) ON DELETE CASCADE,
+  FOREIGN KEY (mcp_server_id) REFERENCES mcp_servers(id) ON DELETE CASCADE
 );
 ```
 
 #### `mcp_servers`
-MCP server configurations.
+MCP server configurations. Supports two server types: `local` (process managed by the Rust server) and `remote` (externally hosted HTTP/SSE endpoint).
 
 ```sql
 CREATE TABLE mcp_servers (
   id           TEXT PRIMARY KEY,          -- UUID v4
   user_id      TEXT NOT NULL,
   name         TEXT NOT NULL,
-  command      TEXT NOT NULL,             -- executable command
-  args         TEXT NOT NULL DEFAULT '[]', -- JSON array of args
-  env          TEXT NOT NULL DEFAULT '{}', -- JSON object of env vars
+  description  TEXT,                      -- short description shown in UI
+  source_url   TEXT,                      -- GitHub repo or docs link, informational only
+  server_type  TEXT NOT NULL CHECK (server_type IN ('local', 'remote')),
+  config       TEXT NOT NULL,             -- JSON, shape varies by server_type:
+                                          --   local:  { "executable": "path", "args": [], "env": {} }
+                                          --   remote: { "url": "https://...", "auth_header": "Authorization", "credential_key": "google_oauth" }
+  status       TEXT NOT NULL DEFAULT 'inactive', -- 'inactive' | 'connecting' | 'connected' | 'error'
   enabled      INTEGER NOT NULL DEFAULT 1,
   created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
 ```
@@ -395,21 +409,6 @@ CREATE TABLE threads (
   FOREIGN KEY (persona_id) REFERENCES agent_personas(id),
   FOREIGN KEY (active_model) REFERENCES models(id),
   FOREIGN KEY (active_provider) REFERENCES providers(id)
-);
-```
-
-#### `thread_skills`
-Skills attached to a thread. Skills here are available to the agent and all routines in the thread.
-
-```sql
-CREATE TABLE thread_skills (
-  id         TEXT PRIMARY KEY,            -- UUID v4
-  thread_id  TEXT NOT NULL,
-  skill_id   TEXT NOT NULL,
-  enabled    INTEGER NOT NULL DEFAULT 1,
-  FOREIGN KEY (thread_id) REFERENCES threads(id),
-  FOREIGN KEY (skill_id) REFERENCES skills(id),
-  UNIQUE(thread_id, skill_id)
 );
 ```
 
@@ -439,9 +438,13 @@ CREATE TABLE messages (
   content      TEXT NOT NULL,
   source       TEXT NOT NULL DEFAULT 'chat', -- 'chat' | 'routine'
   routine_id   TEXT,                      -- set if source = 'routine'
+  visibility   TEXT NOT NULL DEFAULT 'visible' CHECK (visibility IN ('visible', 'hidden')),
+                                          -- 'hidden' for tool calls, MCP results, routine intermediate steps
+  execution_id TEXT,                      -- references routine_executions(id) for routine-generated messages
   created_at   TEXT NOT NULL DEFAULT (datetime('now')),
   FOREIGN KEY (thread_id) REFERENCES threads(id),
-  FOREIGN KEY (routine_id) REFERENCES routines(id)
+  FOREIGN KEY (routine_id) REFERENCES routines(id),
+  FOREIGN KEY (execution_id) REFERENCES routine_executions(id)
 );
 
 CREATE INDEX idx_messages_thread_created ON messages(thread_id, created_at);
@@ -503,6 +506,48 @@ CREATE VIRTUAL TABLE memory_fts USING fts5(
   content,
   content='memory',
   content_rowid='rowid'
+);
+```
+
+#### `credentials`
+Encrypted credential store for OAuth tokens and API keys. Credentials are never exposed to the agent directly — MCP servers resolve them at runtime by key name.
+
+```sql
+CREATE TABLE credentials (
+  id              TEXT PRIMARY KEY,       -- UUID v4
+  key             TEXT NOT NULL UNIQUE,   -- referenced by MCP server configs, e.g. "google_oauth"
+  display_name    TEXT NOT NULL,          -- shown in settings UI
+  provider        TEXT NOT NULL,          -- 'google' | 'github' | 'custom'
+  credential_type TEXT NOT NULL CHECK (credential_type IN ('oauth2', 'api_key', 'custom')),
+  owner_type      TEXT NOT NULL CHECK (owner_type IN ('user', 'persona')),
+  persona_id      TEXT,                   -- null if owner_type = 'user'; references agent_personas(id)
+  encrypted_data  TEXT NOT NULL,          -- AES-256-GCM encrypted JSON blob
+  scopes          TEXT,                   -- JSON array of granted OAuth scopes
+  expires_at      TEXT,                   -- for OAuth access tokens; null for API keys
+  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  FOREIGN KEY (persona_id) REFERENCES agent_personas(id)
+);
+```
+
+Encryption key: a 256-bit master key is generated on first server run, stored in `app_config` as `credential_master_key`. All credential blobs are encrypted with AES-256-GCM. The key never leaves the server process and is never exposed via API.
+
+#### `routine_executions`
+Execution log for routine runs. Each run gets one row. Intermediate hidden messages reference this table.
+
+```sql
+CREATE TABLE routine_executions (
+  id                TEXT PRIMARY KEY,     -- UUID v4
+  routine_id        TEXT NOT NULL,
+  thread_id         TEXT NOT NULL,
+  fired_at          TEXT NOT NULL,
+  status            TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'completed', 'failed')),
+  output_message_id TEXT,                 -- the final visible result message in threads
+  error             TEXT,                 -- set on failure
+  completed_at      TEXT,
+  FOREIGN KEY (routine_id) REFERENCES routines(id),
+  FOREIGN KEY (thread_id) REFERENCES threads(id),
+  FOREIGN KEY (output_message_id) REFERENCES messages(id)
 );
 ```
 
@@ -616,23 +661,47 @@ Responses follow the shape:
 }
 ```
 
-### 6.5 Skills
+### 6.5 Credentials
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/skills` | List all skills |
-| `POST` | `/api/skills` | Create a skill |
-| `GET` | `/api/skills/:id` | Get a skill |
-| `PUT` | `/api/skills/:id` | Update a skill |
-| `DELETE` | `/api/skills/:id` | Delete a skill |
+| `GET` | `/api/credentials` | List all credentials (metadata only, never encrypted_data) |
+| `DELETE` | `/api/credentials/:id` | Delete a credential |
+| `GET` | `/api/auth/oauth/:provider/start` | Begin OAuth flow — returns redirect URL |
+| `GET` | `/api/auth/oauth/callback` | OAuth callback endpoint (provider, code, state params) |
+| `POST` | `/api/credentials/api-key` | Store an API key credential |
 
-**POST /api/skills body:**
+OAuth flow providers: `google`, `github`. Additional providers are registered in the provider registry without API changes.
+
+**POST /api/credentials/api-key body:**
 ```json
 {
-  "name": "weekly-report",
-  "display_name": "Weekly Report",
-  "description": "Generates a formatted weekly status report. Use when the user asks for a weekly summary or status report.",
-  "instructions": "# Weekly Report Skill\n\n## Instructions\n..."
+  "key": "openai_key",
+  "display_name": "OpenAI API Key",
+  "provider": "custom",
+  "owner_type": "user",
+  "persona_id": null,
+  "secret": "sk-..."
+}
+```
+
+**GET /api/credentials response** (never returns raw tokens):
+```json
+{
+  "data": [
+    {
+      "id": "<id>",
+      "key": "google_oauth",
+      "display_name": "Your Google Account",
+      "provider": "google",
+      "credential_type": "oauth2",
+      "owner_type": "user",
+      "persona_id": null,
+      "scopes": ["gmail.readonly", "calendar.readonly"],
+      "expires_at": "2026-04-01T00:00:00Z",
+      "created_at": "2026-03-01T00:00:00Z"
+    }
+  ]
 }
 ```
 
@@ -640,11 +709,43 @@ Responses follow the shape:
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/mcp-servers` | List all MCP servers |
+| `GET` | `/api/mcp-servers` | List all MCP servers with status |
 | `POST` | `/api/mcp-servers` | Add an MCP server |
 | `GET` | `/api/mcp-servers/:id` | Get an MCP server |
+| `GET` | `/api/mcp-servers/:id/tools` | List tools exposed by this server |
 | `PUT` | `/api/mcp-servers/:id` | Update an MCP server |
 | `DELETE` | `/api/mcp-servers/:id` | Delete an MCP server |
+| `POST` | `/api/mcp-servers/:id/connect` | Trigger connection attempt (for local servers) |
+
+**POST /api/mcp-servers body (local):**
+```json
+{
+  "name": "filesystem",
+  "description": "Read and write local files",
+  "source_url": "https://github.com/anthropics/mcp-filesystem",
+  "server_type": "local",
+  "config": {
+    "executable": "/usr/local/bin/mcp-filesystem",
+    "args": ["--root", "/Users/me/projects"],
+    "env": {}
+  }
+}
+```
+
+**POST /api/mcp-servers body (remote):**
+```json
+{
+  "name": "gmail",
+  "description": "Read and send Gmail",
+  "source_url": "https://github.com/example/mcp-gmail",
+  "server_type": "remote",
+  "config": {
+    "url": "https://my-mcp-host.example.com/gmail",
+    "auth_header": "Authorization",
+    "credential_key": "google_oauth"
+  }
+}
+```
 
 ### 6.7 Threads
 
@@ -657,9 +758,6 @@ Responses follow the shape:
 | `PATCH` | `/api/threads/:id` | Update thread (title, model, addendum) |
 | `POST` | `/api/threads/:id/archive` | Archive a thread |
 | `POST` | `/api/threads/:id/unarchive` | Restore a thread |
-| `GET` | `/api/threads/:id/skills` | List skills attached to thread |
-| `POST` | `/api/threads/:id/skills` | Attach a skill to thread |
-| `DELETE` | `/api/threads/:id/skills/:skillId` | Detach a skill from thread |
 | `GET` | `/api/threads/:id/mcp-servers` | List MCP servers for thread |
 | `POST` | `/api/threads/:id/mcp-servers` | Attach MCP server to thread |
 | `DELETE` | `/api/threads/:id/mcp-servers/:mcpId` | Detach MCP server from thread |
@@ -742,7 +840,6 @@ Slash commands are intercepted client-side (the UI detects the `/` prefix) and s
 | `model` | `switch <model_id>` | Updates `active_model` on the thread, returns confirmation |
 | `routine` | `list` | Returns routines attached to this thread |
 | `routine` | `add` | Returns signal for client to open the add-routine modal |
-| `skill` | `list` | Returns skills attached to this thread |
 | `memory` | `list` | Returns last 20 memories for this thread's persona, ordered by recency |
 | `help` | (none) | Returns all available commands with descriptions |
 
@@ -876,7 +973,6 @@ A thread is a persistent conversation session between the user and one agent per
 **Configuration pane:** Each thread has a slide-in config panel accessible from the chat UI. From here the user can:
 - See which persona the thread uses (display only, not editable)
 - Switch the active model (calls `/api/threads/:id` PATCH)
-- Add/remove skills
 - Add/remove MCP servers
 - Add/manage routines
 - Add a thread-level system prompt addendum
@@ -897,7 +993,6 @@ The server owns all command logic via the dedicated command endpoint. This keeps
 | `/model switch <model_id>` | Updates active_model on the thread |
 | `/routine list` | Shows routines attached to this thread |
 | `/routine add` | Opens the add routine modal (client reacts to server response type) |
-| `/skill list` | Shows skills attached to this thread |
 | `/memory list` | Shows last 20 memories for this thread's persona |
 | `/help` | Shows all available commands |
 
@@ -905,16 +1000,37 @@ The server owns all command logic via the dedicated command endpoint. This keeps
 
 ### 7.4 Routines
 
-A routine is a scheduled prompt that fires automatically on a cron schedule and injects a message into a thread as if the agent spoke unprompted.
+A routine is a scheduled prompt that fires automatically on a cron schedule. It executes silently in the background and surfaces only the final synthesized result to the chat thread.
 
-**Execution flow:**
+**Two-phase execution model:**
+
+**Phase 1 — Background execution (hidden)**
 1. `tokio-cron-scheduler` fires the job at the scheduled time
-2. The scheduler calls the agent run-loop directly (in-process function call)
-3. The run-loop assembles context: system prompt + thread config + recent history + routine prompt
-4. The LLM generates a response
-5. Both the routine prompt (as a `user` role message with `source: routine`) and the response are persisted to SQLite
-6. The server pushes a `routine_message` event on the thread's SSE stream
-7. The server checks for connected SSE clients — if none, dispatches an FCM push notification
+2. A `routine_executions` row is created with `status: running`
+3. A background agent context is created for the thread (in-process, no SSE emission)
+4. The agent receives a structured routine invocation message with the routine's instructions
+5. The agent executes, including any MCP tool calls, in a private scratchpad
+6. All intermediate messages (tool calls, MCP results, partial reasoning) are written to `messages` with `visibility: hidden` and `execution_id` set — they are stored but not rendered in chat
+
+**Phase 2 — Result emission (visible)**
+1. The agent produces a final synthesized response
+2. This is written to `messages` as a standard assistant message with `source: routine`, `visibility: visible`, and `execution_id` set
+3. The `routine_executions` row is updated with `status: completed` and `output_message_id`
+4. The server pushes a `routine_message` event on the thread's SSE stream
+5. The server checks for connected SSE clients — if none, dispatches an FCM push notification
+
+**Routine invocation message schema** (injected as the triggering user message in the background context, not persisted to visible thread):
+```json
+{
+  "type": "routine_invocation",
+  "routine_id": "<uuid>",
+  "routine_name": "Morning check-in",
+  "instructions": "Fetch unread emails from the last 12 hours using the gmail tool. Summarize them by sender and urgency. Output a brief digest.",
+  "fired_at": "2026-03-09T09:00:00Z"
+}
+```
+
+**Tool activity disclosure:** In the chat view, routine result messages include a collapsed "Show work" disclosure. Expanding it reveals the hidden intermediate steps (tool calls and results) in a read-only, visually distinct format. This is the only way intermediate steps are ever visible — they never appear inline in the chat stream.
 
 **Parameters:**
 - Name (human-readable label)
@@ -928,29 +1044,33 @@ Routines have access to all skills and MCP servers attached to their thread.
 
 The cron expression field in the UI shows a human-friendly description below it ("Runs every day at 9:00 AM") to make scheduling accessible to non-engineers.
 
-### 7.5 Skills (Experimental — Tool Call Based)
+### 7.5 MCP Integration
 
-Skills are modular expertise bundles that extend what an agent can do within a conversation. They are stored locally in SQLite and work via tool calling — making them compatible with any provider that supports function calling.
+MCP (Model Context Protocol) is the primary capability extension layer for Agent-Deck. Every integration — email, calendar, file access, code tools — is delivered as an MCP server. There are no skills; MCP replaces that concept entirely.
 
-**How they work at runtime:**
+#### Local vs Remote MCP
 
-1. When a thread has skills attached, the agent run-loop adds a `load_skill` tool to every LLM request
-2. The system prompt includes a lightweight index of available skills — just name and description for each (~100 tokens total)
-3. When the model determines a skill is relevant, it calls `load_skill("skill-name")`
-4. The server looks up the skill in SQLite and returns the full instructions as the tool result
-5. The model reads the instructions and proceeds with the task
+**Local servers** are executables managed by the Rust server. The server starts them as child processes, monitors health, and restarts them on crash. Lifecycle is identical to copilot-api management. The `config.executable` and `config.args` fields define the command. Environment variables can be injected via `config.env`.
 
-This replicates the progressive disclosure behavior of Anthropic's native Agent Skills — metadata always present, full instructions loaded on demand — using standard tool calling that works across all providers.
+**Remote servers** are externally hosted HTTP/SSE endpoints. The Rust server connects to them but does not manage their lifecycle. If they go down, graceful degradation applies (same `PROVIDER_UNAVAILABLE` pattern as copilot-api). Auth headers and credential key references are defined in `config`.
 
-**Skills are hidden entirely when the active provider does not support tool calling.** There is no degraded fallback.
+#### Per-Persona Defaults
 
-**Skill structure in the UI:**
-- Display name
-- Slug name (used in tool calls)
-- Description (shown to the model in the index — should describe what it does AND when to use it)
-- Instructions (the full SKILL.md body — a markdown document the agent reads when the skill is triggered)
+Each persona has a set of default MCP servers (`persona_default_mcp_servers`). When a new thread is created with that persona, those servers are automatically attached to the thread. The user can add or remove servers per-thread from the Thread Config pane at any time.
 
-**Note:** This is marked experimental because model compliance with tool-based progressive disclosure is not guaranteed. The model may not always choose to call `load_skill` when it should. This behavior should be monitored and the approach revised based on real usage. In a future version, when using the official Anthropic API directly, native Agent Skills via `/v1/skills` endpoints should be used instead.
+#### Credential Resolution
+
+When a remote MCP server config references a `credential_key`, the server resolves the credential at connection time:
+1. Look up `credentials` by `key`
+2. Decrypt the blob using the master key
+3. If OAuth and expired, refresh transparently and update the stored token
+4. Inject the resolved token into the MCP server's auth header
+
+The MCP server process or endpoint receives only the resolved token for its credential — not the full credential store.
+
+#### Tool Visibility
+
+All MCP tool calls and results are stored as `hidden` messages in the `messages` table. They do not appear in the chat thread by default. A per-thread "Show tool activity" toggle in Thread Config changes client rendering — when enabled, hidden messages appear as collapsible disclosure rows between regular messages, showing what tools were called and what they returned.
 
 ### 7.6 Agent Memory
 
@@ -1207,21 +1327,30 @@ The chat view shows:
 Slides in from the right over the chat view. Sections:
 - **Persona** — name, emoji, avatar (read-only)
 - **Model** — dropdown of available models, shows current selection
-- **Routines** — list with toggle, add button, edit/delete per routine
-- **Skills** — list with toggle, add from library button (only shown for compatible providers)
-- **MCP Servers** — list with toggle, add from library button
-- **System Prompt Addendum** — textarea, applied on top of persona prompt
+- **Routines** — list with toggle, add button, edit/delete per routine. Routine-generated messages show a collapsed "Show work" disclosure in chat.
+- **MCP Servers** — list of attached servers, each showing:
+  - Name, status badge (connected / connecting / error), type badge (local / remote)
+  - One-line description
+  - Source URL link (if set)
+  - Expandable tool list — each tool the server exposes with its description
+  - Remove button
+  - "+ Attach server" opens a searchable picker of all configured MCP servers
+- **Tool Activity** — toggle: "Show tool activity in chat" (default: off). When on, hidden tool call messages render as collapsible disclosure rows.
+- **System Prompt Addendum** — textarea, applied on top of persona prompt. Editable at any time; changes are noted in message history with a timestamp marker.
 
 ### 8.4 Settings / Management Pages
 
 Accessible from the sidebar "Settings" link. Sections as sub-routes:
 
 - `/settings/providers` — provider list, add/edit/delete, Copilot auth status
-- `/settings/personas` — persona list, create/edit/delete, avatar upload
-- `/settings/skills` — skills library, create/edit/delete
-- `/settings/mcp-servers` — MCP server list, add/edit/delete
+- `/settings/personas` — persona list, create/edit/delete, avatar upload, default MCP servers per persona, persona-owned Accounts tab
+- `/settings/mcp-servers` — MCP server list with local/remote type, add/edit/delete, per-server tool inspector (tool names and descriptions), source URL display
+- `/settings/accounts` — user-owned OAuth connections and API keys; connect Google (with scope selection), connect GitHub, add custom API key, disconnect
 - `/settings/mobile` — QR code for mobile pairing
 - `/settings/general` — server name, auth token rotation
+
+**Accounts UI pattern (used in both `/settings/accounts` and persona settings):**
+Each connected account shows: provider logo, display name, connected email or handle, granted scopes (as pills), and a Disconnect button. A "+ Connect account" button opens a provider picker. Selecting a provider with OAuth begins the redirect flow. For personas, the heading reads "{Persona name}'s accounts" to make the identity distinction clear.
 
 ### 8.5 React Native App — Screens
 
@@ -1722,28 +1851,75 @@ Acceptance criteria:
 
 ---
 
-**Story 3.4 — Settings: Skills, MCP, Mobile, General**  
+**Story 3.4 — Settings: MCP, Mobile, General**  
 Branch: `feature/phase3-settings-remaining`
 
-Implement `/settings/skills`, `/settings/mcp-servers`, `/settings/mobile` (QR code display for pairing), and `/settings/general` (server name, auth token rotation).
+Implement `/settings/mcp-servers`, `/settings/mobile` (QR code display for pairing), and `/settings/general` (server name, auth token rotation). MCP settings is a full management surface: add/edit/delete servers (local and remote types), per-server tool inspector (fetched from the server connection), source URL display.
 
 Acceptance criteria:
-- Skills CRUD works with instructions editor (markdown-friendly textarea)
-- MCP server CRUD works
+- MCP server CRUD works for both local and remote types
+- Local server config fields: executable path, args, env vars
+- Remote server config fields: URL, auth header name, credential key reference
+- Source URL field is displayed as a clickable link when set
+- Tool inspector shows tools for connected servers
 - QR code displays and encodes correct pairing data
 - General settings show auth token (masked) with rotation button
+
+---
+
+**Story 3.x — Credential store and encryption**  
+Branch: `feature/phase3-credential-store`
+
+Implement the credential storage infrastructure. On first server run, generate a 256-bit master key and store it in `app_config` as `credential_master_key`. Implement AES-256-GCM encrypt/decrypt helpers. Implement `credentials` table CRUD with all data encrypted at rest. The `GET /api/credentials` endpoint returns metadata only — encrypted_data is never included in any API response.
+
+Acceptance criteria:
+- Master key is generated once and persists across restarts
+- Master key is never included in any log output or API response
+- Integration test: store a credential, retrieve it, confirm encrypted_data round-trips correctly
+- Credential metadata endpoint returns correct fields with no secrets
+
+---
+
+**Story 3.y — OAuth framework + Google integration**  
+Branch: `feature/phase3-oauth-google`
+
+Implement the OAuth provider trait and provider registry. Implement the Google provider. Implement the OAuth flow endpoints: `GET /api/auth/oauth/:provider/start` (returns redirect URL with state) and `GET /api/auth/oauth/callback` (exchanges code, stores encrypted tokens). Add the `/settings/accounts` page and the Accounts tab in persona settings. Implement token refresh on credential resolution.
+
+Accepted scopes for Google (selectable in UI): Gmail read, Gmail send, Calendar read, Calendar write, Drive read, Drive write.
+
+Acceptance criteria:
+- OAuth flow completes end-to-end with a real Google account
+- Access token and refresh token stored encrypted
+- Token refresh works transparently when expired
+- `/settings/accounts` shows connected account with scopes as pills
+- Disconnect removes the credential row
+- Adding a second OAuth provider in future requires only: implement the trait, register in registry — no other changes
+
+---
+
+**Story 3.z — GitHub OAuth provider**  
+Branch: `feature/phase3-oauth-github`
+
+Implement the GitHub OAuth provider using the existing trait and registry infrastructure from Story 3.y. Register it in the provider picker UI.
+
+Acceptance criteria:
+- GitHub OAuth flow completes end-to-end
+- Connected account shows GitHub handle and granted scopes
+- No changes to OAuth infrastructure were required beyond implementing the trait and registering it
 
 ---
 
 **Story 3.5 — Thread config pane**  
 Branch: `feature/phase3-thread-config`
 
-Implement the slide-in thread config panel matching `mockups/thread-config.html`. Sections: persona info (read-only), model switcher (dropdown of available models), routines list (add/edit/delete/toggle — routines CRUD happens in Phase 4, but the UI shell goes here), skills list (add/remove, hidden for non-compatible providers), MCP servers list, system prompt addendum textarea. Cron expression field shows human-readable description below it.
+Implement the slide-in thread config panel matching `mockups/thread-config.html`. Sections: persona info (read-only), model switcher (dropdown of available models), routines list (add/edit/delete/toggle — routines CRUD happens in Phase 4, but the UI shell goes here), MCP servers list with tool inspector and local/remote badge, tool activity toggle, system prompt addendum textarea. Cron expression field shows human-readable description below it.
 
 Acceptance criteria:
 - Pane opens and closes smoothly
 - Model switch takes effect immediately and persists
-- Skills section is hidden when active provider doesn't support tool calling
+- MCP servers section shows attached servers with status, type badge, and expandable tool list
+- "+ Attach server" picker shows all configured servers not yet attached
+- Tool activity toggle is visible and persists per-thread
 - Addendum textarea saves on blur
 
 ---
@@ -1829,17 +2005,27 @@ Acceptance criteria:
 **Story 4.4 — Routine execution**  
 Branch: `feature/phase4-routine-execution`
 
-Implement the routine execution logic. When a routine fires:
-1. Assemble context (same as chat, but inject the routine prompt as the user message)
-2. Call the agent run-loop directly (in-process function call)
-3. Persist both the routine prompt message and agent response to DB with `source: routine`
-4. Emit `routine_message` event on the thread's SSE stream
-5. Emit `routine_fired` event on the global SSE stream
-6. Update `last_run_at` and `run_count` on the routine record
+Implement the two-phase routine execution model per section 7.4. When a routine fires:
+
+**Phase 1 (background):**
+1. Create a `routine_executions` row with `status: running`
+2. Build a background agent context (in-process, no SSE emission during execution)
+3. Inject the routine invocation message (JSON schema per section 7.4) as the triggering prompt
+4. Run the agent loop — all intermediate messages (tool calls, MCP results) are written to `messages` with `visibility: hidden` and `execution_id` set
+
+**Phase 2 (emit):**
+5. Write the final synthesized response to `messages` with `source: routine`, `visibility: visible`, `execution_id` set
+6. Update `routine_executions` with `status: completed` and `output_message_id`
+7. Emit `routine_message` event on the thread's SSE stream
+8. Emit `routine_fired` event on the global SSE stream
+9. Update `last_run_at` and `run_count` on the routine record
+10. If no SSE clients connected, dispatch FCM push notification
 
 Acceptance criteria:
-- Integration test: create a routine with a 1-minute schedule, verify it fires and persists messages
-- Routine messages are marked with `source: routine` in DB
+- Integration test: create a routine with a 1-minute schedule, verify it fires, hidden intermediate messages are stored, and one visible result message appears
+- No hidden messages appear in `GET /api/threads/:id/messages` response (filtered by default; `?include_hidden=true` param exposes them)
+- Visible result message has `source: routine` in DB
+- `routine_executions` row correctly tracks status and output_message_id
 - SSE events are emitted correctly
 - `last_run_at` and `run_count` are updated after each run
 
@@ -2005,40 +2191,37 @@ Acceptance criteria:
 
 ---
 
-### Phase 7 — Skills (Experimental)
+### Phase 7 — MCP Depth
 
-**Goal:** Skills work via tool calling for all providers that support function calling.
-
-**Note:** This phase is experimental. The approach of using tool calling to simulate progressive disclosure is novel and model compliance is not guaranteed. Treat this as a best-effort feature and monitor real-world behavior before relying on it.
+**Goal:** MCP servers are fully first-class. Tool inspector works, local server process management is robust, and the platform is ready for any MCP integration.
 
 ---
 
-**Story 7.1 — Skill tool definitions**  
-Branch: `feature/phase7-skill-tools`
+**Story 7.1 — MCP tool inspector**  
+Branch: `feature/phase7-mcp-tool-inspector`
 
-Implement the `load_skill` tool definition. When a thread has skills attached, include:
-1. A skills index in the system prompt (name + description for each skill, lightweight)
-2. The `load_skill` tool in every LLM request
-
-When the model calls `load_skill(name)`, look up the skill in SQLite and return the full instructions as the tool result.
+When an MCP server connects, enumerate its exposed tools and cache the list (name, description, input schema) in memory. Expose this via `GET /api/mcp-servers/:id/tools`. In the Thread Config pane and MCP settings page, render the tool list as an expandable section per server. Include the source URL as a clickable link when set.
 
 Acceptance criteria:
-- Skills index appears in assembled context when skills are attached
-- `load_skill` tool is included in requests to providers that support function calling
-- Tool calls are handled correctly and instructions are returned
-- Unit tests for index assembly and tool response
+- Tool list is fetched and displayed in Thread Config per attached server
+- Tool list is displayed in MCP settings per server
+- Source URL renders as a link when present
+- Tool list refreshes when a server reconnects
+- Unit tests for tool enumeration and caching
 
 ---
 
-**Story 7.2 — Skill tool UI integration**  
-Branch: `feature/phase7-skill-ui`
+**Story 7.2 — Local MCP process management**  
+Branch: `feature/phase7-local-mcp-processes`
 
-Show skill tool calls and responses in the chat UI (collapsible, subtle — similar to how Cursor shows tool use). This gives the user visibility into when a skill was loaded.
+Implement full lifecycle management for local MCP servers. The Rust server starts local servers as child processes on demand (when a thread with that server is opened or on server startup if the server has active threads). Health-check loop monitors the process. On crash, attempt restart with exponential backoff. Status is kept live in the `mcp_servers.status` field and broadcast via global SSE event. Graceful shutdown on server exit.
 
 Acceptance criteria:
-- Tool calls are visible in chat as collapsed items
-- Expanding shows which skill was loaded
-- Does not disrupt the flow of the conversation visually
+- Local server starts on demand and is restarted on crash
+- Restart backoff prevents tight crash loops
+- Status badge in UI reflects actual connection state in near-real-time
+- All local server processes are cleanly shut down when the Rust server exits
+- Integration test: start a local server, kill its process, verify restart and reconnection
 
 ---
 
@@ -2098,14 +2281,16 @@ The data model includes `user_id` on all relevant tables in anticipation of this
 ### Hard Delete
 Threads can be archived in v1. Hard delete (with full cascade through messages, routines, thread_skills, etc.) requires careful design to avoid accidental data loss. In v1, use soft delete only.
 
-### Semantic / Vector Memory
-The v1 memory system uses SQLite FTS5 full-text keyword search. A future version should explore `sqlite-vec` for vector embeddings, enabling semantic recall ("what did I say about the project deadline?" finds the entry even if "deadline" isn't the exact word used). This requires an embeddings API call when saving memories.
 
-### Native Anthropic Agent Skills
-When using the official Anthropic API directly (not via Copilot proxy), native Agent Skills via `/v1/skills` endpoints should be used instead of the tool-calling approach from Phase 8. This requires the three beta headers (`code-execution-2025-08-25`, `skills-2025-10-02`, `files-api-2025-04-14`) and Anthropic's container environment. Phase 8's tool-based approach remains the fallback for all other providers.
 
-### MCP Server Deep Integration
-Phase 1 includes CRUD for MCP server records. Actually connecting to MCP servers, discovering their tools, and wiring them into the agent run-loop is a separate effort. The `mcp-sdk` Rust crate (official from Anthropic) is the right starting point.
+### Additional OAuth Providers
+The OAuth provider framework (Phase 3) is designed to be modular — adding a new provider (Notion, Linear, Slack, etc.) requires only implementing the `OAuthProvider` trait and registering in the provider registry. Future providers follow the same pattern with no infrastructure changes.
+
+### Memory as MCP
+The current memory system is a baked-in tool-calling implementation. A future version should expose it as a local MCP server instead, making it swappable. This would allow plugging in a different memory backend (e.g., a vector database) without touching the core agent run-loop. Deferred to avoid scope expansion in v1.
+
+### Semantic / Vector Memory (revised)
+The v1 memory system uses SQLite FTS5 keyword search. If memory is migrated to an MCP server pattern (above), the backend can be swapped to `sqlite-vec` for vector embeddings, enabling semantic recall.
 
 ### Thread Hard Search
 Full-text search across all threads and messages. Useful as the thread list grows. SQLite FTS5 on the `messages` table would power this.

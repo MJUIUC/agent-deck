@@ -9,10 +9,7 @@ use serde_json::json;
 
 use crate::{
     error::{AppError, AppResult},
-    models::thread::{
-        AttachMcpServer, AttachSkill, CreateThread, Thread, ThreadMcpServer, ThreadSkill,
-        UpdateThread,
-    },
+    models::thread::{AttachMcpServer, CreateThread, Thread, ThreadMcpServer, UpdateThread},
     routes::AppState,
 };
 
@@ -283,90 +280,6 @@ async fn set_thread_status(
         StatusCode::OK,
         Json(json!({ "data": { "id": thread_id, "status": status } })),
     ))
-}
-
-// ─── Thread Skills ─────────────────────────────────────────────────────────────
-
-/// GET /api/threads/:id/skills
-pub async fn list_skills(
-    State(state): State<AppState>,
-    Path(thread_id): Path<String>,
-) -> AppResult<impl IntoResponse> {
-    let user_id = get_user_id(&state).await?;
-    verify_thread_ownership(&state, &thread_id, &user_id).await?;
-
-    let skills: Vec<ThreadSkill> = sqlx::query_as(
-        "SELECT id, thread_id, skill_id, enabled FROM thread_skills WHERE thread_id = ?",
-    )
-    .bind(&thread_id)
-    .fetch_all(&state.pool)
-    .await?;
-
-    Ok((StatusCode::OK, Json(json!({ "data": skills }))))
-}
-
-/// POST /api/threads/:id/skills
-pub async fn attach_skill(
-    State(state): State<AppState>,
-    Path(thread_id): Path<String>,
-    Json(payload): Json<AttachSkill>,
-) -> AppResult<impl IntoResponse> {
-    let user_id = get_user_id(&state).await?;
-    verify_thread_ownership(&state, &thread_id, &user_id).await?;
-
-    // Verify the skill exists and belongs to this user
-    let skill_exists: Option<(String,)> =
-        sqlx::query_as("SELECT id FROM skills WHERE id = ? AND user_id = ?")
-            .bind(&payload.skill_id)
-            .bind(&user_id)
-            .fetch_optional(&state.pool)
-            .await?;
-
-    if skill_exists.is_none() {
-        return Err(AppError::NotFound(format!(
-            "Skill '{}' not found",
-            payload.skill_id
-        )));
-    }
-
-    let entry = ThreadSkill::new(&thread_id, &payload.skill_id);
-
-    sqlx::query(
-        "INSERT OR IGNORE INTO thread_skills (id, thread_id, skill_id, enabled)
-         VALUES (?, ?, ?, ?)",
-    )
-    .bind(&entry.id)
-    .bind(&entry.thread_id)
-    .bind(&entry.skill_id)
-    .bind(entry.enabled)
-    .execute(&state.pool)
-    .await?;
-
-    Ok((StatusCode::CREATED, Json(json!({ "data": entry }))))
-}
-
-/// DELETE /api/threads/:id/skills/:skill_id
-pub async fn detach_skill(
-    State(state): State<AppState>,
-    Path((thread_id, skill_id)): Path<(String, String)>,
-) -> AppResult<impl IntoResponse> {
-    let user_id = get_user_id(&state).await?;
-    verify_thread_ownership(&state, &thread_id, &user_id).await?;
-
-    let result = sqlx::query("DELETE FROM thread_skills WHERE thread_id = ? AND skill_id = ?")
-        .bind(&thread_id)
-        .bind(&skill_id)
-        .execute(&state.pool)
-        .await?;
-
-    if result.rows_affected() == 0 {
-        return Err(AppError::NotFound(format!(
-            "Skill '{}' not attached to thread '{}'",
-            skill_id, thread_id
-        )));
-    }
-
-    Ok((StatusCode::OK, Json(json!({ "data": { "deleted": true } }))))
 }
 
 // ─── Thread MCP Servers ────────────────────────────────────────────────────────

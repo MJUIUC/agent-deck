@@ -31,7 +31,7 @@ pub async fn list_mcp(State(state): State<AppState>) -> AppResult<impl IntoRespo
     let user_id = get_user_id(&state).await?;
 
     let servers: Vec<McpServer> = sqlx::query_as(
-        "SELECT id, user_id, name, command, args, env, enabled, created_at
+        "SELECT id, user_id, name, description, source_url, server_type, config, status, enabled, created_at, updated_at
          FROM mcp_servers
          WHERE user_id = ?
          ORDER BY created_at ASC",
@@ -51,7 +51,7 @@ pub async fn get_mcp(
     let user_id = get_user_id(&state).await?;
 
     let server: Option<McpServer> = sqlx::query_as(
-        "SELECT id, user_id, name, command, args, env, enabled, created_at
+        "SELECT id, user_id, name, description, source_url, server_type, config, status, enabled, created_at, updated_at
          FROM mcp_servers
          WHERE id = ? AND user_id = ?",
     )
@@ -74,9 +74,9 @@ pub async fn create_mcp(
     if payload.name.trim().is_empty() {
         return Err(AppError::BadRequest("name must not be empty".to_string()));
     }
-    if payload.command.trim().is_empty() {
+    if payload.server_type != "local" && payload.server_type != "remote" {
         return Err(AppError::BadRequest(
-            "command must not be empty".to_string(),
+            "server_type must be 'local' or 'remote'".to_string(),
         ));
     }
 
@@ -84,17 +84,20 @@ pub async fn create_mcp(
     let server = McpServer::new(&user_id, payload);
 
     sqlx::query(
-        "INSERT INTO mcp_servers (id, user_id, name, command, args, env, enabled, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO mcp_servers (id, user_id, name, description, source_url, server_type, config, status, enabled, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&server.id)
     .bind(&server.user_id)
     .bind(&server.name)
-    .bind(&server.command)
-    .bind(&server.args)
-    .bind(&server.env)
+    .bind(&server.description)
+    .bind(&server.source_url)
+    .bind(&server.server_type)
+    .bind(&server.config)
+    .bind(&server.status)
     .bind(server.enabled)
     .bind(&server.created_at)
+    .bind(&server.updated_at)
     .execute(&state.pool)
     .await?;
 
@@ -110,7 +113,7 @@ pub async fn update_mcp(
     let user_id = get_user_id(&state).await?;
 
     let existing: Option<McpServer> = sqlx::query_as(
-        "SELECT id, user_id, name, command, args, env, enabled, created_at
+        "SELECT id, user_id, name, description, source_url, server_type, config, status, enabled, created_at, updated_at
          FROM mcp_servers
          WHERE id = ? AND user_id = ?",
     )
@@ -125,29 +128,33 @@ pub async fn update_mcp(
     };
 
     let name = payload.name.as_deref().unwrap_or(&existing.name);
-    let command = payload.command.as_deref().unwrap_or(&existing.command);
-    let args = payload
-        .args
+    let description = match &payload.description {
+        Some(v) => Some(v.as_str()),
+        None => existing.description.as_deref(),
+    };
+    let source_url = match &payload.source_url {
+        Some(v) => Some(v.as_str()),
+        None => existing.source_url.as_deref(),
+    };
+    let config = payload
+        .config
         .as_ref()
         .map(|v| v.to_string())
-        .unwrap_or_else(|| existing.args.clone());
-    let env = payload
-        .env
-        .as_ref()
-        .map(|v| v.to_string())
-        .unwrap_or_else(|| existing.env.clone());
+        .unwrap_or_else(|| existing.config.clone());
     let enabled = payload.enabled.unwrap_or(existing.enabled);
+    let now = chrono::Utc::now().to_rfc3339();
 
     sqlx::query(
         "UPDATE mcp_servers
-         SET name = ?, command = ?, args = ?, env = ?, enabled = ?
+         SET name = ?, description = ?, source_url = ?, config = ?, enabled = ?, updated_at = ?
          WHERE id = ? AND user_id = ?",
     )
     .bind(name)
-    .bind(command)
-    .bind(&args)
-    .bind(&env)
+    .bind(description)
+    .bind(source_url)
+    .bind(&config)
     .bind(enabled)
+    .bind(&now)
     .bind(&id)
     .bind(&user_id)
     .execute(&state.pool)
@@ -157,11 +164,14 @@ pub async fn update_mcp(
         id: existing.id,
         user_id: existing.user_id,
         name: name.to_string(),
-        command: command.to_string(),
-        args,
-        env,
+        description: description.map(|s| s.to_string()),
+        source_url: source_url.map(|s| s.to_string()),
+        server_type: existing.server_type,
+        config,
+        status: existing.status,
         enabled,
         created_at: existing.created_at,
+        updated_at: now,
     };
 
     Ok((StatusCode::OK, Json(json!({ "data": updated }))))
