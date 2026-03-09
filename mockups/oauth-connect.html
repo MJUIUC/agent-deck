@@ -1,0 +1,1139 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>agent-deck — OAuth Connect Flow</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <script>
+            tailwind.config = {</script>
+                theme: {
+                    extend: {
+                        colors: {
+                            "bg-primary": "#1C1C1A",
+                            "bg-secondary": "#242422",
+                            "bg-tertiary": "#2E2E2B",
+                            "bg-elevated": "#383835",
+                            "accent-primary": "#7C8C5A",
+                            "accent-secondary": "#9AAD6E",
+                            "accent-muted": "#4A5235",
+                            "text-primary": "#F0EDE4",
+                            "text-secondary": "#B8B4A8",
+                            "text-tertiary": "#7A7870",
+                            "text-inverse": "#1C1C1A",
+                            success: "#6A9E5B",
+                            warning: "#C4A24A",
+                            error: "#C45A5A",
+                            info: "#5A82C4",
+                            "border-subtle": "#333330",
+                            "border-default": "#444440",
+                            "border-strong": "#666660",
+                        },
+                    },
+                },
+            };
+        </script>
+        <style>
+            *,
+            *::before,
+            *::after {
+                box-sizing: border-box;
+                margin: 0;
+                padding: 0;
+            }
+
+            :root {
+                --bg-primary: #1c1c1a;
+                --bg-secondary: #242422;
+                --bg-tertiary: #2e2e2b;
+                --bg-elevated: #383835;
+                --accent-primary: #7c8c5a;
+                --accent-secondary: #9aad6e;
+                --accent-muted: #4a5235;
+                --text-primary: #f0ede4;
+                --text-secondary: #b8b4a8;
+                --text-tertiary: #7a7870;
+                --text-inverse: #1c1c1a;
+                --success: #6a9e5b;
+                --warning: #c4a24a;
+                --error: #c45a5a;
+                --info: #5a82c4;
+                --border-subtle: #333330;
+                --border-default: #444440;
+                --border-strong: #666660;
+            }
+
+            html,
+            body {
+                min-height: 100%;
+                background: var(--bg-primary);
+                color: var(--text-primary);
+                font-family:
+                    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                    sans-serif;
+                font-size: 14px;
+                line-height: 1.5;
+            }
+
+            /* ── Layout ── */
+            .page-wrap {
+                max-width: 960px;
+                margin: 0 auto;
+                padding: 40px 24px 60px;
+            }
+
+            .page-header {
+                margin-bottom: 36px;
+            }
+
+            .page-back {
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                font-size: 12px;
+                color: var(--text-tertiary);
+                cursor: pointer;
+                background: none;
+                border: none;
+                padding: 0;
+                margin-bottom: 20px;
+                transition: color 0.15s;
+            }
+            .page-back:hover {
+                color: var(--text-secondary);
+            }
+
+            .page-title {
+                font-size: 22px;
+                font-weight: 700;
+                color: var(--text-primary);
+                letter-spacing: -0.02em;
+                margin-bottom: 6px;
+            }
+
+            .page-subtitle {
+                font-size: 13px;
+                color: var(--text-tertiary);
+            }
+
+            /* ── Step navigation ── */
+            .step-nav {
+                display: flex;
+                gap: 0;
+                margin-bottom: 32px;
+                border-bottom: 1px solid var(--border-subtle);
+                padding-bottom: 0;
+            }
+
+            .step-btn {
+                background: none;
+                border: none;
+                padding: 10px 20px;
+                font-size: 13px;
+                font-weight: 500;
+                color: var(--text-tertiary);
+                cursor: pointer;
+                border-bottom: 2px solid transparent;
+                margin-bottom: -1px;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                transition:
+                    color 0.15s,
+                    border-color 0.15s;
+                white-space: nowrap;
+            }
+
+            .step-btn:hover {
+                color: var(--text-secondary);
+            }
+
+            .step-btn.active {
+                color: var(--accent-secondary);
+                border-bottom-color: var(--accent-primary);
+            }
+
+            .step-num {
+                width: 20px;
+                height: 20px;
+                border-radius: 50%;
+                background: var(--bg-elevated);
+                color: var(--text-tertiary);
+                font-size: 10px;
+                font-weight: 700;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                flex-shrink: 0;
+                transition:
+                    background 0.15s,
+                    color 0.15s;
+            }
+
+            .step-btn.active .step-num {
+                background: var(--accent-muted);
+                color: var(--accent-secondary);
+            }
+
+            .step-btn.done .step-num {
+                background: rgba(106, 158, 91, 0.2);
+                color: var(--success);
+            }
+
+            .step-btn.done {
+                color: var(--text-secondary);
+            }
+
+            /* ── Step panels ── */
+            .step-panel {
+                display: none;
+            }
+
+            .step-panel.visible {
+                display: block;
+            }
+
+            /* ── Section label ── */
+            .section-label {
+                font-size: 11px;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: 0.08em;
+                color: var(--text-tertiary);
+                margin-bottom: 16px;
+            }
+
+            /* ── Card container ── */
+            .card {
+                background: var(--bg-secondary);
+                border: 1px solid var(--border-subtle);
+                border-radius: 12px;
+                padding: 28px;
+                max-width: 560px;
+            }
+
+            .card-title {
+                font-size: 17px;
+                font-weight: 700;
+                color: var(--text-primary);
+                margin-bottom: 6px;
+            }
+
+            .card-subtitle {
+                font-size: 13px;
+                color: var(--text-tertiary);
+                margin-bottom: 24px;
+                line-height: 1.5;
+            }
+
+            /* ── Buttons ── */
+            .btn {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                gap: 6px;
+                padding: 9px 18px;
+                border-radius: 8px;
+                font-size: 13px;
+                font-weight: 600;
+                cursor: pointer;
+                border: none;
+                transition:
+                    background 0.15s,
+                    color 0.15s,
+                    opacity 0.15s;
+                white-space: nowrap;
+            }
+
+            .btn-primary {
+                background: var(--accent-primary);
+                color: var(--text-inverse);
+            }
+
+            .btn-primary:hover {
+                background: var(--accent-secondary);
+            }
+
+            .btn-ghost {
+                background: var(--bg-elevated);
+                color: var(--text-secondary);
+                border: 1px solid var(--border-default);
+            }
+
+            .btn-ghost:hover {
+                color: var(--text-primary);
+                background: var(--bg-tertiary);
+            }
+
+            .btn-google {
+                background: #4285f4;
+                color: #fff;
+            }
+
+            .btn-google:hover {
+                background: #3272da;
+            }
+
+            .btn-github {
+                background: #24292e;
+                color: #fff;
+                border: 1px solid #444;
+            }
+
+            .btn-github:hover {
+                background: #1a1f23;
+            }
+
+            .btn-sm {
+                padding: 6px 12px;
+                font-size: 12px;
+            }
+
+            .btn-lg {
+                padding: 11px 24px;
+                font-size: 14px;
+            }
+
+            /* ── Provider cards ── */
+            .provider-cards {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 12px;
+                margin-bottom: 8px;
+            }
+
+            .provider-card {
+                background: var(--bg-tertiary);
+                border: 2px solid var(--border-default);
+                border-radius: 10px;
+                padding: 20px 16px;
+                cursor: pointer;
+                display: flex;
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 10px;
+                transition:
+                    border-color 0.15s,
+                    background 0.15s,
+                    transform 0.1s;
+            }
+
+            .provider-card:hover {
+                border-color: var(--accent-primary);
+                background: var(--bg-elevated);
+            }
+
+            .provider-card.selected {
+                border-color: var(--accent-primary);
+                background: var(--accent-muted);
+            }
+
+            .provider-card:active {
+                transform: scale(0.98);
+            }
+
+            .provider-logo {
+                width: 42px;
+                height: 42px;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 15px;
+                font-weight: 700;
+            }
+
+            .provider-logo-google {
+                background: #4285f4;
+                color: #fff;
+            }
+
+            .provider-logo-github {
+                background: #24292e;
+                color: #fff;
+            }
+
+            .provider-name {
+                font-size: 14px;
+                font-weight: 600;
+                color: var(--text-primary);
+            }
+
+            .provider-desc {
+                font-size: 12px;
+                color: var(--text-tertiary);
+                line-height: 1.4;
+            }
+
+            /* ── Scope list ── */
+            .scope-list {
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+                margin-bottom: 22px;
+            }
+
+            .scope-item {
+                display: flex;
+                align-items: flex-start;
+                gap: 12px;
+                padding: 12px 14px;
+                background: var(--bg-tertiary);
+                border: 1px solid var(--border-subtle);
+                border-radius: 8px;
+                cursor: pointer;
+                transition:
+                    border-color 0.15s,
+                    background 0.15s;
+                user-select: none;
+            }
+
+            .scope-item:hover {
+                border-color: var(--border-default);
+            }
+
+            .scope-item.checked {
+                border-color: var(--accent-primary);
+                background: rgba(74, 82, 53, 0.25);
+            }
+
+            .scope-checkbox {
+                width: 18px;
+                height: 18px;
+                border-radius: 4px;
+                border: 2px solid var(--border-default);
+                background: var(--bg-elevated);
+                flex-shrink: 0;
+                margin-top: 1px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 11px;
+                color: var(--accent-secondary);
+                transition:
+                    border-color 0.15s,
+                    background 0.15s;
+            }
+
+            .scope-item.checked .scope-checkbox {
+                border-color: var(--accent-primary);
+                background: var(--accent-muted);
+            }
+
+            .scope-name {
+                font-size: 13px;
+                font-weight: 600;
+                color: var(--text-primary);
+                margin-bottom: 2px;
+            }
+
+            .scope-desc {
+                font-size: 12px;
+                color: var(--text-tertiary);
+                line-height: 1.4;
+            }
+
+            /* ── Redirect loading ── */
+            .redirect-wrap {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                padding: 48px 24px;
+                text-align: center;
+            }
+
+            .spinner {
+                width: 48px;
+                height: 48px;
+                border: 3px solid var(--border-default);
+                border-top-color: var(--accent-primary);
+                border-radius: 50%;
+                animation: spin 0.9s linear infinite;
+                margin-bottom: 20px;
+            }
+
+            @keyframes spin {
+                to {
+                    transform: rotate(360deg);
+                }
+            }
+
+            .redirect-provider-logo {
+                width: 52px;
+                height: 52px;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 20px;
+                font-weight: 700;
+                margin-bottom: 16px;
+            }
+
+            .redirect-title {
+                font-size: 16px;
+                font-weight: 600;
+                color: var(--text-primary);
+                margin-bottom: 8px;
+            }
+
+            .redirect-desc {
+                font-size: 13px;
+                color: var(--text-tertiary);
+                max-width: 320px;
+                line-height: 1.55;
+            }
+
+            .redirect-dots span {
+                display: inline-block;
+                width: 6px;
+                height: 6px;
+                border-radius: 50%;
+                background: var(--accent-primary);
+                margin: 0 2px;
+                animation: bounce 1.2s ease-in-out infinite;
+            }
+
+            .redirect-dots span:nth-child(2) {
+                animation-delay: 0.2s;
+            }
+
+            .redirect-dots span:nth-child(3) {
+                animation-delay: 0.4s;
+            }
+
+            @keyframes bounce {
+                0%,
+                80%,
+                100% {
+                    transform: scale(0.6);
+                    opacity: 0.4;
+                }
+                40% {
+                    transform: scale(1);
+                    opacity: 1;
+                }
+            }
+
+            /* ── Success ── */
+            .success-wrap {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                padding: 40px 24px;
+                text-align: center;
+            }
+
+            .success-icon {
+                width: 64px;
+                height: 64px;
+                border-radius: 50%;
+                background: rgba(106, 158, 91, 0.15);
+                border: 2px solid var(--success);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 28px;
+                margin-bottom: 20px;
+            }
+
+            .success-title {
+                font-size: 18px;
+                font-weight: 700;
+                color: var(--text-primary);
+                margin-bottom: 8px;
+            }
+
+            .success-account {
+                font-size: 13px;
+                color: var(--text-secondary);
+                margin-bottom: 6px;
+            }
+
+            .success-scopes {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 5px;
+                justify-content: center;
+                margin-bottom: 24px;
+                margin-top: 12px;
+            }
+
+            .success-scope-pill {
+                font-size: 11px;
+                font-weight: 500;
+                padding: 3px 9px;
+                border-radius: 4px;
+                background: rgba(74, 82, 53, 0.35);
+                color: var(--accent-secondary);
+                border: 1px solid var(--accent-muted);
+            }
+
+            /* ── Provider badge ── */
+            .provider-badge {
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                padding: 8px 14px;
+                background: var(--bg-tertiary);
+                border: 1px solid var(--border-subtle);
+                border-radius: 8px;
+                margin-bottom: 22px;
+            }
+
+            .provider-badge-logo {
+                width: 26px;
+                height: 26px;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 11px;
+                font-weight: 700;
+            }
+
+            .provider-badge-name {
+                font-size: 13px;
+                font-weight: 600;
+                color: var(--text-primary);
+            }
+
+            /* ── Step actions ── */
+            .step-actions {
+                display: flex;
+                gap: 10px;
+                align-items: center;
+                flex-wrap: wrap;
+            }
+
+            /* ── Demo notice ── */
+            .demo-notice {
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                font-size: 11px;
+                color: var(--text-tertiary);
+                background: var(--bg-tertiary);
+                border: 1px solid var(--border-subtle);
+                border-radius: 6px;
+                padding: 5px 10px;
+                margin-top: 32px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="page-wrap">
+            <!-- Header -->
+            <div class="page-header">
+                <button class="page-back">← Settings / Accounts</button>
+                <div class="page-title">Connect an Account</div>
+                <div class="page-subtitle">
+                    Authorize agent-deck to access external services on your
+                    behalf
+                </div>
+            </div>
+
+            <!-- Step navigation -->
+            <div class="step-nav">
+                <button
+                    class="step-btn active"
+                    data-step="1"
+                    onclick="goToStep(1)"
+                    id="stepBtn1"
+                >
+                    <span class="step-num" id="stepNum1">1</span>
+                    Choose Provider
+                </button>
+                <button
+                    class="step-btn"
+                    data-step="2"
+                    onclick="goToStep(2)"
+                    id="stepBtn2"
+                >
+                    <span class="step-num" id="stepNum2">2</span>
+                    Select Permissions
+                </button>
+                <button
+                    class="step-btn"
+                    data-step="3"
+                    id="stepBtn3"
+                    style="pointer-events: none"
+                >
+                    <span class="step-num" id="stepNum3">3</span>
+                    Redirecting
+                </button>
+                <button
+                    class="step-btn"
+                    data-step="4"
+                    id="stepBtn4"
+                    style="pointer-events: none"
+                >
+                    <span class="step-num" id="stepNum4">4</span>
+                    Connected
+                </button>
+            </div>
+
+            <!-- ══════ Step 1 — Provider Picker ══════ -->
+            <div class="step-panel visible" id="step-1">
+                <div class="card">
+                    <div class="card-title">Choose a provider</div>
+                    <div class="card-subtitle">
+                        Select the service you'd like to connect. You'll be
+                        taken through the provider's standard authorization flow.
+                    </div>
+
+                    <div class="provider-cards" id="providerCards">
+                        <div
+                            class="provider-card"
+                            id="providerGoogle"
+                            onclick="selectProvider('google')"
+                        >
+                            <div class="provider-logo provider-logo-google">
+                                G
+                            </div>
+                            <div>
+                                <div class="provider-name">Google</div>
+                                <div class="provider-desc">
+                                    Gmail, Calendar, Drive, and more via OAuth
+                                    2.0.
+                                </div>
+                            </div>
+                        </div>
+                        <div
+                            class="provider-card"
+                            id="providerGitHub"
+                            onclick="selectProvider('github')"
+                        >
+                            <div class="provider-logo provider-logo-github">
+                                GH
+                            </div>
+                            <div>
+                                <div class="provider-name">GitHub</div>
+                                <div class="provider-desc">
+                                    Repositories, issues, pull requests, and
+                                    gists.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div
+                        style="
+                            margin-top: 16px;
+                            padding-top: 16px;
+                            border-top: 1px solid var(--border-subtle);
+                            font-size: 12px;
+                            color: var(--text-tertiary);
+                        "
+                    >
+                        More providers coming soon: Notion, Slack, Linear
+                    </div>
+                </div>
+            </div>
+
+            <!-- ══════ Step 2 — Scope Selection ══════ -->
+            <div class="step-panel" id="step-2">
+                <div class="card">
+                    <div class="card-title" id="step2Title">
+                        Google — Select Permissions
+                    </div>
+                    <div class="card-subtitle">
+                        Choose what agent-deck can access on your behalf. You
+                        can disconnect or update these at any time from Settings
+                        → Accounts.
+                    </div>
+
+                    <!-- Selected provider badge -->
+                    <div class="provider-badge" id="selectedProviderBadge">
+                        <div
+                            class="provider-badge-logo provider-logo-google"
+                            id="badgeLogo"
+                        >
+                            G
+                        </div>
+                        <span class="provider-badge-name" id="badgeName"
+                            >Google</span
+                        >
+                        <button
+                            class="btn btn-ghost btn-sm"
+                            onclick="goToStep(1)"
+                            style="font-size: 11px; padding: 3px 8px"
+                        >
+                            Change
+                        </button>
+                    </div>
+
+                    <div class="scope-list" id="scopeList">
+                        <!-- populated by JS -->
+                    </div>
+
+                    <div class="step-actions">
+                        <button
+                            class="btn btn-primary btn-lg"
+                            id="connectBtn"
+                            onclick="startRedirect()"
+                        >
+                            Connect with Google
+                        </button>
+                        <button class="btn btn-ghost" onclick="goToStep(1)">
+                            ← Back
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ══════ Step 3 — Redirect In Progress ══════ -->
+            <div class="step-panel" id="step-3">
+                <div class="card">
+                    <div class="redirect-wrap">
+                        <div
+                            class="redirect-provider-logo provider-logo-google"
+                            id="redirectLogo"
+                        >
+                            G
+                        </div>
+                        <div class="spinner"></div>
+                        <div class="redirect-title" id="redirectTitle">
+                            Redirecting to Google…
+                        </div>
+                        <div class="redirect-desc" id="redirectDesc">
+                            You're being taken to Google to authorize access.
+                            Complete the sign-in there and you'll be returned
+                            here automatically.
+                        </div>
+                        <div
+                            class="redirect-dots"
+                            style="margin-top: 18px"
+                        >
+                            <span></span><span></span><span></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Simulate redirect return for demo -->
+                <div
+                    style="
+                        margin-top: 16px;
+                        text-align: center;
+                        font-size: 12px;
+                        color: var(--text-tertiary);
+                    "
+                >
+                    <em>Demo:</em>
+                    <button
+                        class="btn btn-ghost btn-sm"
+                        onclick="simulateSuccess()"
+                        style="margin-left: 8px; font-size: 12px"
+                    >
+                        Simulate success →
+                    </button>
+                </div>
+            </div>
+
+            <!-- ══════ Step 4 — Success ══════ -->
+            <div class="step-panel" id="step-4">
+                <div class="card">
+                    <div class="success-wrap">
+                        <div class="success-icon">✓</div>
+                        <div class="success-title" id="successTitle">
+                            Google account connected
+                        </div>
+                        <div class="success-account" id="successAccount">
+                            Signed in as marcus@gmail.com
+                        </div>
+                        <div class="success-scopes" id="successScopes">
+                            <!-- populated by JS -->
+                        </div>
+                        <div
+                            style="
+                                font-size: 12px;
+                                color: var(--text-tertiary);
+                                margin-bottom: 28px;
+                                max-width: 320px;
+                                line-height: 1.5;
+                                text-align: center;
+                            "
+                        >
+                            This account is now available for use in MCP
+                            integrations and routines. You can manage it from
+                            Settings → Accounts.
+                        </div>
+                        <div class="step-actions">
+                            <button
+                                class="btn btn-primary btn-lg"
+                                onclick="goToSettings()"
+                            >
+                                Done
+                            </button>
+                            <button
+                                class="btn btn-ghost"
+                                onclick="goToStep(1)"
+                            >
+                                Connect another
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Demo notice -->
+            <div class="demo-notice">
+                ℹ This is a static mockup. Step navigation is interactive — use
+                the tabs above or the buttons within each step to move through
+                the flow.
+            </div>
+        </div>
+
+        <script>
+            // ── State ──────────────────────────────────────────────────────────────
+            let selectedProvider = "google";
+
+            const scopeData = {
+                google: {
+                    title: "Google — Select Permissions",
+                    connectLabel: "Connect with Google",
+                    badgeLabel: "Google",
+                    badgeBg: "#4285f4",
+                    badgeText: "#fff",
+                    badgeInitial: "G",
+                    redirectTitle: "Redirecting to Google…",
+                    redirectDesc:
+                        "You're being taken to Google to authorize access. Complete the sign-in there and you'll be returned here automatically.",
+                    successTitle: "Google account connected",
+                    successAccount: "Signed in as marcus@gmail.com",
+                    successAccountLabel: "marcus@gmail.com",
+                    scopes: [
+                        {
+                            name: "Gmail read",
+                            desc: "Read emails and attachments in your Gmail inbox.",
+                            default: true,
+                        },
+                        {
+                            name: "Gmail send",
+                            desc: "Send emails from your Gmail account on your behalf.",
+                            default: true,
+                        },
+                        {
+                            name: "Calendar read",
+                            desc: "View events and schedules in Google Calendar.",
+                            default: false,
+                        },
+                        {
+                            name: "Calendar write",
+                            desc: "Create, update, and delete calendar events.",
+                            default: false,
+                        },
+                        {
+                            name: "Drive read",
+                            desc: "Read files and documents stored in Google Drive.",
+                            default: false,
+                        },
+                        {
+                            name: "Drive write",
+                            desc: "Create and modify files in Google Drive.",
+                            default: false,
+                        },
+                    ],
+                },
+                github: {
+                    title: "GitHub — Select Permissions",
+                    connectLabel: "Connect with GitHub",
+                    badgeLabel: "GitHub",
+                    badgeBg: "#24292e",
+                    badgeText: "#fff",
+                    badgeInitial: "GH",
+                    redirectTitle: "Redirecting to GitHub…",
+                    redirectDesc:
+                        "You're being taken to GitHub to authorize access. Complete the sign-in there and you'll be returned here automatically.",
+                    successTitle: "GitHub account connected",
+                    successAccount: "Signed in as @MJUIUC",
+                    successAccountLabel: "@MJUIUC",
+                    scopes: [
+                        {
+                            name: "repo read",
+                            desc: "Read access to public and private repositories.",
+                            default: true,
+                        },
+                        {
+                            name: "issues write",
+                            desc: "Create and comment on issues in your repositories.",
+                            default: true,
+                        },
+                        {
+                            name: "pull requests",
+                            desc: "Read and create pull requests.",
+                            default: false,
+                        },
+                        {
+                            name: "gists",
+                            desc: "Create and manage gists.",
+                            default: false,
+                        },
+                        {
+                            name: "notifications",
+                            desc: "Access your GitHub notification feed.",
+                            default: false,
+                        },
+                    ],
+                },
+            };
+
+            // ── Navigation ────────────────────────────────────────────────────────
+            function goToStep(n) {
+                document.querySelectorAll(".step-panel").forEach((p) => {
+                    p.classList.remove("visible");
+                });
+                document.getElementById("step-" + n).classList.add("visible");
+
+                document.querySelectorAll(".step-btn").forEach((btn) => {
+                    const s = parseInt(btn.dataset.step);
+                    btn.classList.remove("active", "done");
+                    if (s === n) btn.classList.add("active");
+                    else if (s < n) btn.classList.add("done");
+                });
+
+                // Update step number indicators for done steps
+                for (let i = 1; i <= 4; i++) {
+                    const numEl = document.getElementById("stepNum" + i);
+                    if (i < n) {
+                        numEl.textContent = "✓";
+                    } else {
+                        numEl.textContent = String(i);
+                    }
+                }
+            }
+
+            // ── Provider selection ────────────────────────────────────────────────
+            function selectProvider(provider) {
+                selectedProvider = provider;
+
+                document
+                    .querySelectorAll(".provider-card")
+                    .forEach((c) => c.classList.remove("selected"));
+                document
+                    .getElementById(
+                        "provider" +
+                            provider.charAt(0).toUpperCase() +
+                            provider.slice(1),
+                    )
+                    .classList.add("selected");
+
+                setTimeout(() => buildScopeStep(provider), 200);
+                setTimeout(() => goToStep(2), 320);
+            }
+
+            function buildScopeStep(provider) {
+                const data = scopeData[provider];
+
+                document.getElementById("step2Title").textContent = data.title;
+                document.getElementById("connectBtn").textContent =
+                    data.connectLabel;
+                document.getElementById("badgeName").textContent =
+                    data.badgeLabel;
+
+                const badgeLogo = document.getElementById("badgeLogo");
+                badgeLogo.textContent = data.badgeInitial;
+                badgeLogo.style.background = data.badgeBg;
+                badgeLogo.style.color = data.badgeText;
+                // Remove previous provider class
+                badgeLogo.className =
+                    "provider-badge-logo " +
+                    (provider === "google"
+                        ? "provider-logo-google"
+                        : "provider-logo-github");
+
+                const list = document.getElementById("scopeList");
+                list.innerHTML = "";
+                data.scopes.forEach((scope) => {
+                    const item = document.createElement("div");
+                    item.className =
+                        "scope-item" + (scope.default ? " checked" : "");
+                    item.innerHTML = `
+                        <div class="scope-checkbox">${scope.default ? "✓" : ""}</div>
+                        <div>
+                            <div class="scope-name">${scope.name}</div>
+                            <div class="scope-desc">${scope.desc}</div>
+                        </div>
+                    `;
+                    item.addEventListener("click", () => {
+                        item.classList.toggle("checked");
+                        item.querySelector(".scope-checkbox").textContent =
+                            item.classList.contains("checked") ? "✓" : "";
+                    });
+                    list.appendChild(item);
+                });
+            }
+
+            // ── Redirect ──────────────────────────────────────────────────────────
+            function startRedirect() {
+                const data = scopeData[selectedProvider];
+
+                const logo = document.getElementById("redirectLogo");
+                logo.textContent = data.badgeInitial;
+                logo.style.background = data.badgeBg;
+                logo.style.color = data.badgeText;
+
+                document.getElementById("redirectTitle").textContent =
+                    data.redirectTitle;
+                document.getElementById("redirectDesc").textContent =
+                    data.redirectDesc;
+
+                goToStep(3);
+            }
+
+            // ── Simulate success ──────────────────────────────────────────────────
+            function simulateSuccess() {
+                const data = scopeData[selectedProvider];
+
+                document.getElementById("successTitle").textContent =
+                    data.successTitle;
+                document.getElementById("successAccount").textContent =
+                    data.successAccount;
+
+                // Populate success scope pills from checked scopes
+                const checked = document.querySelectorAll(
+                    "#scopeList .scope-item.checked .scope-name",
+                );
+                const pills = document.getElementById("successScopes");
+                pills.innerHTML = "";
+                checked.forEach((el) => {
+                    const pill = document.createElement("span");
+                    pill.className = "success-scope-pill";
+                    pill.textContent = el.textContent;
+                    pills.appendChild(pill);
+                });
+
+                // If no scopes were checked (came straight from step 3 demo),
+                // show default ones
+                if (pills.children.length === 0) {
+                    const defaults = data.scopes
+                        .filter((s) => s.default)
+                        .map((s) => s.name);
+                    defaults.forEach((name) => {
+                        const pill = document.createElement("span");
+                        pill.className = "success-scope-pill";
+                        pill.textContent = name;
+                        pills.appendChild(pill);
+                    });
+                }
+
+                goToStep(4);
+            }
+
+            // ── Done / navigate away (demo no-op) ─────────────────────────────────
+            function goToSettings() {
+                // In production: navigate to /settings/accounts
+                // For demo, cycle back to step 1
+                document
+                    .querySelectorAll(".provider-card")
+                    .forEach((c) => c.classList.remove("selected"));
+                goToStep(1);
+            }
+
+            // ── Initialize ────────────────────────────────────────────────────────
+            buildScopeStep("google");
+        </script>
+    </body>
+</html>

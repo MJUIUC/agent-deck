@@ -3,7 +3,7 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>agent-deck — Settings: Other</title>
+        <title>agent-deck — Settings: MCP & Accounts</title>
         <script src="https://cdn.tailwindcss.com"></script>
         <script>
             tailwind.config = {
@@ -28,9 +28,6 @@
                             "border-subtle": "#333330",
                             "border-default": "#444440",
                             "border-strong": "#666660",
-                            "bubble-user": "#4A5235",
-                            "bubble-agent": "#2E2E2B",
-                            "bubble-routine": "#2A3545",
                         },
                     },
                 },
@@ -98,75 +95,67 @@
                 display: flex;
                 align-items: center;
                 gap: 8px;
-                padding: 0 16px 20px;
+                padding: 0 16px 16px;
                 border-bottom: 1px solid var(--border-subtle);
-                margin-bottom: 12px;
+                margin-bottom: 8px;
             }
             .sidebar-brand .emoji {
-                font-size: 18px;
+                font-size: 20px;
             }
             .sidebar-brand .name {
                 font-size: 14px;
                 font-weight: 700;
-                color: var(--text-primary);
                 letter-spacing: -0.01em;
             }
             .back-link {
-                display: flex;
-                align-items: center;
-                gap: 7px;
-                padding: 7px 16px;
-                margin: 0 8px 12px;
-                border-radius: 6px;
-                font-size: 13px;
-                color: var(--text-secondary);
-                cursor: pointer;
                 background: none;
                 border: none;
-                transition:
-                    background 0.15s,
-                    color 0.15s;
+                color: var(--text-tertiary);
+                font-size: 12px;
+                cursor: pointer;
+                padding: 6px 16px;
+                text-align: left;
+                width: 100%;
+                transition: color 0.15s;
+                margin-bottom: 4px;
             }
             .back-link:hover {
-                background: var(--bg-tertiary);
-                color: var(--text-primary);
+                color: var(--text-secondary);
             }
             .nav-section-label {
-                padding: 4px 16px 6px;
                 font-size: 10px;
-                font-weight: 600;
-                color: var(--text-tertiary);
+                font-weight: 700;
                 text-transform: uppercase;
                 letter-spacing: 0.08em;
+                color: var(--text-tertiary);
+                padding: 8px 16px 4px;
             }
             .nav-item {
+                background: none;
+                border: none;
+                color: var(--text-secondary);
+                font-size: 13px;
+                cursor: pointer;
+                padding: 7px 16px;
+                text-align: left;
+                width: 100%;
                 display: flex;
                 align-items: center;
                 gap: 8px;
-                padding: 8px 16px;
-                margin: 0 8px 2px;
-                border-radius: 7px;
-                font-size: 13px;
-                color: var(--text-secondary);
-                cursor: pointer;
-                background: none;
-                border: none;
-                width: calc(100% - 16px);
-                text-align: left;
                 transition:
-                    background 0.15s,
-                    color 0.15s;
+                    background 0.1s,
+                    color 0.1s;
             }
             .nav-item:hover {
-                background: var(--bg-tertiary);
                 color: var(--text-primary);
+                background: var(--bg-tertiary);
             }
             .nav-item.active {
+                color: var(--accent-secondary);
                 background: var(--accent-muted);
-                color: var(--text-primary);
             }
             .nav-item .icon {
-                font-size: 15px;
+                font-size: 14px;
             }
 
             /* ── Main ── */
@@ -175,23 +164,24 @@
                 display: flex;
                 flex-direction: column;
                 overflow: hidden;
+                background: var(--bg-primary);
             }
-
             .page-header {
                 padding: 20px 28px 16px;
                 border-bottom: 1px solid var(--border-subtle);
                 display: flex;
-                align-items: center;
+                align-items: flex-start;
                 justify-content: space-between;
-                background: var(--bg-primary);
+                flex-shrink: 0;
             }
             .page-title {
                 font-size: 18px;
                 font-weight: 700;
+                color: var(--text-primary);
                 letter-spacing: -0.01em;
             }
             .page-subtitle {
-                font-size: 13px;
+                font-size: 12px;
                 color: var(--text-tertiary);
                 margin-top: 2px;
             }
@@ -199,31 +189,30 @@
             /* ── Tabs ── */
             .tab-bar {
                 display: flex;
+                gap: 2px;
+                padding: 10px 28px 0;
                 border-bottom: 1px solid var(--border-subtle);
-                padding: 0 28px;
-                background: var(--bg-primary);
-                gap: 0;
+                flex-shrink: 0;
             }
             .tab {
-                padding: 10px 16px;
-                font-size: 13px;
-                font-weight: 500;
-                color: var(--text-tertiary);
-                cursor: pointer;
-                border: none;
                 background: none;
-                border-bottom: 2px solid transparent;
-                margin-bottom: -1px;
+                border: none;
+                color: var(--text-tertiary);
+                font-size: 13px;
+                cursor: pointer;
+                padding: 7px 14px;
+                border-radius: 6px 6px 0 0;
                 transition:
                     color 0.15s,
-                    border-color 0.15s;
+                    background 0.15s;
+                white-space: nowrap;
             }
             .tab:hover {
                 color: var(--text-secondary);
             }
             .tab.active {
-                color: var(--text-primary);
-                border-bottom-color: var(--accent-primary);
+                color: var(--accent-secondary);
+                background: var(--bg-tertiary);
             }
 
             .page-body {
@@ -232,11 +221,11 @@
                 padding: 24px 28px;
             }
             .page-body::-webkit-scrollbar {
-                width: 4px;
+                width: 5px;
             }
             .page-body::-webkit-scrollbar-thumb {
                 background: var(--border-default);
-                border-radius: 2px;
+                border-radius: 3px;
             }
 
             .tab-panel {
@@ -246,9 +235,13 @@
                 display: block;
             }
 
-            /* ── Common ── */
+            /* ── Buttons ── */
             .btn {
-                padding: 8px 16px;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                gap: 6px;
+                padding: 7px 14px;
                 border-radius: 7px;
                 font-size: 13px;
                 font-weight: 500;
@@ -256,10 +249,9 @@
                 border: none;
                 transition:
                     background 0.15s,
-                    color 0.15s;
-                display: inline-flex;
-                align-items: center;
-                gap: 6px;
+                    color 0.15s,
+                    opacity 0.15s;
+                white-space: nowrap;
             }
             .btn-primary {
                 background: var(--accent-primary);
@@ -269,47 +261,48 @@
                 background: var(--accent-secondary);
             }
             .btn-ghost {
-                background: transparent;
+                background: var(--bg-elevated);
                 color: var(--text-secondary);
                 border: 1px solid var(--border-default);
             }
             .btn-ghost:hover {
-                background: var(--bg-elevated);
                 color: var(--text-primary);
+                background: var(--bg-tertiary);
             }
             .btn-danger {
-                background: transparent;
+                background: rgba(196, 90, 90, 0.15);
                 color: var(--error);
-                border: 1px solid rgba(196, 90, 90, 0.35);
+                border: 1px solid rgba(196, 90, 90, 0.25);
             }
             .btn-danger:hover {
-                background: rgba(196, 90, 90, 0.1);
-            }
-            .btn-sm {
-                padding: 5px 11px;
-                font-size: 12px;
+                background: rgba(196, 90, 90, 0.25);
             }
             .btn-warning {
-                background: transparent;
+                background: rgba(196, 162, 74, 0.15);
                 color: var(--warning);
-                border: 1px solid rgba(196, 162, 74, 0.35);
+                border: 1px solid rgba(196, 162, 74, 0.25);
             }
             .btn-warning:hover {
-                background: rgba(196, 162, 74, 0.1);
+                background: rgba(196, 162, 74, 0.25);
+            }
+            .btn-sm {
+                padding: 4px 10px;
+                font-size: 12px;
             }
 
+            /* ── Section card ── */
             .section-card {
                 background: var(--bg-secondary);
                 border: 1px solid var(--border-subtle);
-                border-radius: 12px;
-                padding: 20px 22px;
-                margin-bottom: 20px;
+                border-radius: 10px;
+                padding: 20px;
+                margin-bottom: 16px;
             }
             .section-header {
                 display: flex;
-                align-items: center;
+                align-items: flex-start;
                 justify-content: space-between;
-                margin-bottom: 14px;
+                margin-bottom: 16px;
             }
             .section-title {
                 font-size: 14px;
@@ -322,36 +315,33 @@
                 margin-top: 2px;
             }
 
+            /* ── Fields ── */
             .field {
-                display: flex;
-                flex-direction: column;
-                gap: 6px;
                 margin-bottom: 14px;
             }
             .field:last-child {
                 margin-bottom: 0;
             }
             .field-label {
-                font-size: 11px;
-                font-weight: 600;
+                display: block;
+                font-size: 12px;
+                font-weight: 500;
                 color: var(--text-secondary);
-                text-transform: uppercase;
-                letter-spacing: 0.06em;
+                margin-bottom: 5px;
             }
             .field-input,
             .field-select,
             .field-textarea {
+                width: 100%;
                 background: var(--bg-tertiary);
                 border: 1px solid var(--border-default);
                 border-radius: 7px;
-                padding: 9px 12px;
                 color: var(--text-primary);
                 font-size: 13px;
-                font-family: inherit;
+                padding: 8px 10px;
                 outline: none;
-                transition:
-                    border-color 0.15s,
-                    box-shadow 0.15s;
+                transition: border-color 0.15s;
+                font-family: inherit;
             }
             .field-input::placeholder,
             .field-textarea::placeholder {
@@ -361,71 +351,26 @@
             .field-select:focus,
             .field-textarea:focus {
                 border-color: var(--accent-primary);
-                box-shadow: 0 0 0 3px rgba(124, 140, 90, 0.15);
             }
             .field-textarea {
                 resize: vertical;
-                min-height: 110px;
-                line-height: 1.55;
+                min-height: 80px;
             }
             .field-hint {
                 font-size: 11px;
                 color: var(--text-tertiary);
+                margin-top: 4px;
             }
-
-            /* ── Skills List ── */
-            .skill-list {
-                display: flex;
-                flex-direction: column;
-                gap: 10px;
-            }
-            .skill-item {
-                background: var(--bg-tertiary);
-                border: 1px solid var(--border-subtle);
-                border-radius: 9px;
-                padding: 13px 15px;
-                display: flex;
-                align-items: flex-start;
-                gap: 12px;
-                transition: border-color 0.15s;
-            }
-            .skill-item:hover {
-                border-color: var(--border-default);
-            }
-            .skill-item-content {
-                flex: 1;
-                min-width: 0;
-            }
-            .skill-name {
-                font-size: 13px;
-                font-weight: 600;
-                color: var(--text-primary);
-                margin-bottom: 2px;
-            }
-            .skill-slug {
-                display: inline-block;
-                font-size: 10px;
+            .field-hint code {
                 font-family: "SF Mono", "Fira Code", monospace;
+                font-size: 11px;
                 background: var(--bg-elevated);
                 color: var(--accent-secondary);
-                padding: 1px 6px;
+                padding: 1px 4px;
                 border-radius: 3px;
-                margin-bottom: 4px;
-            }
-            .skill-desc {
-                font-size: 12px;
-                color: var(--text-tertiary);
-                line-height: 1.45;
-            }
-            .skill-actions {
-                display: flex;
-                align-items: center;
-                gap: 6px;
-                flex-shrink: 0;
-                margin-top: 2px;
             }
 
-            /* ── MCP Servers ── */
+            /* ── MCP list ── */
             .mcp-list {
                 display: flex;
                 flex-direction: column;
@@ -435,7 +380,7 @@
                 background: var(--bg-tertiary);
                 border: 1px solid var(--border-subtle);
                 border-radius: 9px;
-                padding: 13px 15px;
+                padding: 14px 16px;
                 transition: border-color 0.15s;
             }
             .mcp-item:hover {
@@ -443,145 +388,400 @@
             }
             .mcp-item-top {
                 display: flex;
-                align-items: center;
+                align-items: flex-start;
                 gap: 10px;
                 margin-bottom: 6px;
             }
+            .mcp-item-meta {
+                display: flex;
+                flex-direction: column;
+                gap: 5px;
+                flex: 1;
+                min-width: 0;
+            }
             .mcp-name {
+                font-size: 14px;
+                font-weight: 600;
+                color: var(--text-primary);
+            }
+            .mcp-badges {
+                display: flex;
+                gap: 5px;
+                flex-wrap: wrap;
+            }
+            .mcp-badge {
+                font-size: 10px;
+                font-weight: 600;
+                padding: 2px 7px;
+                border-radius: 4px;
+                letter-spacing: 0.02em;
+            }
+            .mcp-badge-connected {
+                background: rgba(106, 158, 91, 0.15);
+                color: var(--success);
+            }
+            .mcp-badge-connecting {
+                background: rgba(196, 162, 74, 0.15);
+                color: var(--warning);
+            }
+            .mcp-badge-error {
+                background: rgba(196, 90, 90, 0.12);
+                color: var(--error);
+            }
+            .mcp-badge-local {
+                background: var(--bg-elevated);
+                color: var(--text-tertiary);
+            }
+            .mcp-badge-remote {
+                background: rgba(90, 130, 196, 0.12);
+                color: var(--info);
+            }
+            .mcp-desc {
+                font-size: 12px;
+                color: var(--text-secondary);
+                line-height: 1.4;
+                margin-bottom: 6px;
+            }
+            .mcp-url {
+                display: flex;
+                align-items: center;
+                gap: 4px;
+                margin-bottom: 8px;
+            }
+            .mcp-url span {
+                font-size: 11px;
+                color: var(--text-tertiary);
+            }
+            .mcp-url a {
+                font-size: 11px;
+                color: var(--text-tertiary);
+                text-decoration: none;
+            }
+            .mcp-url a:hover {
+                color: var(--accent-secondary);
+            }
+            .mcp-item-actions {
+                display: flex;
+                gap: 6px;
+                margin-top: 10px;
+                padding-top: 10px;
+                border-top: 1px solid var(--border-subtle);
+                align-items: center;
+            }
+
+            /* ── Tools disclosure ── */
+            .mcp-tools-disclosure {
+                margin-top: 4px;
+            }
+            .mcp-tools-toggle {
+                background: none;
+                border: none;
+                color: var(--text-tertiary);
+                font-size: 11px;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                gap: 4px;
+                padding: 2px 0;
+                transition: color 0.15s;
+            }
+            .mcp-tools-toggle:hover {
+                color: var(--text-secondary);
+            }
+            .mcp-tools-arrow {
+                font-size: 9px;
+                transition: transform 0.15s;
+                display: inline-block;
+            }
+            .mcp-tools-arrow.open {
+                transform: rotate(90deg);
+            }
+            .mcp-tools-list {
+                margin-top: 8px;
+                display: none;
+                flex-direction: column;
+                gap: 6px;
+                padding-left: 14px;
+                border-left: 2px solid var(--border-subtle);
+            }
+            .mcp-tool-item {
+                display: flex;
+                flex-direction: column;
+                gap: 1px;
+            }
+            .mcp-tool-name {
+                font-size: 11px;
+                font-family: "SF Mono", "Fira Code", monospace;
+                color: var(--accent-secondary);
+            }
+            .mcp-tool-desc {
+                font-size: 11px;
+                color: var(--text-tertiary);
+                line-height: 1.3;
+            }
+
+            /* ── Add / Edit MCP form ── */
+            .add-form-card {
+                background: var(--bg-secondary);
+                border: 1px solid var(--border-default);
+                border-radius: 10px;
+                padding: 20px;
+                margin-bottom: 16px;
+                display: none;
+            }
+            .add-form-card.open {
+                display: block;
+            }
+            .type-radio-group {
+                display: flex;
+                gap: 8px;
+            }
+            .type-radio-btn {
+                flex: 1;
+                background: var(--bg-tertiary);
+                border: 1px solid var(--border-default);
+                border-radius: 7px;
+                color: var(--text-secondary);
+                font-size: 12px;
+                font-weight: 500;
+                padding: 7px 10px;
+                cursor: pointer;
+                text-align: center;
+                transition:
+                    border-color 0.15s,
+                    color 0.15s,
+                    background 0.15s;
+            }
+            .type-radio-btn.active {
+                border-color: var(--accent-primary);
+                color: var(--accent-secondary);
+                background: var(--accent-muted);
+            }
+            .config-block {
+                background: var(--bg-tertiary);
+                border: 1px solid var(--border-subtle);
+                border-radius: 7px;
+                padding: 14px;
+                margin-top: 4px;
+            }
+            .kv-list {
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+                margin-bottom: 8px;
+            }
+            .kv-row {
+                display: grid;
+                grid-template-columns: 1fr 1fr auto;
+                gap: 6px;
+                align-items: center;
+            }
+            .kv-remove-btn {
+                background: none;
+                border: none;
+                color: var(--text-tertiary);
+                cursor: pointer;
+                font-size: 12px;
+                padding: 4px 6px;
+                border-radius: 4px;
+                transition: color 0.15s;
+            }
+            .kv-remove-btn:hover {
+                color: var(--error);
+            }
+            .form-actions {
+                display: flex;
+                gap: 8px;
+                justify-content: flex-end;
+                margin-top: 16px;
+                padding-top: 14px;
+                border-top: 1px solid var(--border-subtle);
+            }
+
+            /* ── Accounts ── */
+            .accounts-list {
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+            }
+            .account-item {
+                background: var(--bg-tertiary);
+                border: 1px solid var(--border-subtle);
+                border-radius: 9px;
+                padding: 14px 16px;
+                display: flex;
+                align-items: center;
+                gap: 14px;
+                transition: border-color 0.15s;
+            }
+            .account-item:hover {
+                border-color: var(--border-default);
+            }
+            .account-logo {
+                width: 36px;
+                height: 36px;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 13px;
+                font-weight: 700;
+                flex-shrink: 0;
+            }
+            .account-logo-google {
+                background: #4285f4;
+                color: #fff;
+            }
+            .account-logo-github {
+                background: #24292e;
+                color: #fff;
+            }
+            .account-info {
+                flex: 1;
+                min-width: 0;
+            }
+            .account-name {
                 font-size: 13px;
                 font-weight: 600;
                 color: var(--text-primary);
-                flex: 1;
             }
-            .mcp-command {
+            .account-handle {
                 font-size: 12px;
-                font-family: "SF Mono", "Fira Code", monospace;
-                color: var(--text-secondary);
-                background: var(--bg-elevated);
-                padding: 3px 8px;
-                border-radius: 5px;
-                white-space: nowrap;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                max-width: 360px;
+                color: var(--text-tertiary);
+                margin-top: 2px;
             }
-            .mcp-actions {
+            .account-scopes {
                 display: flex;
-                gap: 6px;
-                margin-top: 8px;
-                justify-content: flex-end;
+                flex-wrap: wrap;
+                gap: 4px;
+                margin-top: 6px;
+            }
+            .scope-pill {
+                font-size: 10px;
+                font-weight: 500;
+                padding: 2px 7px;
+                border-radius: 4px;
+                background: var(--bg-elevated);
+                color: var(--text-secondary);
+                border: 1px solid var(--border-subtle);
+            }
+            .accounts-empty {
+                background: var(--bg-tertiary);
+                border: 1px dashed var(--border-default);
+                border-radius: 10px;
+                padding: 40px 20px;
+                text-align: center;
+            }
+            .accounts-empty .empty-icon {
+                font-size: 28px;
+                margin-bottom: 10px;
+            }
+            .accounts-empty .empty-title {
+                font-size: 14px;
+                font-weight: 600;
+                color: var(--text-secondary);
+                margin-bottom: 6px;
+            }
+            .accounts-empty .empty-desc {
+                font-size: 12px;
+                color: var(--text-tertiary);
             }
 
-            /* ── Mobile Pairing ── */
+            /* ── QR / pairing ── */
             .qr-placeholder {
                 width: 180px;
                 height: 180px;
                 background: var(--bg-tertiary);
                 border: 2px dashed var(--border-default);
-                border-radius: 12px;
+                border-radius: 10px;
                 margin: 0 auto 20px;
                 display: flex;
                 flex-direction: column;
                 align-items: center;
                 justify-content: center;
-                gap: 10px;
+                gap: 6px;
                 color: var(--text-tertiary);
-                font-size: 13px;
+                font-size: 12px;
                 text-align: center;
             }
             .qr-icon {
-                font-size: 48px;
-            }
-
-            .qr-instructions {
-                background: var(--bg-tertiary);
-                border-radius: 9px;
-                padding: 14px 16px;
-                margin-bottom: 16px;
+                font-size: 40px;
             }
             .qr-step {
                 display: flex;
+                align-items: flex-start;
                 gap: 10px;
                 margin-bottom: 10px;
-                align-items: flex-start;
             }
             .qr-step:last-child {
                 margin-bottom: 0;
             }
             .step-num {
-                width: 20px;
-                height: 20px;
+                width: 22px;
+                height: 22px;
                 border-radius: 50%;
-                background: var(--bg-elevated);
-                color: var(--text-tertiary);
-                font-size: 10px;
+                background: var(--accent-muted);
+                color: var(--accent-secondary);
+                font-size: 11px;
                 font-weight: 700;
                 display: flex;
                 align-items: center;
                 justify-content: center;
                 flex-shrink: 0;
-                margin-top: 1px;
             }
             .step-text {
                 font-size: 12px;
                 color: var(--text-secondary);
-                line-height: 1.5;
+                padding-top: 2px;
             }
             .step-text code {
-                font-family: "SF Mono", "Fira Code", monospace;
-                font-size: 11px;
                 background: var(--bg-elevated);
                 color: var(--accent-secondary);
-                padding: 1px 5px;
+                font-size: 11px;
+                padding: 1px 4px;
                 border-radius: 3px;
+                font-family: "SF Mono", "Fira Code", monospace;
             }
 
-            /* ── General / Auth token ── */
+            /* ── General ── */
             .token-display {
                 display: flex;
                 gap: 8px;
                 align-items: center;
-                margin-top: 4px;
             }
             .token-field {
                 flex: 1;
                 background: var(--bg-tertiary);
                 border: 1px solid var(--border-default);
                 border-radius: 7px;
-                padding: 9px 12px;
-                color: var(--accent-secondary);
+                color: var(--text-primary);
                 font-size: 12px;
                 font-family: "SF Mono", "Fira Code", monospace;
-                letter-spacing: 0.04em;
+                padding: 8px 10px;
                 outline: none;
-                cursor: default;
             }
-
             .token-actions {
                 display: flex;
-                gap: 6px;
+                gap: 4px;
                 flex-shrink: 0;
             }
-
             .warning-box {
-                background: rgba(196, 162, 74, 0.08);
+                background: rgba(196, 162, 74, 0.1);
                 border: 1px solid rgba(196, 162, 74, 0.3);
-                border-radius: 8px;
+                border-radius: 7px;
                 padding: 12px 14px;
-                margin-top: 12px;
                 font-size: 12px;
-                color: var(--warning);
-                line-height: 1.55;
+                color: var(--text-secondary);
+                margin-top: 12px;
             }
             .warning-box strong {
-                font-weight: 600;
+                color: var(--warning);
             }
-
-            /* ── Toggle ── */
             .toggle-row {
                 display: flex;
                 align-items: center;
                 justify-content: space-between;
+                gap: 16px;
                 padding: 10px 0;
             }
             .toggle-row:not(:last-child) {
@@ -589,7 +789,6 @@
             }
             .toggle-row-info {
                 flex: 1;
-                padding-right: 16px;
             }
             .toggle-row-title {
                 font-size: 13px;
@@ -597,126 +796,194 @@
                 color: var(--text-primary);
             }
             .toggle-row-desc {
-                font-size: 11px;
+                font-size: 12px;
                 color: var(--text-tertiary);
                 margin-top: 2px;
             }
-
             .toggle {
                 width: 36px;
-                height: 21px;
-                border-radius: 10.5px;
-                background: var(--bg-elevated);
-                border: 1px solid var(--border-default);
-                cursor: pointer;
+                height: 20px;
+                border-radius: 10px;
+                background: var(--border-default);
                 position: relative;
-                transition: background 0.2s;
+                cursor: pointer;
                 flex-shrink: 0;
+                transition: background 0.2s;
             }
             .toggle::after {
                 content: "";
                 position: absolute;
-                top: 2px;
-                left: 2px;
-                width: 15px;
-                height: 15px;
+                width: 14px;
+                height: 14px;
                 border-radius: 50%;
                 background: var(--text-tertiary);
+                top: 3px;
+                left: 3px;
                 transition:
                     transform 0.2s,
                     background 0.2s;
             }
             .toggle.on {
-                background: var(--accent-muted);
-                border-color: var(--accent-primary);
-            }
-            .toggle.on::after {
-                transform: translateX(15px);
                 background: var(--accent-primary);
             }
-
-            /* Danger zone */
-            .danger-zone {
-                border: 1px solid rgba(196, 90, 90, 0.3);
-                border-radius: 12px;
-                padding: 20px 22px;
-                margin-bottom: 20px;
-            }
-            .danger-zone-title {
-                font-size: 13px;
-                font-weight: 600;
-                color: var(--error);
-                margin-bottom: 12px;
+            .toggle.on::after {
+                transform: translateX(16px);
+                background: var(--text-inverse);
             }
 
-            /* Form inline */
-            .form-card {
-                background: var(--bg-elevated);
-                border: 1px solid var(--border-default);
-                border-radius: 10px;
-                padding: 16px 18px;
-                margin-top: 10px;
-            }
-            .form-actions {
-                display: flex;
-                justify-content: flex-end;
-                gap: 8px;
-                margin-top: 14px;
-            }
-
-            /* Confirm modal */
+            /* ── Modal ── */
             .modal-overlay {
                 position: fixed;
                 inset: 0;
-                background: rgba(0, 0, 0, 0.65);
+                background: rgba(0, 0, 0, 0.6);
+                z-index: 100;
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                z-index: 100;
                 opacity: 0;
                 pointer-events: none;
-                transition: opacity 0.2s;
+                transition: opacity 0.18s;
             }
             .modal-overlay.open {
                 opacity: 1;
-                pointer-events: auto;
+                pointer-events: all;
             }
             .modal {
                 background: var(--bg-secondary);
                 border: 1px solid var(--border-default);
-                border-radius: 13px;
-                width: 380px;
-                max-width: calc(100vw - 40px);
+                border-radius: 12px;
                 padding: 24px;
-                transform: scale(0.97);
-                transition: transform 0.2s;
+                width: 480px;
+                max-width: calc(100vw - 40px);
+                max-height: 80vh;
+                overflow-y: auto;
+                transform: translateY(10px);
+                transition: transform 0.18s;
             }
             .modal-overlay.open .modal {
-                transform: scale(1);
+                transform: translateY(0);
             }
             .modal-title {
                 font-size: 16px;
                 font-weight: 700;
-                margin-bottom: 8px;
                 color: var(--text-primary);
+                margin-bottom: 18px;
             }
             .modal-body {
-                font-size: 13px;
-                color: var(--text-secondary);
-                line-height: 1.6;
                 margin-bottom: 20px;
-            }
-            .modal-body ul {
-                padding-left: 18px;
-                margin-top: 8px;
-            }
-            .modal-body li {
-                margin-bottom: 4px;
             }
             .modal-actions {
                 display: flex;
-                justify-content: flex-end;
                 gap: 8px;
+                justify-content: flex-end;
+            }
+
+            /* ── Provider picker ── */
+            .provider-cards {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 10px;
+            }
+            .provider-card {
+                background: var(--bg-tertiary);
+                border: 1px solid var(--border-default);
+                border-radius: 9px;
+                padding: 16px;
+                cursor: pointer;
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+                transition:
+                    border-color 0.15s,
+                    background 0.15s;
+            }
+            .provider-card:hover {
+                border-color: var(--accent-primary);
+                background: var(--bg-elevated);
+            }
+            .provider-logo {
+                width: 38px;
+                height: 38px;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 14px;
+                font-weight: 700;
+            }
+            .provider-logo-google {
+                background: #4285f4;
+                color: #fff;
+            }
+            .provider-logo-github {
+                background: #24292e;
+                color: #fff;
+            }
+            .provider-name {
+                font-size: 13px;
+                font-weight: 600;
+                color: var(--text-primary);
+            }
+            .provider-desc {
+                font-size: 11px;
+                color: var(--text-tertiary);
+                line-height: 1.4;
+            }
+
+            /* ── Scope selection ── */
+            .scope-list {
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+            }
+            .scope-item {
+                display: flex;
+                align-items: flex-start;
+                gap: 10px;
+                padding: 10px 12px;
+                background: var(--bg-tertiary);
+                border: 1px solid var(--border-subtle);
+                border-radius: 7px;
+                cursor: pointer;
+                transition: border-color 0.15s;
+            }
+            .scope-item:hover {
+                border-color: var(--border-default);
+            }
+            .scope-item.selected {
+                border-color: var(--accent-primary);
+                background: rgba(74, 82, 53, 0.3);
+            }
+            .scope-checkbox {
+                width: 16px;
+                height: 16px;
+                border-radius: 4px;
+                border: 2px solid var(--border-default);
+                background: var(--bg-elevated);
+                flex-shrink: 0;
+                margin-top: 1px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 10px;
+                color: var(--accent-secondary);
+                transition:
+                    border-color 0.15s,
+                    background 0.15s;
+            }
+            .scope-item.selected .scope-checkbox {
+                border-color: var(--accent-primary);
+                background: var(--accent-muted);
+            }
+            .scope-name {
+                font-size: 13px;
+                font-weight: 500;
+                color: var(--text-primary);
+            }
+            .scope-desc {
+                font-size: 11px;
+                color: var(--text-tertiary);
+                margin-top: 2px;
             }
         </style>
     </head>
@@ -737,10 +1004,10 @@
                     <span class="icon">🎭</span> Personas
                 </button>
                 <button class="nav-item active">
-                    <span class="icon">🛠</span> Skills
+                    <span class="icon">🔧</span> MCP Servers
                 </button>
                 <button class="nav-item">
-                    <span class="icon">🔧</span> MCP Servers
+                    <span class="icon">🔑</span> Accounts
                 </button>
                 <button class="nav-item">
                     <span class="icon">📱</span> Mobile Pairing
@@ -754,23 +1021,24 @@
             <div class="main">
                 <div class="page-header">
                     <div>
-                        <div class="page-title" id="pageTitle">Skills</div>
+                        <div class="page-title" id="pageTitle">MCP Servers</div>
                         <div class="page-subtitle" id="pageSubtitle">
-                            Define reusable capabilities your agents can invoke
+                            Manage external tool servers using the Model Context
+                            Protocol
                         </div>
                     </div>
                     <button class="btn btn-primary" id="addBtn">
-                        ＋ Add Skill
+                        ＋ Add Server
                     </button>
                 </div>
 
-                <!-- Tabs (act as nav between settings sections) -->
+                <!-- Tabs -->
                 <div class="tab-bar">
-                    <button class="tab active" data-section="skills">
-                        🛠 Skills
-                    </button>
-                    <button class="tab" data-section="mcp">
+                    <button class="tab active" data-section="mcp">
                         🔧 MCP Servers
+                    </button>
+                    <button class="tab" data-section="accounts">
+                        🔑 Accounts
                     </button>
                     <button class="tab" data-section="pairing">
                         📱 Mobile Pairing
@@ -781,195 +1049,20 @@
                 </div>
 
                 <div class="page-body">
-                    <!-- ══════ SKILLS ══════ -->
-                    <div class="tab-panel visible" id="section-skills">
-                        <!-- Add/Edit skill form -->
-                        <div
-                            class="section-card"
-                            id="skillForm"
-                            style="
-                                display: none;
-                                border-color: var(--border-default);
-                            "
-                        >
-                            <div class="section-header">
-                                <div class="section-title" id="skillFormTitle">
-                                    New Skill
-                                </div>
-                                <button
-                                    class="btn btn-ghost btn-sm"
-                                    id="closeSkillForm"
-                                >
-                                    ✕ Cancel
-                                </button>
-                            </div>
-
-                            <div class="field">
-                                <label class="field-label">Slug (name)</label>
-                                <input
-                                    type="text"
-                                    class="field-input"
-                                    id="skillSlug"
-                                    placeholder="e.g. weekly-report"
-                                />
-                                <span class="field-hint"
-                                    >Lowercase letters, numbers, and hyphens
-                                    only. Used as the tool call name.</span
-                                >
-                            </div>
-                            <div class="field">
-                                <label class="field-label">Display Name</label>
-                                <input
-                                    type="text"
-                                    class="field-input"
-                                    id="skillDisplayName"
-                                    placeholder="e.g. Weekly Report"
-                                />
-                            </div>
-                            <div class="field">
-                                <label class="field-label">Description</label>
-                                <input
-                                    type="text"
-                                    class="field-input"
-                                    id="skillDesc"
-                                    placeholder="What it does and when the model should invoke it…"
-                                />
-                                <span class="field-hint"
-                                    >This is shown to the model as the tool
-                                    description. Be specific about when to use
-                                    it.</span
-                                >
-                            </div>
-                            <div class="field">
-                                <label class="field-label">Instructions</label>
-                                <textarea
-                                    class="field-textarea"
-                                    id="skillInstructions"
-                                    style="
-                                        min-height: 160px;
-                                        font-family:
-                                            &quot;SF Mono&quot;,
-                                            &quot;Fira Code&quot;, monospace;
-                                        font-size: 12px;
-                                    "
-                                    placeholder="# Weekly Report Skill&#10;&#10;## Instructions&#10;When invoked, generate a formatted weekly status report..."
-                                ></textarea>
-                                <span class="field-hint"
-                                    >Full skill instructions in Markdown. This
-                                    content is injected as a tool result when
-                                    the skill is invoked.</span
-                                >
-                            </div>
-
-                            <div class="form-actions">
-                                <button
-                                    class="btn btn-ghost"
-                                    onclick="document.getElementById('skillForm').style.display='none'"
-                                >
-                                    Cancel
-                                </button>
-                                <button class="btn btn-primary">
-                                    Save Skill
-                                </button>
-                            </div>
-                        </div>
-
-                        <div class="skill-list">
-                            <div class="skill-item">
-                                <div class="skill-item-content">
-                                    <div>
-                                        <span class="skill-slug"
-                                            >weekly-report</span
-                                        >
-                                    </div>
-                                    <div class="skill-name">Weekly Report</div>
-                                    <div class="skill-desc">
-                                        Generates a formatted weekly status
-                                        report. Use when the user asks for a
-                                        weekly summary or status report.
-                                    </div>
-                                </div>
-                                <div class="skill-actions">
-                                    <button
-                                        class="btn btn-ghost btn-sm"
-                                        onclick="editSkill('weekly-report')"
-                                    >
-                                        Edit
-                                    </button>
-                                    <button class="btn btn-danger btn-sm">
-                                        Delete
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div class="skill-item">
-                                <div class="skill-item-content">
-                                    <div>
-                                        <span class="skill-slug"
-                                            >code-review</span
-                                        >
-                                    </div>
-                                    <div class="skill-name">Code Review</div>
-                                    <div class="skill-desc">
-                                        Performs a structured code review with
-                                        sections for correctness, style,
-                                        performance, and security concerns.
-                                    </div>
-                                </div>
-                                <div class="skill-actions">
-                                    <button class="btn btn-ghost btn-sm">
-                                        Edit
-                                    </button>
-                                    <button class="btn btn-danger btn-sm">
-                                        Delete
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div class="skill-item">
-                                <div class="skill-item-content">
-                                    <div>
-                                        <span class="skill-slug"
-                                            >meeting-notes</span
-                                        >
-                                    </div>
-                                    <div class="skill-name">Meeting Notes</div>
-                                    <div class="skill-desc">
-                                        Formats and structures meeting notes
-                                        with action items, decisions, and
-                                        follow-ups clearly separated.
-                                    </div>
-                                </div>
-                                <div class="skill-actions">
-                                    <button class="btn btn-ghost btn-sm">
-                                        Edit
-                                    </button>
-                                    <button class="btn btn-danger btn-sm">
-                                        Delete
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
                     <!-- ══════ MCP SERVERS ══════ -->
-                    <div class="tab-panel" id="section-mcp">
-                        <!-- Add form -->
-                        <div
-                            class="section-card"
-                            id="mcpForm"
-                            style="
-                                display: none;
-                                border-color: var(--border-default);
-                            "
-                        >
-                            <div class="section-header">
+                    <div class="tab-panel visible" id="section-mcp">
+                        <!-- Add / Edit form (hidden by default) -->
+                        <div class="add-form-card" id="mcpForm">
+                            <div
+                                class="section-header"
+                                style="margin-bottom: 14px"
+                            >
                                 <div class="section-title" id="mcpFormTitle">
                                     Add MCP Server
                                 </div>
                                 <button
                                     class="btn btn-ghost btn-sm"
-                                    onclick="document.getElementById('mcpForm').style.display='none'"
+                                    id="closeMcpForm"
                                 >
                                     ✕ Cancel
                                 </button>
@@ -982,7 +1075,7 @@
                                     gap: 14px;
                                 "
                             >
-                                <div class="field">
+                                <div class="field" style="grid-column: 1/-1">
                                     <label class="field-label">Name</label>
                                     <input
                                         type="text"
@@ -990,75 +1083,209 @@
                                         placeholder="e.g. Filesystem Server"
                                     />
                                 </div>
-                                <div class="field">
-                                    <label class="field-label">Command</label>
-                                    <input
-                                        type="text"
-                                        class="field-input"
-                                        style="
-                                            font-family: monospace;
-                                            font-size: 12px;
-                                        "
-                                        placeholder="npx @modelcontextprotocol/server-filesystem"
-                                    />
-                                </div>
                                 <div class="field" style="grid-column: 1/-1">
                                     <label class="field-label"
-                                        >Args (JSON array)</label
+                                        >Description</label
                                     >
                                     <input
                                         type="text"
                                         class="field-input"
-                                        style="
-                                            font-family: monospace;
-                                            font-size: 12px;
-                                        "
-                                        placeholder='["/Users/marcus/Documents"]'
+                                        placeholder="Brief description of what this server provides…"
+                                    />
+                                </div>
+                                <div class="field" style="grid-column: 1/-1">
+                                    <label class="field-label"
+                                        >Source URL</label
+                                    >
+                                    <input
+                                        type="text"
+                                        class="field-input"
+                                        placeholder="https://github.com/modelcontextprotocol/servers"
                                     />
                                     <span class="field-hint"
-                                        >JSON array of command-line arguments,
-                                        e.g.
-                                        <code
+                                        >Link to the server's documentation or
+                                        repository (optional).</span
+                                    >
+                                </div>
+                                <div class="field" style="grid-column: 1/-1">
+                                    <label class="field-label">Type</label>
+                                    <div class="type-radio-group">
+                                        <button
+                                            class="type-radio-btn active"
+                                            data-type="local"
+                                            onclick="switchType('local')"
+                                        >
+                                            🖥 Local (stdio)
+                                        </button>
+                                        <button
+                                            class="type-radio-btn"
+                                            data-type="remote"
+                                            onclick="switchType('remote')"
+                                        >
+                                            🌐 Remote (HTTP/SSE)
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Local config -->
+                            <div id="localConfig">
+                                <div
+                                    class="field-label"
+                                    style="margin-bottom: 8px; margin-top: 12px"
+                                >
+                                    Local Configuration
+                                </div>
+                                <div class="config-block">
+                                    <div class="field">
+                                        <label class="field-label"
+                                            >Executable</label
+                                        >
+                                        <input
+                                            type="text"
+                                            class="field-input"
                                             style="
                                                 font-family: monospace;
-                                                font-size: 11px;
-                                                background: var(--bg-elevated);
-                                                padding: 1px 4px;
-                                                border-radius: 3px;
+                                                font-size: 12px;
                                             "
-                                            >["--port", "8080"]</code
-                                        ></span
-                                    >
+                                            placeholder="npx @modelcontextprotocol/server-filesystem"
+                                        />
+                                    </div>
+                                    <div class="field">
+                                        <label class="field-label"
+                                            >Args (one per line)</label
+                                        >
+                                        <textarea
+                                            class="field-textarea"
+                                            style="
+                                                font-family: monospace;
+                                                font-size: 12px;
+                                                min-height: 60px;
+                                            "
+                                            placeholder="/Users/marcus/Documents&#10;/Users/marcus/Projects"
+                                        ></textarea>
+                                    </div>
+                                    <div class="field" style="margin-bottom: 0">
+                                        <label class="field-label"
+                                            >Environment Variables</label
+                                        >
+                                        <div class="kv-list" id="envVarList">
+                                            <div class="kv-row">
+                                                <input
+                                                    type="text"
+                                                    class="field-input"
+                                                    placeholder="KEY"
+                                                    style="
+                                                        font-family: monospace;
+                                                        font-size: 12px;
+                                                    "
+                                                />
+                                                <input
+                                                    type="text"
+                                                    class="field-input"
+                                                    placeholder="value"
+                                                    style="
+                                                        font-family: monospace;
+                                                        font-size: 12px;
+                                                    "
+                                                />
+                                                <button
+                                                    class="kv-remove-btn"
+                                                    onclick="this.closest('.kv-row').remove()"
+                                                    title="Remove"
+                                                >
+                                                    ✕
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <button
+                                            class="btn btn-ghost btn-sm"
+                                            onclick="addEnvRow()"
+                                            style="margin-top: 6px"
+                                        >
+                                            ＋ Add variable
+                                        </button>
+                                    </div>
                                 </div>
-                                <div class="field" style="grid-column: 1/-1">
-                                    <label class="field-label"
-                                        >Environment Variables (JSON
-                                        object)</label
-                                    >
-                                    <input
-                                        type="text"
-                                        class="field-input"
-                                        style="
-                                            font-family: monospace;
-                                            font-size: 12px;
-                                        "
-                                        placeholder='{"API_KEY": "abc123"}'
-                                    />
-                                    <span class="field-hint"
-                                        >Optional environment variables to set
-                                        for the MCP process.</span
-                                    >
+                            </div>
+
+                            <!-- Remote config (hidden by default) -->
+                            <div id="remoteConfig" style="display: none">
+                                <div
+                                    class="field-label"
+                                    style="margin-bottom: 8px; margin-top: 12px"
+                                >
+                                    Remote Configuration
+                                </div>
+                                <div class="config-block">
+                                    <div class="field">
+                                        <label class="field-label">URL</label>
+                                        <input
+                                            type="text"
+                                            class="field-input"
+                                            style="
+                                                font-family: monospace;
+                                                font-size: 12px;
+                                            "
+                                            placeholder="https://api.example.com/mcp"
+                                        />
+                                    </div>
+                                    <div class="field">
+                                        <label class="field-label"
+                                            >Auth Header Name</label
+                                        >
+                                        <input
+                                            type="text"
+                                            class="field-input"
+                                            style="
+                                                font-family: monospace;
+                                                font-size: 12px;
+                                            "
+                                            placeholder="Authorization"
+                                        />
+                                        <span class="field-hint"
+                                            >HTTP header used to send the auth
+                                            token, e.g.
+                                            <code>Authorization</code>.</span
+                                        >
+                                    </div>
+                                    <div class="field" style="margin-bottom: 0">
+                                        <label class="field-label"
+                                            >Credential Key</label
+                                        >
+                                        <select class="field-select">
+                                            <option value="">
+                                                — None / no auth —
+                                            </option>
+                                            <option>
+                                                github-token (GitHub)
+                                            </option>
+                                            <option>
+                                                google-oauth (Google)
+                                            </option>
+                                        </select>
+                                        <span class="field-hint"
+                                            >Select a stored credential to use
+                                            as the auth token.</span
+                                        >
+                                    </div>
                                 </div>
                             </div>
 
                             <div class="form-actions">
-                                <button class="btn btn-ghost">Cancel</button>
+                                <button
+                                    class="btn btn-ghost"
+                                    id="cancelMcpForm"
+                                >
+                                    Cancel
+                                </button>
                                 <button class="btn btn-primary">
                                     Add Server
                                 </button>
                             </div>
                         </div>
 
+                        <!-- List header -->
                         <div
                             style="
                                 display: flex;
@@ -1072,116 +1299,384 @@
                                     font-size: 11px;
                                     color: var(--text-tertiary);
                                 "
-                                >MCP servers run as child processes and are
-                                available to attach to threads.</span
                             >
+                                MCP servers run as child processes or remote
+                                connections and are available to attach to
+                                threads.
+                            </span>
+                        </div>
+
+                        <!-- Server list -->
+                        <div class="mcp-list">
+                            <!-- Filesystem — connected, local -->
+                            <div class="mcp-item">
+                                <div class="mcp-item-top">
+                                    <div class="mcp-item-meta">
+                                        <span class="mcp-name">Filesystem</span>
+                                        <div class="mcp-badges">
+                                            <span
+                                                class="mcp-badge mcp-badge-connected"
+                                                >connected</span
+                                            >
+                                            <span
+                                                class="mcp-badge mcp-badge-local"
+                                                >local</span
+                                            >
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="mcp-desc">
+                                    Read and write files on the local filesystem
+                                    within allowed paths.
+                                </div>
+                                <div class="mcp-url">
+                                    <span
+                                        >github.com/modelcontextprotocol/servers</span
+                                    >
+                                    <a
+                                        href="#"
+                                        onclick="return false;"
+                                        title="Open source URL"
+                                        >↗</a
+                                    >
+                                </div>
+                                <div class="mcp-tools-disclosure">
+                                    <button
+                                        class="mcp-tools-toggle"
+                                        onclick="toggleTools(this)"
+                                    >
+                                        <span class="mcp-tools-arrow">▶</span>
+                                        <span>Tools</span>
+                                        <span
+                                            style="
+                                                color: var(--text-tertiary);
+                                                font-size: 10px;
+                                                margin-left: 4px;
+                                            "
+                                            >(5)</span
+                                        >
+                                    </button>
+                                    <div class="mcp-tools-list">
+                                        <div class="mcp-tool-item">
+                                            <span class="mcp-tool-name"
+                                                >read_file</span
+                                            ><span class="mcp-tool-desc"
+                                                >Read the contents of a file at
+                                                a given path.</span
+                                            >
+                                        </div>
+                                        <div class="mcp-tool-item">
+                                            <span class="mcp-tool-name"
+                                                >write_file</span
+                                            ><span class="mcp-tool-desc"
+                                                >Write or overwrite a file at a
+                                                given path.</span
+                                            >
+                                        </div>
+                                        <div class="mcp-tool-item">
+                                            <span class="mcp-tool-name"
+                                                >list_directory</span
+                                            ><span class="mcp-tool-desc"
+                                                >List files and folders in a
+                                                directory.</span
+                                            >
+                                        </div>
+                                        <div class="mcp-tool-item">
+                                            <span class="mcp-tool-name"
+                                                >create_directory</span
+                                            ><span class="mcp-tool-desc"
+                                                >Create a new directory at a
+                                                given path.</span
+                                            >
+                                        </div>
+                                        <div class="mcp-tool-item">
+                                            <span class="mcp-tool-name"
+                                                >delete_file</span
+                                            ><span class="mcp-tool-desc"
+                                                >Delete a file at a given
+                                                path.</span
+                                            >
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="mcp-item-actions">
+                                    <button
+                                        class="btn btn-ghost btn-sm"
+                                        onclick="openEditMcp('Filesystem')"
+                                    >
+                                        Edit
+                                    </button>
+                                    <button
+                                        class="btn btn-danger btn-sm mcp-delete-btn"
+                                    >
+                                        Delete
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- GitHub — connecting, remote -->
+                            <div class="mcp-item">
+                                <div class="mcp-item-top">
+                                    <div class="mcp-item-meta">
+                                        <span class="mcp-name">GitHub</span>
+                                        <div class="mcp-badges">
+                                            <span
+                                                class="mcp-badge mcp-badge-connecting"
+                                                >connecting</span
+                                            >
+                                            <span
+                                                class="mcp-badge mcp-badge-remote"
+                                                >remote</span
+                                            >
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="mcp-desc">
+                                    Access GitHub repositories, issues, pull
+                                    requests, and code search via the GitHub
+                                    Copilot MCP endpoint.
+                                </div>
+                                <div class="mcp-url">
+                                    <span>api.githubcopilot.com/mcp</span>
+                                    <a
+                                        href="#"
+                                        onclick="return false;"
+                                        title="Open source URL"
+                                        >↗</a
+                                    >
+                                </div>
+                                <div class="mcp-tools-disclosure">
+                                    <button
+                                        class="mcp-tools-toggle"
+                                        onclick="toggleTools(this)"
+                                    >
+                                        <span class="mcp-tools-arrow">▶</span>
+                                        <span>Tools</span>
+                                        <span
+                                            style="
+                                                color: var(--text-tertiary);
+                                                font-size: 10px;
+                                                margin-left: 4px;
+                                            "
+                                            >(3)</span
+                                        >
+                                    </button>
+                                    <div class="mcp-tools-list">
+                                        <div class="mcp-tool-item">
+                                            <span class="mcp-tool-name"
+                                                >search_repositories</span
+                                            ><span class="mcp-tool-desc"
+                                                >Search GitHub repositories by
+                                                query.</span
+                                            >
+                                        </div>
+                                        <div class="mcp-tool-item">
+                                            <span class="mcp-tool-name"
+                                                >get_issue</span
+                                            ><span class="mcp-tool-desc"
+                                                >Fetch a specific issue by repo
+                                                and number.</span
+                                            >
+                                        </div>
+                                        <div class="mcp-tool-item">
+                                            <span class="mcp-tool-name"
+                                                >list_pull_requests</span
+                                            ><span class="mcp-tool-desc"
+                                                >List open pull requests for a
+                                                repository.</span
+                                            >
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="mcp-item-actions">
+                                    <button
+                                        class="btn btn-ghost btn-sm"
+                                        onclick="openEditMcp('GitHub')"
+                                    >
+                                        Edit
+                                    </button>
+                                    <button
+                                        class="btn btn-danger btn-sm mcp-delete-btn"
+                                    >
+                                        Delete
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Brave Search — error, local -->
+                            <div
+                                class="mcp-item"
+                                style="border-color: rgba(196, 90, 90, 0.3)"
+                            >
+                                <div class="mcp-item-top">
+                                    <div class="mcp-item-meta">
+                                        <span class="mcp-name"
+                                            >Brave Search</span
+                                        >
+                                        <div class="mcp-badges">
+                                            <span
+                                                class="mcp-badge mcp-badge-error"
+                                                >error</span
+                                            >
+                                            <span
+                                                class="mcp-badge mcp-badge-local"
+                                                >local</span
+                                            >
+                                        </div>
+                                    </div>
+                                </div>
+                                <div
+                                    class="mcp-desc"
+                                    style="color: var(--error)"
+                                >
+                                    Missing required environment variable:
+                                    BRAVE_API_KEY
+                                </div>
+                                <div class="mcp-tools-disclosure">
+                                    <button
+                                        class="mcp-tools-toggle"
+                                        onclick="toggleTools(this)"
+                                    >
+                                        <span class="mcp-tools-arrow">▶</span>
+                                        <span>Tools</span>
+                                        <span
+                                            style="
+                                                color: var(--text-tertiary);
+                                                font-size: 10px;
+                                                margin-left: 4px;
+                                            "
+                                            >(2)</span
+                                        >
+                                    </button>
+                                    <div class="mcp-tools-list">
+                                        <div class="mcp-tool-item">
+                                            <span class="mcp-tool-name"
+                                                >web_search</span
+                                            ><span class="mcp-tool-desc"
+                                                >Search the web using Brave
+                                                Search API.</span
+                                            >
+                                        </div>
+                                        <div class="mcp-tool-item">
+                                            <span class="mcp-tool-name"
+                                                >news_search</span
+                                            ><span class="mcp-tool-desc"
+                                                >Search recent news
+                                                articles.</span
+                                            >
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="mcp-item-actions">
+                                    <button
+                                        class="btn btn-ghost btn-sm"
+                                        onclick="openEditMcp('Brave Search')"
+                                    >
+                                        Edit
+                                    </button>
+                                    <button
+                                        class="btn btn-danger btn-sm mcp-delete-btn"
+                                    >
+                                        Delete
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ══════ ACCOUNTS ══════ -->
+                    <div class="tab-panel" id="section-accounts">
+                        <div
+                            style="
+                                display: flex;
+                                align-items: flex-start;
+                                justify-content: space-between;
+                                margin-bottom: 20px;
+                            "
+                        >
+                            <div>
+                                <div
+                                    style="
+                                        font-size: 15px;
+                                        font-weight: 600;
+                                        color: var(--text-primary);
+                                    "
+                                >
+                                    Your Accounts
+                                </div>
+                                <div
+                                    style="
+                                        font-size: 12px;
+                                        color: var(--text-tertiary);
+                                        margin-top: 3px;
+                                    "
+                                >
+                                    Connect external accounts to use with MCP
+                                    integrations and routines.
+                                </div>
+                            </div>
                             <button
-                                class="btn btn-primary btn-sm"
-                                onclick="document.getElementById('mcpForm').style.display='block'"
+                                class="btn btn-primary"
+                                id="connectAccountBtn"
                             >
-                                ＋ Add Server
+                                ＋ Connect Account
                             </button>
                         </div>
 
-                        <div class="mcp-list">
-                            <div class="mcp-item">
-                                <div class="mcp-item-top">
-                                    <div class="mcp-name">Filesystem</div>
-                                    <span
-                                        style="
-                                            font-size: 10px;
-                                            font-weight: 600;
-                                            padding: 2px 7px;
-                                            border-radius: 4px;
-                                            background: rgba(
-                                                106,
-                                                158,
-                                                91,
-                                                0.15
-                                            );
-                                            color: var(--success);
-                                        "
-                                        >Running</span
-                                    >
+                        <div class="accounts-list">
+                            <!-- Google -->
+                            <div class="account-item">
+                                <div class="account-logo account-logo-google">
+                                    G
                                 </div>
-                                <div class="mcp-command">
-                                    npx @modelcontextprotocol/server-filesystem
-                                    /Users/marcus/Documents
+                                <div class="account-info">
+                                    <div class="account-name">Google</div>
+                                    <div class="account-handle">
+                                        marcus@gmail.com
+                                    </div>
+                                    <div class="account-scopes">
+                                        <span class="scope-pill"
+                                            >Gmail read</span
+                                        >
+                                        <span class="scope-pill"
+                                            >Gmail send</span
+                                        >
+                                        <span class="scope-pill"
+                                            >Calendar read</span
+                                        >
+                                        <span class="scope-pill"
+                                            >Drive read</span
+                                        >
+                                    </div>
                                 </div>
-                                <div class="mcp-actions">
-                                    <button class="btn btn-ghost btn-sm">
-                                        Edit
-                                    </button>
-                                    <button class="btn btn-danger btn-sm">
-                                        Delete
-                                    </button>
-                                </div>
+                                <button class="btn btn-danger btn-sm">
+                                    Disconnect
+                                </button>
                             </div>
 
-                            <div class="mcp-item">
-                                <div class="mcp-item-top">
-                                    <div class="mcp-name">GitHub</div>
-                                    <span
-                                        style="
-                                            font-size: 10px;
-                                            font-weight: 600;
-                                            padding: 2px 7px;
-                                            border-radius: 4px;
-                                            background: rgba(
-                                                90,
-                                                130,
-                                                196,
-                                                0.15
-                                            );
-                                            color: var(--info);
-                                        "
-                                        >Idle</span
-                                    >
+                            <!-- GitHub -->
+                            <div class="account-item">
+                                <div class="account-logo account-logo-github">
+                                    GH
                                 </div>
-                                <div class="mcp-command">
-                                    npx @modelcontextprotocol/server-github
+                                <div class="account-info">
+                                    <div class="account-name">GitHub</div>
+                                    <div class="account-handle">@MJUIUC</div>
+                                    <div class="account-scopes">
+                                        <span class="scope-pill"
+                                            >repo read</span
+                                        >
+                                        <span class="scope-pill"
+                                            >issues write</span
+                                        >
+                                        <span class="scope-pill"
+                                            >pull requests</span
+                                        >
+                                    </div>
                                 </div>
-                                <div class="mcp-actions">
-                                    <button class="btn btn-ghost btn-sm">
-                                        Edit
-                                    </button>
-                                    <button class="btn btn-danger btn-sm">
-                                        Delete
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div class="mcp-item">
-                                <div class="mcp-item-top">
-                                    <div class="mcp-name">Brave Search</div>
-                                    <span
-                                        style="
-                                            font-size: 10px;
-                                            font-weight: 600;
-                                            padding: 2px 7px;
-                                            border-radius: 4px;
-                                            background: rgba(196, 90, 90, 0.12);
-                                            color: var(--error);
-                                        "
-                                        >Error</span
-                                    >
-                                </div>
-                                <div
-                                    class="mcp-command"
-                                    style="color: var(--error)"
-                                >
-                                    npx
-                                    @modelcontextprotocol/server-brave-search —
-                                    missing API_KEY
-                                </div>
-                                <div class="mcp-actions">
-                                    <button class="btn btn-ghost btn-sm">
-                                        Edit
-                                    </button>
-                                    <button class="btn btn-danger btn-sm">
-                                        Delete
-                                    </button>
-                                </div>
+                                <button class="btn btn-danger btn-sm">
+                                    Disconnect
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -1207,8 +1702,6 @@
                                 valid until it's rotated — re-scan after any
                                 token rotation.
                             </div>
-
-                            <!-- QR placeholder -->
                             <div class="qr-placeholder">
                                 <div class="qr-icon">▦</div>
                                 <span>QR code renders here</span>
@@ -1216,7 +1709,6 @@
                                     >Contains server URL + auth token</span
                                 >
                             </div>
-
                             <div
                                 style="
                                     display: flex;
@@ -1239,7 +1731,6 @@
                                     ⟳ Refresh
                                 </button>
                             </div>
-
                             <div
                                 style="
                                     background: var(--bg-tertiary);
@@ -1306,7 +1797,6 @@
 
                     <!-- ══════ GENERAL ══════ -->
                     <div class="tab-panel" id="section-general">
-                        <!-- Auth Token section -->
                         <div class="section-card">
                             <div class="section-header">
                                 <div>
@@ -1317,7 +1807,6 @@
                                     </div>
                                 </div>
                             </div>
-
                             <div class="field">
                                 <label class="field-label">Current Token</label>
                                 <div class="token-display">
@@ -1339,7 +1828,6 @@
                                         <button
                                             class="btn btn-ghost btn-sm"
                                             id="copyTokenBtn"
-                                            title="Copy token"
                                         >
                                             Copy
                                         </button>
@@ -1352,7 +1840,6 @@
                                     app.</span
                                 >
                             </div>
-
                             <div
                                 class="warning-box"
                                 id="rotateWarning"
@@ -1361,7 +1848,7 @@
                                 <strong>⚠ Warning:</strong> Rotating the token
                                 will immediately invalidate all existing
                                 sessions. You'll need to:
-                                <ul style="margin-top: 6px">
+                                <ul style="margin-top: 6px; padding-left: 18px">
                                     <li>
                                         Re-enter the new token on any remote
                                         browsers accessing via Tailscale
@@ -1391,7 +1878,6 @@
                                     </button>
                                 </div>
                             </div>
-
                             <div style="margin-top: 12px">
                                 <button
                                     class="btn btn-warning"
@@ -1402,7 +1888,6 @@
                             </div>
                         </div>
 
-                        <!-- Preferences -->
                         <div class="section-card">
                             <div class="section-header">
                                 <div class="section-title">Preferences</div>
@@ -1457,7 +1942,6 @@
                             </div>
                         </div>
 
-                        <!-- Server info -->
                         <div class="section-card">
                             <div class="section-header">
                                 <div class="section-title">Server Info</div>
@@ -1513,20 +1997,101 @@
             </div>
         </div>
 
+        <!-- ── Provider Picker Modal ── -->
+        <div class="modal-overlay" id="providerPickerModal">
+            <div class="modal">
+                <div class="modal-title">Connect an Account</div>
+                <div class="modal-body">
+                    <p
+                        style="
+                            font-size: 12px;
+                            color: var(--text-tertiary);
+                            margin-bottom: 16px;
+                        "
+                    >
+                        Choose a provider to connect. You'll be redirected to
+                        authorize access.
+                    </p>
+                    <div class="provider-cards">
+                        <div
+                            class="provider-card"
+                            onclick="openScopeModal('google')"
+                        >
+                            <div class="provider-logo provider-logo-google">
+                                G
+                            </div>
+                            <div class="provider-name">Google</div>
+                            <div class="provider-desc">
+                                Connect Gmail, Calendar, and Drive for agent
+                                integrations.
+                            </div>
+                        </div>
+                        <div
+                            class="provider-card"
+                            onclick="openScopeModal('github')"
+                        >
+                            <div class="provider-logo provider-logo-github">
+                                GH
+                            </div>
+                            <div class="provider-name">GitHub</div>
+                            <div class="provider-desc">
+                                Connect repositories, issues, and pull requests.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn btn-ghost" id="closeProviderPicker">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Scope Selection Modal ── -->
+        <div class="modal-overlay" id="scopeModal">
+            <div class="modal">
+                <div class="modal-title" id="scopeModalTitle">
+                    Google — Select Permissions
+                </div>
+                <div class="modal-body">
+                    <p
+                        style="
+                            font-size: 12px;
+                            color: var(--text-tertiary);
+                            margin-bottom: 16px;
+                        "
+                    >
+                        Choose what agent-deck can access on your behalf. You
+                        can update these later.
+                    </p>
+                    <div class="scope-list" id="scopeList"></div>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn btn-ghost" id="closeScopeModal">
+                        ← Back
+                    </button>
+                    <button class="btn btn-primary" id="connectWithProvider">
+                        Connect with Google
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <script>
-            // ── Tab / section switching ──────────────────────────────────────────────────
+            // ── Tab / section switching ─────────────────────────────────────────────
             const sections = {
-                skills: {
-                    title: "Skills",
-                    subtitle:
-                        "Define reusable capabilities your agents can invoke",
-                    addLabel: "＋ Add Skill",
-                },
                 mcp: {
                     title: "MCP Servers",
                     subtitle:
                         "Manage external tool servers using the Model Context Protocol",
                     addLabel: "＋ Add Server",
+                },
+                accounts: {
+                    title: "Accounts",
+                    subtitle:
+                        "Connect external accounts for use with MCP integrations and routines",
+                    addLabel: "＋ Connect Account",
                 },
                 pairing: {
                     title: "Mobile Pairing",
@@ -1542,7 +2107,6 @@
 
             document.querySelectorAll(".tab").forEach((tab) => {
                 tab.addEventListener("click", () => {
-                    const sec = tab.dataset.section;
                     document
                         .querySelectorAll(".tab")
                         .forEach((t) => t.classList.remove("active"));
@@ -1551,10 +2115,10 @@
                         .forEach((p) => p.classList.remove("visible"));
                     tab.classList.add("active");
                     document
-                        .getElementById("section-" + sec)
+                        .getElementById("section-" + tab.dataset.section)
                         .classList.add("visible");
 
-                    const info = sections[sec];
+                    const info = sections[tab.dataset.section];
                     document.getElementById("pageTitle").textContent =
                         info.title;
                     document.getElementById("pageSubtitle").textContent =
@@ -1563,47 +2127,98 @@
                     if (info.addLabel) {
                         addBtn.style.display = "";
                         addBtn.textContent = info.addLabel;
-                    } else addBtn.style.display = "none";
+                    } else {
+                        addBtn.style.display = "none";
+                    }
                 });
             });
 
-            // ── Add skill ────────────────────────────────────────────────────────────────
+            // ── Add button dispatcher ────────────────────────────────────────────────
             document.getElementById("addBtn").addEventListener("click", () => {
-                const activeSection =
+                const sec =
                     document.querySelector(".tab.active").dataset.section;
-                if (activeSection === "skills") {
-                    document.getElementById("skillFormTitle").textContent =
-                        "New Skill";
-                    document.getElementById("skillForm").style.display =
-                        "block";
+                if (sec === "mcp") {
+                    document.getElementById("mcpFormTitle").textContent =
+                        "Add MCP Server";
+                    document.getElementById("mcpForm").classList.add("open");
                     document
-                        .getElementById("skillForm")
+                        .getElementById("mcpForm")
                         .scrollIntoView({ behavior: "smooth" });
+                } else if (sec === "accounts") {
+                    openProviderPicker();
                 }
             });
+
+            // ── MCP form open / close ────────────────────────────────────────────────
             document
-                .getElementById("closeSkillForm")
+                .getElementById("closeMcpForm")
                 .addEventListener("click", () => {
-                    document.getElementById("skillForm").style.display = "none";
+                    document.getElementById("mcpForm").classList.remove("open");
+                });
+            document
+                .getElementById("cancelMcpForm")
+                .addEventListener("click", () => {
+                    document.getElementById("mcpForm").classList.remove("open");
                 });
 
-            function editSkill(slug) {
-                document.getElementById("skillFormTitle").textContent =
-                    "Edit Skill";
-                document.getElementById("skillSlug").value = slug;
-                document.getElementById("skillDisplayName").value =
-                    "Weekly Report";
-                document.getElementById("skillDesc").value =
-                    "Generates a formatted weekly status report. Use when the user asks for a weekly summary or status report.";
-                document.getElementById("skillInstructions").value =
-                    "# Weekly Report Skill\n\n## Instructions\nWhen invoked, generate a formatted weekly status report with sections:\n- **Highlights** — key wins this week\n- **In Progress** — active work items\n- **Blockers** — anything that needs attention\n- **Next Week** — planned priorities\n\nFormat as Markdown with clear section headers.";
-                document.getElementById("skillForm").style.display = "block";
+            function openEditMcp(name) {
+                document.getElementById("mcpFormTitle").textContent =
+                    "Edit MCP Server — " + name;
+                document.getElementById("mcpForm").classList.add("open");
                 document
-                    .getElementById("skillForm")
+                    .getElementById("mcpForm")
                     .scrollIntoView({ behavior: "smooth" });
             }
 
-            // ── QR code generate ─────────────────────────────────────────────────────────
+            // ── Type switcher ────────────────────────────────────────────────────────
+            function switchType(type) {
+                document.querySelectorAll(".type-radio-btn").forEach((btn) => {
+                    btn.classList.toggle("active", btn.dataset.type === type);
+                });
+                document.getElementById("localConfig").style.display =
+                    type === "local" ? "block" : "none";
+                document.getElementById("remoteConfig").style.display =
+                    type === "remote" ? "block" : "none";
+            }
+
+            // ── Env var rows ─────────────────────────────────────────────────────────
+            function addEnvRow() {
+                const list = document.getElementById("envVarList");
+                const row = document.createElement("div");
+                row.className = "kv-row";
+                row.innerHTML = `
+                    <input type="text" class="field-input" placeholder="KEY" style="font-family:monospace;font-size:12px;" />
+                    <input type="text" class="field-input" placeholder="value" style="font-family:monospace;font-size:12px;" />
+                    <button class="kv-remove-btn" onclick="this.closest('.kv-row').remove()" title="Remove">✕</button>
+                `;
+                list.appendChild(row);
+            }
+
+            // ── MCP tools disclosure ─────────────────────────────────────────────────
+            function toggleTools(btn) {
+                const arrow = btn.querySelector(".mcp-tools-arrow");
+                const list = btn
+                    .closest(".mcp-tools-disclosure")
+                    .querySelector(".mcp-tools-list");
+                const isOpen = list.style.display === "flex";
+                list.style.display = isOpen ? "none" : "flex";
+                arrow.classList.toggle("open", !isOpen);
+            }
+
+            // ── Delete MCP server ────────────────────────────────────────────────────
+            document.querySelectorAll(".mcp-delete-btn").forEach((btn) => {
+                btn.addEventListener("click", function () {
+                    if (
+                        confirm(
+                            "Delete this MCP server? It will be removed from all threads.",
+                        )
+                    ) {
+                        this.closest(".mcp-item").remove();
+                    }
+                });
+            });
+
+            // ── QR code ─────────────────────────────────────────────────────────────
             document
                 .getElementById("generateQrBtn")
                 .addEventListener("click", function () {
@@ -1611,41 +2226,37 @@
                     qr.style.background = "var(--text-primary)";
                     qr.style.color = "var(--text-inverse)";
                     qr.innerHTML = `
-      <div style="font-size:14px;font-weight:700;color:var(--text-inverse);margin-bottom:8px;">▦ QR Code</div>
-      <div style="font-size:11px;color:#555;max-width:160px;text-align:center;">
-        Would render a real QR code encoding {"server_url":"http://agent-deck.local:7474","token":"83a32f..."}
-      </div>`;
+                    <div style="font-size:14px;font-weight:700;color:var(--text-inverse);margin-bottom:8px;">▦ QR Code</div>
+                    <div style="font-size:11px;color:#555;max-width:160px;text-align:center;">
+                        Encodes {"server_url":"http://agent-deck.local:7474","token":"83a32f..."}
+                    </div>`;
                     this.style.display = "none";
                     document.getElementById("refreshQrBtn").style.display = "";
                 });
-
             document
                 .getElementById("refreshQrBtn")
                 .addEventListener("click", function () {
                     const qr = document.querySelector(".qr-placeholder");
-                    qr.style.background = "var(--bg-tertiary)";
-                    qr.style.color = "var(--text-tertiary)";
+                    qr.style.background = "";
+                    qr.style.color = "";
                     qr.innerHTML = `<div class="qr-icon">▦</div><span>QR code renders here</span><span style="font-size:11px;">Contains server URL + auth token</span>`;
                     document.getElementById("generateQrBtn").style.display = "";
                     this.style.display = "none";
                 });
 
-            // ── Auth token reveal / copy ─────────────────────────────────────────────────
+            // ── Auth token ───────────────────────────────────────────────────────────
             const tokenField = document.getElementById("tokenField");
             document
                 .getElementById("revealTokenBtn")
                 .addEventListener("click", function () {
                     if (tokenField.type === "password") {
                         tokenField.type = "text";
-                        this.title = "Hide token";
                         this.textContent = "🙈";
                     } else {
                         tokenField.type = "password";
-                        this.title = "Reveal token";
                         this.textContent = "👁";
                     }
                 });
-
             document
                 .getElementById("copyTokenBtn")
                 .addEventListener("click", function () {
@@ -1658,17 +2269,16 @@
                     }, 1500);
                 });
 
-            // ── Token rotation ───────────────────────────────────────────────────────────
             const rotateWarning = document.getElementById("rotateWarning");
-            const rotateTokenBtn = document.getElementById("rotateTokenBtn");
-
-            rotateTokenBtn.addEventListener("click", () => {
-                rotateWarning.style.display = "block";
-                rotateWarning.scrollIntoView({
-                    behavior: "smooth",
-                    block: "nearest",
+            document
+                .getElementById("rotateTokenBtn")
+                .addEventListener("click", () => {
+                    rotateWarning.style.display = "block";
+                    rotateWarning.scrollIntoView({
+                        behavior: "smooth",
+                        block: "nearest",
+                    });
                 });
-            });
             document
                 .getElementById("cancelRotateBtn")
                 .addEventListener("click", () => {
@@ -1686,16 +2296,170 @@
                         tokenField.value = newToken;
                         tokenField.type = "text";
                         rotateWarning.style.display = "none";
-                        rotateTokenBtn.textContent = "⟳ Rotate Token";
+                        document.getElementById("rotateTokenBtn").textContent =
+                            "⟳ Rotate Token";
                         this.disabled = false;
                         this.textContent = "Rotate Token";
                     }, 1200);
                 });
 
-            // ── Toggle switches ──────────────────────────────────────────────────────────
+            // ── Toggle switches ──────────────────────────────────────────────────────
             document.querySelectorAll(".toggle").forEach((t) => {
                 t.addEventListener("click", () => t.classList.toggle("on"));
             });
+
+            // ── Provider Picker modal ────────────────────────────────────────────────
+            document
+                .getElementById("connectAccountBtn")
+                .addEventListener("click", openProviderPicker);
+
+            function openProviderPicker() {
+                document
+                    .getElementById("providerPickerModal")
+                    .classList.add("open");
+            }
+            document
+                .getElementById("closeProviderPicker")
+                .addEventListener("click", () => {
+                    document
+                        .getElementById("providerPickerModal")
+                        .classList.remove("open");
+                });
+            document
+                .getElementById("providerPickerModal")
+                .addEventListener("click", (e) => {
+                    if (
+                        e.target ===
+                        document.getElementById("providerPickerModal")
+                    ) {
+                        document
+                            .getElementById("providerPickerModal")
+                            .classList.remove("open");
+                    }
+                });
+
+            // ── Scope Selection modal ────────────────────────────────────────────────
+            const scopeData = {
+                google: {
+                    title: "Google — Select Permissions",
+                    connectLabel: "Connect with Google",
+                    scopes: [
+                        {
+                            name: "Gmail read",
+                            desc: "Read emails in your Gmail inbox.",
+                        },
+                        {
+                            name: "Gmail send",
+                            desc: "Send emails on your behalf.",
+                        },
+                        {
+                            name: "Calendar read",
+                            desc: "View your Google Calendar events.",
+                        },
+                        {
+                            name: "Calendar write",
+                            desc: "Create and modify calendar events.",
+                        },
+                        {
+                            name: "Drive read",
+                            desc: "Read files stored in Google Drive.",
+                        },
+                        {
+                            name: "Drive write",
+                            desc: "Create and modify files in Google Drive.",
+                        },
+                    ],
+                },
+                github: {
+                    title: "GitHub — Select Permissions",
+                    connectLabel: "Connect with GitHub",
+                    scopes: [
+                        {
+                            name: "repo read",
+                            desc: "Read access to public and private repositories.",
+                        },
+                        {
+                            name: "issues write",
+                            desc: "Create and comment on issues.",
+                        },
+                        {
+                            name: "pull requests",
+                            desc: "Read and create pull requests.",
+                        },
+                        { name: "gists", desc: "Create and read gists." },
+                    ],
+                },
+            };
+
+            function openScopeModal(provider) {
+                document
+                    .getElementById("providerPickerModal")
+                    .classList.remove("open");
+                const data = scopeData[provider];
+                document.getElementById("scopeModalTitle").textContent =
+                    data.title;
+                document.getElementById("connectWithProvider").textContent =
+                    data.connectLabel;
+                document.getElementById("connectWithProvider").disabled = false;
+
+                const list = document.getElementById("scopeList");
+                list.innerHTML = "";
+                data.scopes.forEach((scope, i) => {
+                    const selected = i < 2;
+                    const item = document.createElement("div");
+                    item.className =
+                        "scope-item" + (selected ? " selected" : "");
+                    item.innerHTML = `
+                        <div class="scope-checkbox">${selected ? "✓" : ""}</div>
+                        <div>
+                            <div class="scope-name">${scope.name}</div>
+                            <div class="scope-desc">${scope.desc}</div>
+                        </div>
+                    `;
+                    item.addEventListener("click", () => {
+                        item.classList.toggle("selected");
+                        item.querySelector(".scope-checkbox").textContent =
+                            item.classList.contains("selected") ? "✓" : "";
+                    });
+                    list.appendChild(item);
+                });
+
+                document.getElementById("scopeModal").classList.add("open");
+            }
+
+            document
+                .getElementById("closeScopeModal")
+                .addEventListener("click", () => {
+                    document
+                        .getElementById("scopeModal")
+                        .classList.remove("open");
+                    document
+                        .getElementById("providerPickerModal")
+                        .classList.add("open");
+                });
+            document
+                .getElementById("scopeModal")
+                .addEventListener("click", (e) => {
+                    if (e.target === document.getElementById("scopeModal")) {
+                        document
+                            .getElementById("scopeModal")
+                            .classList.remove("open");
+                    }
+                });
+            document
+                .getElementById("connectWithProvider")
+                .addEventListener("click", function () {
+                    const label = this.textContent;
+                    this.textContent = "⏳ Redirecting…";
+                    this.disabled = true;
+                    setTimeout(() => {
+                        document
+                            .getElementById("scopeModal")
+                            .classList.remove("open");
+                        this.textContent = label;
+                        this.disabled = false;
+                    }, 1500);
+                });
         </script>
     </body>
 </html>

@@ -685,10 +685,10 @@
                     <span class="icon">🎭</span> Personas
                 </button>
                 <button class="nav-item">
-                    <span class="icon">🛠</span> Skills
+                    <span class="icon">🔧</span> MCP Servers
                 </button>
                 <button class="nav-item">
-                    <span class="icon">🔧</span> MCP Servers
+                    <span class="icon">🔑</span> Accounts
                 </button>
                 <button class="nav-item">
                     <span class="icon">📱</span> Mobile Pairing
@@ -884,6 +884,267 @@
                                         prepended to the conversation
                                         context.</span
                                     >
+                                </div>
+
+                                <!-- Default MCP Servers -->
+                                <div class="field form-full">
+                                    <label class="field-label"
+                                        >Default MCP Servers</label
+                                    >
+                                    <span
+                                        class="field-hint"
+                                        style="
+                                            margin-bottom: 8px;
+                                            display: block;
+                                        "
+                                    >
+                                        These servers are attached automatically
+                                        when a new thread is created with this
+                                        persona.
+                                    </span>
+                                    <div
+                                        id="defaultMcpList"
+                                        style="
+                                            display: flex;
+                                            flex-direction: column;
+                                            gap: 7px;
+                                            margin-bottom: 8px;
+                                        "
+                                    >
+                                        <!-- Filesystem default -->
+                                        <div
+                                            class="default-mcp-row"
+                                            style="
+                                                display: flex;
+                                                align-items: center;
+                                                gap: 10px;
+                                                background: var(--bg-tertiary);
+                                                border: 1px solid
+                                                    var(--border-subtle);
+                                                border-radius: 7px;
+                                                padding: 8px 12px;
+                                            "
+                                        >
+                                            <div style="flex: 1; min-width: 0">
+                                                <span
+                                                    style="
+                                                        font-size: 13px;
+                                                        font-weight: 600;
+                                                        color: var(
+                                                            --text-primary
+                                                        );
+                                                    "
+                                                    >Filesystem</span
+                                                >
+                                                <span
+                                                    style="
+                                                        font-size: 10px;
+                                                        font-weight: 600;
+                                                        padding: 2px 6px;
+                                                        border-radius: 4px;
+                                                        background: var(
+                                                            --bg-elevated
+                                                        );
+                                                        color: var(
+                                                            --text-tertiary
+                                                        );
+                                                        margin-left: 8px;
+                                                    "
+                                                    >local</span
+                                                >
+                                            </div>
+                                            <button
+                                                class="btn btn-ghost btn-sm"
+                                                onclick="this.closest('.default-mcp-row').remove()"
+                                                title="Remove default server"
+                                                style="
+                                                    padding: 3px 8px;
+                                                    font-size: 12px;
+                                                    color: var(--text-tertiary);
+                                                "
+                                            >
+                                                ✕
+                                            </button>
+                                        </div>
+                                        <!-- GitHub default -->
+                                        <div
+                                            class="default-mcp-row"
+                                            style="
+                                                display: flex;
+                                                align-items: center;
+                                                gap: 10px;
+                                                background: var(--bg-tertiary);
+                                                border: 1px solid
+                                                    var(--border-subtle);
+                                                border-radius: 7px;
+                                                padding: 8px 12px;
+                                            "
+                                        >
+                                            <div style="flex: 1; min-width: 0">
+                                                <span
+                                                    style="
+                                                        font-size: 13px;
+                                                        font-weight: 600;
+                                                        color: var(
+                                                            --text-primary
+                                                        );
+                                                    "
+                                                    >GitHub</span
+                                                >
+                                                <span
+                                                    style="
+                                                        font-size: 10px;
+                                                        font-weight: 600;
+                                                        padding: 2px 6px;
+                                                        border-radius: 4px;
+                                                        background: rgba(
+                                                            90,
+                                                            130,
+                                                            196,
+                                                            0.12
+                                                        );
+                                                        color: var(--info);
+                                                        margin-left: 8px;
+                                                    "
+                                                    >remote</span
+                                                >
+                                            </div>
+                                            <button
+                                                class="btn btn-ghost btn-sm"
+                                                onclick="this.closest('.default-mcp-row').remove()"
+                                                title="Remove default server"
+                                                style="
+                                                    padding: 3px 8px;
+                                                    font-size: 12px;
+                                                    color: var(--text-tertiary);
+                                                "
+                                            >
+                                                ✕
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <button
+                                        class="btn btn-ghost btn-sm"
+                                        style="align-self: flex-start"
+                                    >
+                                        ＋ Add default server
+                                    </button>
+                                </div>
+
+                                <!-- Persona Accounts -->
+                                <div class="field form-full">
+                                    <label class="field-label">Accounts</label>
+                                    <span
+                                        class="field-hint"
+                                        style="
+                                            margin-bottom: 10px;
+                                            display: block;
+                                        "
+                                    >
+                                        Accounts connected here are used when
+                                        this persona acts on its own behalf —
+                                        for example, sending email as Nexus.
+                                    </span>
+                                    <!-- Connected account row -->
+                                    <div
+                                        style="
+                                            display: flex;
+                                            align-items: center;
+                                            gap: 12px;
+                                            background: var(--bg-tertiary);
+                                            border: 1px solid
+                                                var(--border-subtle);
+                                            border-radius: 8px;
+                                            padding: 10px 14px;
+                                            margin-bottom: 8px;
+                                        "
+                                    >
+                                        <div
+                                            style="
+                                                width: 32px;
+                                                height: 32px;
+                                                border-radius: 50%;
+                                                background: #4285f4;
+                                                color: #fff;
+                                                display: flex;
+                                                align-items: center;
+                                                justify-content: center;
+                                                font-size: 12px;
+                                                font-weight: 700;
+                                                flex-shrink: 0;
+                                            "
+                                        >
+                                            G
+                                        </div>
+                                        <div style="flex: 1; min-width: 0">
+                                            <div
+                                                style="
+                                                    font-size: 13px;
+                                                    font-weight: 600;
+                                                    color: var(--text-primary);
+                                                "
+                                            >
+                                                Google
+                                            </div>
+                                            <div
+                                                style="
+                                                    font-size: 11px;
+                                                    color: var(--text-tertiary);
+                                                "
+                                            >
+                                                nexus@gmail.com
+                                            </div>
+                                        </div>
+                                        <div
+                                            style="
+                                                display: flex;
+                                                gap: 4px;
+                                                flex-wrap: wrap;
+                                            "
+                                        >
+                                            <span
+                                                style="
+                                                    font-size: 10px;
+                                                    padding: 2px 6px;
+                                                    border-radius: 4px;
+                                                    background: var(
+                                                        --bg-elevated
+                                                    );
+                                                    color: var(
+                                                        --text-secondary
+                                                    );
+                                                    border: 1px solid
+                                                        var(--border-subtle);
+                                                "
+                                                >Gmail send</span
+                                            >
+                                            <span
+                                                style="
+                                                    font-size: 10px;
+                                                    padding: 2px 6px;
+                                                    border-radius: 4px;
+                                                    background: var(
+                                                        --bg-elevated
+                                                    );
+                                                    color: var(
+                                                        --text-secondary
+                                                    );
+                                                    border: 1px solid
+                                                        var(--border-subtle);
+                                                "
+                                                >Calendar</span
+                                            >
+                                        </div>
+                                        <button class="btn btn-danger btn-sm">
+                                            Disconnect
+                                        </button>
+                                    </div>
+                                    <button
+                                        class="btn btn-ghost btn-sm"
+                                        style="align-self: flex-start"
+                                    >
+                                        ＋ Connect Account
+                                    </button>
                                 </div>
                             </div>
 
