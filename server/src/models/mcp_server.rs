@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -6,65 +7,49 @@ pub struct McpServer {
     pub id: String,
     pub user_id: String,
     pub name: String,
-    pub command: String,
-    /// JSON array of string args, e.g. `["--port", "8080"]`
-    pub args: String,
-    /// JSON object of env vars, e.g. `{"API_KEY": "abc"}`
-    pub env: String,
+    pub description: Option<String>,
+    pub source_url: Option<String>,
+    pub server_type: String, // "local" | "remote"
+    pub config: String,      // JSON string
+    pub status: String,      // "inactive" | "connecting" | "connected" | "error"
     pub enabled: bool,
     pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct CreateMcpServer {
     pub name: String,
-    pub command: String,
-    #[serde(default = "default_args")]
-    pub args: serde_json::Value,
-    #[serde(default = "default_env")]
-    pub env: serde_json::Value,
+    pub description: Option<String>,
+    pub source_url: Option<String>,
+    pub server_type: String,
+    pub config: Value,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct UpdateMcpServer {
     pub name: Option<String>,
-    pub command: Option<String>,
-    pub args: Option<serde_json::Value>,
-    pub env: Option<serde_json::Value>,
+    pub description: Option<String>,
+    pub source_url: Option<String>,
+    pub config: Option<Value>,
     pub enabled: Option<bool>,
 }
 
-fn default_args() -> serde_json::Value {
-    serde_json::json!([])
-}
-
-fn default_env() -> serde_json::Value {
-    serde_json::json!({})
-}
-
 impl McpServer {
-    pub fn new(user_id: impl Into<String>, req: CreateMcpServer) -> Self {
+    pub fn new(user_id: &str, req: CreateMcpServer) -> Self {
+        let now = chrono::Utc::now().to_rfc3339();
         Self {
             id: Uuid::new_v4().to_string(),
-            user_id: user_id.into(),
+            user_id: user_id.to_string(),
             name: req.name,
-            command: req.command,
-            args: req.args.to_string(),
-            env: req.env.to_string(),
+            description: req.description,
+            source_url: req.source_url,
+            server_type: req.server_type,
+            config: req.config.to_string(),
+            status: "inactive".to_string(),
             enabled: true,
-            created_at: chrono::Utc::now()
-                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-                .to_string(),
+            created_at: now.clone(),
+            updated_at: now,
         }
-    }
-
-    /// Parse the stored JSON args string into a Vec<String>.
-    pub fn parsed_args(&self) -> Vec<String> {
-        serde_json::from_str::<Vec<String>>(&self.args).unwrap_or_default()
-    }
-
-    /// Parse the stored JSON env string into a HashMap<String, String>.
-    pub fn parsed_env(&self) -> std::collections::HashMap<String, String> {
-        serde_json::from_str(&self.env).unwrap_or_default()
     }
 }

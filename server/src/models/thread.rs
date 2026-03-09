@@ -33,24 +33,11 @@ pub struct UpdateThread {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
-pub struct ThreadSkill {
-    pub id: String,
-    pub thread_id: String,
-    pub skill_id: String,
-    pub enabled: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct ThreadMcpServer {
     pub id: String,
     pub thread_id: String,
     pub mcp_server_id: String,
     pub enabled: bool,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct AttachSkill {
-    pub skill_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -83,17 +70,6 @@ impl Thread {
 
     pub fn is_archived(&self) -> bool {
         self.status == "archived"
-    }
-}
-
-impl ThreadSkill {
-    pub fn new(thread_id: impl Into<String>, skill_id: impl Into<String>) -> Self {
-        Self {
-            id: Uuid::new_v4().to_string(),
-            thread_id: thread_id.into(),
-            skill_id: skill_id.into(),
-            enabled: true,
-        }
     }
 }
 

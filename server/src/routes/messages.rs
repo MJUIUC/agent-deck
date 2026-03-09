@@ -52,6 +52,8 @@ pub struct ListMessagesQuery {
 ///
 /// Returns message history for a thread, ordered oldest-first.
 /// Supports cursor-based pagination via the `before` message ID.
+/// Hidden messages (visibility = 'hidden') are excluded by default.
+/// Pass `?include_hidden=true` to include them (for debugging only).
 pub async fn list(
     State(state): State<AppState>,
     Path(thread_id): Path<String>,
@@ -74,9 +76,9 @@ pub async fn list(
         match cursor_time {
             Some((cursor_created_at,)) => {
                 sqlx::query_as(
-                    "SELECT id, thread_id, role, content, source, routine_id, created_at
+                    "SELECT id, thread_id, role, content, source, routine_id, visibility, execution_id, created_at
                      FROM messages
-                     WHERE thread_id = ? AND created_at < ?
+                     WHERE thread_id = ? AND created_at < ? AND visibility = 'visible'
                      ORDER BY created_at DESC
                      LIMIT ?",
                 )
@@ -100,11 +102,11 @@ pub async fn list(
     } else {
         // No cursor: return the most recent `limit` messages, oldest-first
         sqlx::query_as(
-            "SELECT id, thread_id, role, content, source, routine_id, created_at
+            "SELECT id, thread_id, role, content, source, routine_id, visibility, execution_id, created_at
              FROM (
-                 SELECT id, thread_id, role, content, source, routine_id, created_at
+                 SELECT id, thread_id, role, content, source, routine_id, visibility, execution_id, created_at
                  FROM messages
-                 WHERE thread_id = ?
+                 WHERE thread_id = ? AND visibility = 'visible'
                  ORDER BY created_at DESC
                  LIMIT ?
              )
@@ -153,8 +155,8 @@ pub async fn send(
     let message = Message::new_user(&thread_id, &payload.content);
 
     sqlx::query(
-        "INSERT INTO messages (id, thread_id, role, content, source, routine_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO messages (id, thread_id, role, content, source, routine_id, visibility, execution_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&message.id)
     .bind(&message.thread_id)
@@ -162,6 +164,8 @@ pub async fn send(
     .bind(&message.content)
     .bind(&message.source)
     .bind(&message.routine_id)
+    .bind(&message.visibility)
+    .bind(&message.execution_id)
     .bind(&message.created_at)
     .execute(&state.pool)
     .await?;
@@ -224,9 +228,6 @@ pub async fn slash_command(
         "routine" => handle_routine_command(&state, &thread_id, &args)
             .await
             .map(IntoResponse::into_response),
-        "skill" => handle_skill_command(&state, &thread_id, &args)
-            .await
-            .map(IntoResponse::into_response),
         "memory" => handle_memory_command(&state, &thread, &args)
             .await
             .map(IntoResponse::into_response),
@@ -242,7 +243,6 @@ pub async fn slash_command(
                             { "command": "/model switch <model_id>", "description": "Switch to a different model" },
                             { "command": "/routine list", "description": "List routines attached to this thread" },
                             { "command": "/routine add", "description": "Opens the add-routine modal" },
-                            { "command": "/skill list", "description": "List skills attached to this thread" },
                             { "command": "/memory list", "description": "Show recent memories for this thread's persona" },
                             { "command": "/help", "description": "Show this help message" },
                         ]
@@ -394,46 +394,6 @@ async fn handle_routine_command(
         _ => Err(AppError::BadRequest(
             "Usage: /routine list  or  /routine add".to_string(),
         )),
-    }
-}
-
-async fn handle_skill_command(
-    state: &AppState,
-    thread_id: &str,
-    args: &[String],
-) -> AppResult<impl IntoResponse> {
-    let sub = args.first().map(|s| s.as_str()).unwrap_or("list");
-
-    match sub {
-        "list" => {
-            let skills: Vec<(String, String, String)> = sqlx::query_as(
-                "SELECT s.id, s.display_name, s.description
-                 FROM skills s
-                 JOIN thread_skills ts ON ts.skill_id = s.id
-                 WHERE ts.thread_id = ? AND ts.enabled = 1 AND s.enabled = 1
-                 ORDER BY s.display_name ASC",
-            )
-            .bind(thread_id)
-            .fetch_all(&state.pool)
-            .await?;
-
-            Ok((
-                StatusCode::OK,
-                Json(json!({
-                    "data": {
-                        "type": "skill_list",
-                        "message": format!("{} skill(s) active", skills.len()),
-                        "payload": {
-                            "skills": skills.iter().map(|(id, name, desc)| {
-                                json!({ "id": id, "display_name": name, "description": desc })
-                            }).collect::<Vec<_>>()
-                        }
-                    }
-                })),
-            ))
-        }
-
-        _ => Err(AppError::BadRequest("Usage: /skill list".to_string())),
     }
 }
 

@@ -25,7 +25,7 @@ pub mod personas;
 pub mod providers;
 pub mod routines;
 pub mod setup;
-pub mod skills;
+
 pub mod sse;
 pub mod threads;
 pub mod tokens;
@@ -108,12 +108,6 @@ pub async fn build_router(pool: SqlitePool, config: Config) -> anyhow::Result<Ro
             "/api/personas/:id/avatar",
             axum::routing::post(personas::upload_avatar),
         )
-        // Skills
-        .route("/api/skills", get(skills::list).post(skills::create))
-        .route(
-            "/api/skills/:id",
-            get(skills::get).put(skills::update).delete(skills::delete),
-        )
         // MCP Servers
         .route(
             "/api/mcp-servers",
@@ -140,14 +134,6 @@ pub async fn build_router(pool: SqlitePool, config: Config) -> anyhow::Result<Ro
         .route(
             "/api/threads/:id/unarchive",
             axum::routing::post(threads::unarchive),
-        )
-        .route(
-            "/api/threads/:id/skills",
-            get(threads::list_skills).post(threads::attach_skill),
-        )
-        .route(
-            "/api/threads/:id/skills/:skill_id",
-            axum::routing::delete(threads::detach_skill),
         )
         .route(
             "/api/threads/:id/mcp-servers",
