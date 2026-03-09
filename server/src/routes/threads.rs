@@ -6,6 +6,7 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::json;
+use uuid::Uuid;
 
 use crate::{
     error::{AppError, AppResult},
@@ -131,6 +132,30 @@ pub async fn create(
     .bind(&thread.updated_at)
     .execute(&state.pool)
     .await?;
+
+    // Auto-attach any MCP servers that are defaults for this persona.
+    // Query persona_default_mcp_servers and insert into thread_mcp_servers for each.
+    let default_mcp_server_ids: Vec<(String,)> = sqlx::query_as(
+        "SELECT mcp_server_id FROM persona_default_mcp_servers WHERE persona_id = ?",
+    )
+    .bind(&thread.persona_id)
+    .fetch_all(&state.pool)
+    .await?;
+
+    for (mcp_server_id,) in default_mcp_server_ids {
+        let entry_id = Uuid::new_v4().to_string();
+        // INSERT OR IGNORE so a duplicate constraint never fails the thread creation
+        sqlx::query(
+            "INSERT OR IGNORE INTO thread_mcp_servers (id, thread_id, mcp_server_id, enabled)
+             VALUES (?, ?, ?, ?)",
+        )
+        .bind(&entry_id)
+        .bind(&thread.id)
+        .bind(&mcp_server_id)
+        .bind(true)
+        .execute(&state.pool)
+        .await?;
+    }
 
     Ok((StatusCode::CREATED, Json(json!({ "data": thread }))))
 }

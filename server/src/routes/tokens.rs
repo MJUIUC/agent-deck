@@ -177,6 +177,32 @@ pub async fn update_mcp(
     Ok((StatusCode::OK, Json(json!({ "data": updated }))))
 }
 
+/// GET /api/mcp-servers/:id/tools
+///
+/// Returns the list of tools exposed by this MCP server.
+/// TODO (Phase 7): Connect to live MCP process and enumerate tools dynamically.
+pub async fn list_mcp_tools(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> AppResult<impl IntoResponse> {
+    let user_id = get_user_id(&state).await?;
+
+    // Verify the server exists and belongs to this user
+    let exists: Option<(String,)> =
+        sqlx::query_as("SELECT id FROM mcp_servers WHERE id = ? AND user_id = ?")
+            .bind(&id)
+            .bind(&user_id)
+            .fetch_optional(&state.pool)
+            .await?;
+
+    if exists.is_none() {
+        return Err(AppError::NotFound(format!("MCP server '{}' not found", id)));
+    }
+
+    // TODO (Phase 7): enumerate tools from the live MCP process
+    Ok((StatusCode::OK, Json(json!({ "data": [] }))))
+}
+
 /// DELETE /api/mcp-servers/:id
 pub async fn delete_mcp(
     State(state): State<AppState>,
