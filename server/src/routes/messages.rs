@@ -11,6 +11,7 @@ use crate::{
     error::{AppError, AppResult},
     models::message::{CreateMessage, Message, MessageResponse},
     routes::AppState,
+    services::agent,
 };
 
 /// Helper: get the single user id from the DB.
@@ -180,8 +181,39 @@ pub async fn send(
         .execute(&state.pool)
         .await?;
 
-    // TODO (Phase 2): spawn the agent run-loop as a background task and begin
-    // streaming tokens to any connected SSE clients for this thread.
+    // Auto-generate thread title on first message.
+    // A thread starts with the default title "New Chat"; we replace it the
+    // first time a user sends a message so the sidebar shows something useful.
+    if thread.title == "New Chat" {
+        let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM messages WHERE thread_id = ?")
+            .bind(&thread_id)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap_or((0,));
+
+        // count includes the message we just inserted, so == 1 means first message.
+        if count.0 <= 1 {
+            let generated_title = agent::generate_title_from_message(&payload.content);
+            if !generated_title.is_empty() {
+                let _ = sqlx::query("UPDATE threads SET title = ? WHERE id = ?")
+                    .bind(&generated_title)
+                    .bind(&thread_id)
+                    .execute(&state.pool)
+                    .await;
+            }
+        }
+    }
+
+    // Spawn the agent run-loop as a background Tokio task.
+    // We clone state (cheap — it's all Arc/clone-cheap handles) and move
+    // the thread_id + content in.  The task streams tokens to any SSE clients
+    // connected to this thread and persists the completed assistant message.
+    let run_state = state.clone();
+    let run_thread_id = thread_id.clone();
+    let run_content = payload.content.clone();
+    tokio::spawn(async move {
+        agent::run(run_state, run_thread_id, run_content).await;
+    });
 
     let response = MessageResponse::from(message);
 
