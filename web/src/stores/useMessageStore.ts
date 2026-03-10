@@ -2,6 +2,35 @@ import { create } from "zustand";
 import { messagesApi } from "@/api/client";
 import type { Message } from "@/types";
 
+/**
+ * Merge a list of server-confirmed messages with the current in-memory list.
+ * - Optimistic messages (id starts with "optimistic-") are dropped in favour
+ *   of the real server copies.
+ * - Non-optimistic messages already in `current` are kept as-is (preserves
+ *   any streaming state that may have appended them before the list returned).
+ * - Server messages not yet in `current` are appended.
+ * The result is sorted by `created_at` ascending.
+ */
+function mergeMessages(current: Message[], fromServer: Message[]): Message[] {
+  // Build a set of real ids already present
+  const existingIds = new Set(
+    current.filter((m) => !m.id.startsWith("optimistic-")).map((m) => m.id),
+  );
+
+  // Keep non-optimistic current messages, then append any server messages
+  // we haven't seen yet.
+  const kept = current.filter((m) => !m.id.startsWith("optimistic-"));
+  const newFromServer = fromServer.filter((m) => !existingIds.has(m.id));
+  const merged = [...kept, ...newFromServer];
+
+  // Sort by created_at so order is stable
+  merged.sort(
+    (a, b) =>
+      new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+  );
+  return merged;
+}
+
 interface MessageStore {
   // State
   messagesByThread: Record<string, Message[]>;
@@ -59,7 +88,9 @@ export const useMessageStore = create<MessageStore>((set) => ({
   sendMessage: async (threadId, content) => {
     set((state) => ({
       isSending: { ...state.isSending, [threadId]: true },
-      isStreaming: { ...state.isStreaming, [threadId]: true },
+      // Don't pre-set isStreaming here — let actual token events drive it.
+      // Pre-setting it caused a permanent "typing" indicator when the SSE
+      // connection wasn't established before the agent started firing.
       streamingContent: { ...state.streamingContent, [threadId]: "" },
       error: null,
     }));
@@ -89,9 +120,31 @@ export const useMessageStore = create<MessageStore>((set) => ({
 
     try {
       // Fire the message — the real user message and assistant response
-      // both arrive via SSE (token / message_complete events).
-      // The server persists and the SSE stream handles display.
+      // arrive via SSE (token / message_complete events).
       await messagesApi.send(threadId, content);
+
+      // After the POST returns the user message is persisted. Reload now so
+      // the optimistic placeholder is replaced with the real message (correct
+      // id, created_at, etc.) and any already-completed assistant reply is
+      // picked up in case streaming was missed while the SSE connection was
+      // still being established.
+      try {
+        const res = await messagesApi.list(threadId, { limit: 100 });
+        set((state) => ({
+          messagesByThread: {
+            ...state.messagesByThread,
+            // Merge: keep any messages already present (e.g. streaming tokens
+            // that arrived between POST return and the list response) but
+            // replace optimistic entries with real ones.
+            [threadId]: mergeMessages(
+              state.messagesByThread[threadId] ?? [],
+              res.data,
+            ),
+          },
+        }));
+      } catch {
+        // Non-fatal — SSE will still deliver the response.
+      }
     } catch (err) {
       // On error, remove the optimistic message and surface the error
       set((state) => ({
@@ -144,6 +197,9 @@ export const useMessageStore = create<MessageStore>((set) => ({
   },
 
   appendToken: (threadId, token) => {
+    // Ignore empty tokens — the server used to send an empty token as a
+    // connection handshake which incorrectly set isStreaming=true forever.
+    if (!token) return;
     set((state) => ({
       isStreaming: { ...state.isStreaming, [threadId]: true },
       streamingContent: {

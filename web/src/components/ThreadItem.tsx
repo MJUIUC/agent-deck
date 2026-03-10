@@ -1,5 +1,6 @@
 import type { Thread } from "@/types";
 import { formatThreadTime } from "@/hooks/useTimeFormat";
+import styles from "./ThreadItem.module.css";
 
 interface ThreadItemProps {
   thread: Thread;
@@ -15,13 +16,7 @@ export function ThreadItem({ thread, isActive, onClick }: ThreadItemProps) {
 
   return (
     <div
-      className={[
-        "relative flex items-start gap-[9px] px-3.5 py-[9px] cursor-pointer outline-none",
-        "transition-colors duration-100",
-        isActive
-          ? "bg-accent-muted thread-active-bar"
-          : "hover:bg-bg-tertiary focus-visible:bg-bg-tertiary",
-      ].join(" ")}
+      className={[styles.item, isActive ? styles.itemActive : ""].join(" ")}
       onClick={() => onClick(thread.id)}
       role="button"
       tabIndex={0}
@@ -32,26 +27,15 @@ export function ThreadItem({ thread, isActive, onClick }: ThreadItemProps) {
         }
       }}
     >
-      {/* Avatar */}
-      <div className="w-7 h-7 rounded-full bg-bg-elevated flex items-center justify-center text-[14px] shrink-0 mt-px">
-        {emoji}
-      </div>
+      {/* Active bar rendered via ::before in CSS module */}
+      <div className={styles.avatar}>{emoji}</div>
 
-      {/* Info */}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center justify-between gap-1">
-          <span className="text-[13px] font-medium text-text-primary truncate min-w-0">
-            {thread.title}
-          </span>
-          <span className="text-[11px] text-text-tertiary shrink-0">
-            {timeStr}
-          </span>
+      <div className={styles.info}>
+        <div className={styles.row}>
+          <span className={styles.title}>{thread.title}</span>
+          <span className={styles.time}>{timeStr}</span>
         </div>
-        {preview && (
-          <div className="text-[12px] text-text-tertiary truncate mt-px">
-            {preview}
-          </div>
-        )}
+        {preview && <div className={styles.preview}>{preview}</div>}
       </div>
     </div>
   );

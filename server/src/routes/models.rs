@@ -157,15 +157,7 @@ pub async fn sync(
     .fetch_all(&state.pool)
     .await?;
 
-    Ok((
-        StatusCode::OK,
-        Json(json!({
-            "data": {
-                "models": models,
-                "synced": synced_count
-            }
-        })),
-    ))
+    Ok((StatusCode::OK, Json(json!({ "data": models }))))
 }
 
 /// PUT /api/providers/:provider_id/models/:model_id

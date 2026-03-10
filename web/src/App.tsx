@@ -5,6 +5,8 @@ import { providersApi } from "@/api/client";
 import { Sidebar } from "@/components/Sidebar";
 import { ChatView } from "@/components/ChatView";
 import { EmptyState } from "@/components/EmptyState";
+import { SettingsModal } from "@/components/SettingsModal";
+import styles from "@/App.module.css";
 
 // ── Mobile sidebar state ──────────────────────────────────────────────────────
 // On small viewports (< 640px) the sidebar is hidden by default and slides in
@@ -15,6 +17,10 @@ export function App() {
   const [hasProviders, setHasProviders] = useState(true); // optimistic default
   const [isCheckingProviders, setIsCheckingProviders] = useState(true);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<"providers" | "personas">(
+    "providers",
+  );
 
   // Thread store
   const threads = useThreadStore((s) => s.threads);
@@ -60,15 +66,6 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Thread selection ──────────────────────────────────────────────────────
-
-  const handleSelectThread = useCallback(
-    (threadId: string) => {
-      setActiveThread(threadId);
-    },
-    [setActiveThread],
-  );
-
   // ── Thread creation ───────────────────────────────────────────────────────
 
   const handleCreateThread = useCallback(
@@ -101,25 +98,41 @@ export function App() {
     [setActiveThread],
   );
 
-  // ── Settings placeholder ──────────────────────────────────────────────────
-  // Phase 3 will implement a proper settings page/modal.
-  // For now we just log so the button isn't dead.
-  const handleOpenSettings = useCallback(() => {
-    // TODO Phase 3: navigate to settings
-    console.info("[agent-deck] Settings page coming in Phase 3");
+  // ── Settings ──────────────────────────────────────────────────────────────
+  const handleOpenSettings = useCallback(
+    (tab: "providers" | "personas" = "providers") => {
+      setSettingsTab(tab);
+      setSettingsOpen(true);
+    },
+    [],
+  );
+
+  const handleCloseSettings = useCallback(() => {
+    setSettingsOpen(false);
   }, []);
+
+  // Re-check providers/personas whenever the settings modal reports a change
+  const handleSettingsDataChanged = useCallback(async () => {
+    try {
+      const res = await providersApi.list();
+      setHasProviders(res.data.some((p) => p.enabled !== false));
+    } catch {
+      setHasProviders(false);
+    }
+    loadThreads(); // reload threads so persona updates propagate
+  }, [loadThreads]);
 
   // ── Render ────────────────────────────────────────────────────────────────
 
   const hasPersonas = personas.length > 0;
 
   return (
-    <div className="flex h-screen overflow-hidden bg-bg-primary text-text-primary">
+    <div className={styles.app}>
       {/* ── Mobile backdrop ── */}
       {mobileSidebarOpen && (
         <div
           onClick={handleMobileMenuClose}
-          className="fixed inset-0 bg-black/50 z-40 hidden max-sm:block"
+          className={styles.mobileBackdrop}
           aria-hidden="true"
         />
       )}
@@ -134,8 +147,16 @@ export function App() {
         isMobileOpen={mobileSidebarOpen}
         onSelectThread={handleSelectThreadMobile}
         onCreateThread={handleCreateThread}
-        onOpenSettings={handleOpenSettings}
+        onOpenSettings={() => handleOpenSettings("providers")}
         onMobileClose={handleMobileMenuClose}
+      />
+
+      {/* ── Settings modal ── */}
+      <SettingsModal
+        isOpen={settingsOpen}
+        onClose={handleCloseSettings}
+        initialTab={settingsTab}
+        onDataChanged={handleSettingsDataChanged}
       />
 
       {/* ── Main area ── */}
@@ -145,9 +166,7 @@ export function App() {
           onMobileMenuOpen={handleMobileMenuOpen}
         />
       ) : isCheckingProviders ? (
-        <div className="flex-1 flex items-center justify-center text-text-tertiary text-[13px]">
-          Loading…
-        </div>
+        <div className={styles.loadingScreen}>Loading…</div>
       ) : (
         <EmptyState
           hasThreads={threads.length > 0}
@@ -162,6 +181,8 @@ export function App() {
           }}
           onMobileMenuOpen={handleMobileMenuOpen}
           onOpenSettings={handleOpenSettings}
+          onOpenProviders={() => handleOpenSettings("providers")}
+          onOpenPersonas={() => handleOpenSettings("personas")}
         />
       )}
     </div>

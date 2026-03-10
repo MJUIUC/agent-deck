@@ -580,8 +580,12 @@ pub async fn test_provider(base_url: &str, api_key: Option<&str>) -> Result<Vec<
     #[derive(Deserialize)]
     struct ModelData {
         id: String,
+        /// Standard OpenAI-style label (e.g. "gpt-4o")
         #[serde(default)]
         name: Option<String>,
+        /// Copilot sidecar uses `display_name` instead of `name`
+        #[serde(default)]
+        display_name: Option<String>,
     }
 
     let body: ModelsResponse = response
@@ -592,9 +596,18 @@ pub async fn test_provider(base_url: &str, api_key: Option<&str>) -> Result<Vec<
     let models = body
         .data
         .into_iter()
-        .map(|m| RemoteModel {
-            display_name: m.name.clone().unwrap_or_else(|| m.id.clone()),
-            id: m.id,
+        .map(|m| {
+            // Prefer display_name (copilot-api), then name (OpenAI), then fall
+            // back to the raw model id so we always have something readable.
+            let label = m
+                .display_name
+                .filter(|s| !s.is_empty())
+                .or_else(|| m.name.filter(|s| !s.is_empty()))
+                .unwrap_or_else(|| m.id.clone());
+            RemoteModel {
+                display_name: label,
+                id: m.id,
+            }
         })
         .collect();
 

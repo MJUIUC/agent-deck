@@ -1,5 +1,6 @@
 import type { Thread } from "@/types";
 import { Settings, Menu } from "lucide-react";
+import styles from "./ChatHeader.module.css";
 
 interface ChatHeaderProps {
   thread: Thread;
@@ -22,40 +23,34 @@ export function ChatHeader({
   const subtitle = parts.join(" · ");
 
   return (
-    <div className="flex items-center justify-between px-[18px] py-3 border-b border-border-subtle bg-bg-primary shrink-0">
+    <div className={styles.header}>
       {/* Left: optional hamburger + avatar + info */}
-      <div className="flex items-center gap-2.5 min-w-0">
+      <div className={styles.left}>
         {onMobileMenuOpen && (
           <button
             onClick={onMobileMenuOpen}
             aria-label="Open sidebar"
-            className="hidden max-sm:flex items-center justify-center w-8 h-8 rounded-[6px] text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors shrink-0"
+            className={styles.menuBtn}
           >
             <Menu size={18} />
           </button>
         )}
 
-        <div className="w-8 h-8 rounded-full bg-bg-elevated flex items-center justify-center text-base shrink-0">
-          {emoji}
-        </div>
+        <div className={styles.avatar}>{emoji}</div>
 
-        <div className="min-w-0">
-          <div className="text-[14px] font-semibold text-text-primary truncate leading-tight">
-            {thread.title}
-          </div>
-          <div className="text-[11px] text-text-tertiary truncate leading-tight mt-px">
-            {subtitle}
-          </div>
+        <div className={styles.meta}>
+          <div className={styles.title}>{thread.title}</div>
+          <div className={styles.subtitle}>{subtitle}</div>
         </div>
       </div>
 
       {/* Right: action buttons */}
-      <div className="flex items-center gap-1.5 shrink-0">
+      <div className={styles.right}>
         <button
           onClick={onToggleConfig}
           aria-label="Thread settings"
           title="Thread settings"
-          className="w-8 h-8 rounded-[6px] flex items-center justify-center text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors"
+          className={styles.iconBtn}
         >
           <Settings size={16} />
         </button>

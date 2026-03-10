@@ -246,7 +246,9 @@ pub async fn build_router(pool: SqlitePool, config: Config) -> anyhow::Result<Ro
         )),
     );
 
-    // ── Copilot provider auth routes (public — auth handled by copilot-api itself) ──
+    // ── Copilot provider auth routes — genuinely public, no auth required ──
+    // These endpoints drive the GitHub device-code flow from the UI, which
+    // may be used before the user has a session token.
     let copilot_routes = Router::new()
         .route(
             "/api/providers/copilot/auth-status",
@@ -256,10 +258,10 @@ pub async fn build_router(pool: SqlitePool, config: Config) -> anyhow::Result<Ro
             "/api/providers/copilot/auth-start",
             axum::routing::post(providers::copilot_auth_start),
         )
-        .layer(middleware::from_fn_with_state(
-            state.clone(),
-            auth_middleware,
-        ));
+        .route(
+            "/api/providers/copilot/auth-poll",
+            axum::routing::post(providers::copilot_auth_poll),
+        );
 
     let app = Router::new()
         .merge(public_api)

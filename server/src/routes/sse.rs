@@ -131,6 +131,30 @@ impl AppState {
     pub fn subscribe_global(&self) -> tokio::sync::broadcast::Receiver<GlobalEvent> {
         self.global_tx.subscribe()
     }
+
+    /// Returns `true` if at least one SSE client is currently subscribed to the
+    /// given thread stream.
+    pub fn has_thread_subscriber(&self, thread_id: &str) -> bool {
+        let map = self.thread_senders.lock().unwrap();
+        map.get(thread_id).map_or(false, |v| !v.is_empty())
+    }
+
+    /// Wait until at least one SSE client subscribes to `thread_id`, or until
+    /// `timeout` elapses.  This lets the agent start streaming immediately after
+    /// the client's EventSource connection is established, rather than firing
+    /// tokens into the void before the browser is ready.
+    pub async fn wait_for_subscriber(&self, thread_id: &str, timeout: std::time::Duration) {
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            if self.has_thread_subscriber(thread_id) {
+                return;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+    }
 }
 
 // ─── Route handlers ───────────────────────────────────────────────────────────
@@ -143,12 +167,6 @@ pub async fn thread_stream(
     Path(thread_id): Path<String>,
 ) -> AppResult<impl IntoResponse> {
     let (tx, rx) = state.subscribe_thread(&thread_id);
-
-    // Initial handshake event so the client knows the connection is live.
-    let _ = tx.try_send(ThreadEvent::Token {
-        // Empty token — signals connection established without polluting the transcript.
-        token: String::new(),
-    });
 
     // Clone identifiers for the cleanup closure.
     let state_for_cleanup = state.clone();

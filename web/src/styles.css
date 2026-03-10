@@ -1,31 +1,4 @@
-@import "tailwindcss";
-
-@theme {
-    /* ── Design tokens ── */
-    --color-bg-primary: #1c1c1a;
-    --color-bg-secondary: #242422;
-    --color-bg-tertiary: #2e2e2b;
-    --color-bg-elevated: #383835;
-    --color-accent-primary: #7c8c5a;
-    --color-accent-secondary: #9aad6e;
-    --color-accent-muted: #4a5235;
-    --color-text-primary: #f0ede4;
-    --color-text-secondary: #b8b4a8;
-    --color-text-tertiary: #7a7870;
-    --color-text-inverse: #1c1c1a;
-    --color-success: #6a9e5b;
-    --color-warning: #c4a24a;
-    --color-error: #c45a5a;
-    --color-info: #5a82c4;
-    --color-border-subtle: #333330;
-    --color-border-default: #444440;
-    --color-border-strong: #666660;
-    --color-bubble-user: #4a5235;
-    --color-bubble-agent: #2e2e2b;
-    --color-bubble-routine: #2a3545;
-}
-
-/* ── Global base ─────────────────────────────────────────────────────────── */
+/* ── Reset ───────────────────────────────────────────────────────────────── */
 
 *,
 *::before,
@@ -35,6 +8,39 @@
     padding: 0;
 }
 
+/* ── Design tokens ───────────────────────────────────────────────────────── */
+
+:root {
+    --bg-primary: #1c1c1a;
+    --bg-secondary: #242422;
+    --bg-tertiary: #2e2e2b;
+    --bg-elevated: #383835;
+
+    --accent-primary: #7c8c5a;
+    --accent-secondary: #9aad6e;
+    --accent-muted: #4a5235;
+
+    --text-primary: #f0ede4;
+    --text-secondary: #b8b4a8;
+    --text-tertiary: #7a7870;
+    --text-inverse: #1c1c1a;
+
+    --success: #6a9e5b;
+    --warning: #c4a24a;
+    --error: #c45a5a;
+    --info: #5a82c4;
+
+    --border-subtle: #333330;
+    --border-default: #444440;
+    --border-strong: #666660;
+
+    --bubble-user: #4a5235;
+    --bubble-agent: #2e2e2b;
+    --bubble-routine: #2a3545;
+}
+
+/* ── Base ────────────────────────────────────────────────────────────────── */
+
 html,
 body,
 #root {
@@ -43,28 +49,39 @@ body,
 }
 
 body {
-    background: var(--color-bg-primary);
-    color: var(--color-text-primary);
+    background: var(--bg-primary);
+    color: var(--text-primary);
     font-family:
         -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     font-size: 14px;
     line-height: 1.5;
 }
 
-/* ── Scrollbar styling (webkit) ──────────────────────────────────────────── */
+button {
+    font-family: inherit;
+}
+
+/* ── Scrollbar ───────────────────────────────────────────────────────────── */
+
+.scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-default) transparent;
+}
 
 .scrollbar-thin::-webkit-scrollbar {
     width: 4px;
 }
+
 .scrollbar-thin::-webkit-scrollbar-track {
     background: transparent;
 }
+
 .scrollbar-thin::-webkit-scrollbar-thumb {
-    background: var(--color-border-default);
+    background: var(--border-default);
     border-radius: 2px;
 }
 
-/* ── Streaming dots animation ────────────────────────────────────────────── */
+/* ── Streaming dots ──────────────────────────────────────────────────────── */
 
 @keyframes bounce-dot {
     0%,
@@ -89,7 +106,15 @@ body {
     animation: bounce-dot 1.2s infinite ease-in-out 0.4s;
 }
 
-/* ── Active thread left-bar indicator ───────────────────────────────────── */
+/* ── Spin (used by async buttons) ────────────────────────────────────────── */
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* ── Thread active bar ───────────────────────────────────────────────────── */
 
 .thread-active-bar::before {
     content: "";
@@ -98,18 +123,18 @@ body {
     top: 4px;
     bottom: 4px;
     width: 3px;
-    background: var(--color-accent-primary);
+    background: var(--accent-primary);
     border-radius: 0 2px 2px 0;
 }
 
-/* ── Date divider rule lines ─────────────────────────────────────────────── */
+/* ── Date divider ────────────────────────────────────────────────────────── */
 
 .date-divider {
     position: relative;
     text-align: center;
     padding: 16px 0 8px;
     font-size: 11px;
-    color: var(--color-text-tertiary);
+    color: var(--text-tertiary);
     flex-shrink: 0;
 }
 
@@ -120,7 +145,7 @@ body {
     top: 50%;
     width: calc(50% - 60px);
     height: 1px;
-    background: var(--color-border-subtle);
+    background: var(--border-subtle);
 }
 
 .date-divider::before {
@@ -130,88 +155,13 @@ body {
     right: 18px;
 }
 
-/* ── Modal transition ────────────────────────────────────────────────────── */
-
-.modal-enter {
-    opacity: 0;
-    pointer-events: none;
-}
-.modal-enter .modal-box {
-    transform: scale(0.97);
-}
-.modal-open {
-    opacity: 1;
-    pointer-events: auto;
-}
-.modal-open .modal-box {
-    transform: scale(1);
-}
-
-/* ── Config pane slide ───────────────────────────────────────────────────── */
+/* ── Config pane slide-in ────────────────────────────────────────────────── */
 
 .config-pane {
     transform: translateX(100%);
     transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
+
 .config-pane-open {
     transform: translateX(0);
-}
-
-/* ── Toggle switch ───────────────────────────────────────────────────────── */
-
-.toggle-thumb::after {
-    content: "";
-    position: absolute;
-    top: 2px;
-    left: 2px;
-    width: 14px;
-    height: 14px;
-    border-radius: 9999px;
-    background: var(--color-text-tertiary);
-    transition:
-        transform 0.2s,
-        background 0.2s;
-}
-
-.toggle-thumb.on::after {
-    transform: translateX(14px);
-    background: var(--color-accent-primary);
-}
-
-/* ── Search input icon ───────────────────────────────────────────────────── */
-
-.search-input {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%237A7870' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.35-4.35'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: 9px center;
-}
-
-/* ── Mobile sidebar overlay ──────────────────────────────────────────────── */
-
-.sidebar-mobile {
-    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-@media (max-width: 640px) {
-    .sidebar-mobile {
-        position: fixed;
-        left: 0;
-        top: 0;
-        bottom: 0;
-        z-index: 50;
-        transform: translateX(-100%);
-        box-shadow: 4px 0 24px rgba(0, 0, 0, 0.4);
-    }
-    .sidebar-mobile.open {
-        transform: translateX(0);
-    }
-    .mobile-menu-btn {
-        display: flex !important;
-    }
-    .mobile-close-btn {
-        display: flex !important;
-    }
-    .mobile-backdrop {
-        display: block !important;
-    }
 }

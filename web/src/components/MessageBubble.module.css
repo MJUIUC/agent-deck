@@ -1,0 +1,285 @@
+/* ── Message row ── */
+.row {
+    display: flex;
+    gap: 10px;
+    padding: 3px 18px;
+}
+
+.rowUser {
+    flex-direction: row-reverse;
+}
+
+.rowAgent {
+    flex-direction: row;
+}
+
+/* ── Avatars ── */
+.avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.avatarUser {
+    background: var(--accent-muted);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.avatarAgent {
+    background: var(--bg-elevated);
+}
+
+.avatarRoutine {
+    background: var(--bubble-routine);
+    border: 1px solid #3a4a60;
+}
+
+/* ── Bubble column ── */
+.col {
+    display: flex;
+    flex-direction: column;
+}
+
+.colUser {
+    align-items: flex-end;
+}
+
+/* ── Bubble ── */
+.bubble {
+    max-width: 68%;
+    padding: 9px 13px;
+    font-size: 13.5px;
+    line-height: 1.55;
+    color: var(--text-primary);
+    word-break: break-word;
+}
+
+/* ── Markdown content inside agent bubbles ── */
+.markdown {
+    white-space: normal;
+    line-height: 1.6;
+}
+
+.markdown p {
+    margin: 0 0 0.6em;
+}
+.markdown p:last-child {
+    margin-bottom: 0;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+    font-weight: 650;
+    line-height: 1.3;
+    margin: 0.9em 0 0.35em;
+    color: var(--text-primary);
+}
+.markdown h1:first-child,
+.markdown h2:first-child,
+.markdown h3:first-child {
+    margin-top: 0;
+}
+.markdown h1 {
+    font-size: 1.15em;
+}
+.markdown h2 {
+    font-size: 1.05em;
+}
+.markdown h3 {
+    font-size: 0.97em;
+}
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+    font-size: 0.93em;
+}
+
+.markdown strong {
+    font-weight: 650;
+}
+.markdown em {
+    font-style: italic;
+}
+.markdown del {
+    text-decoration: line-through;
+    opacity: 0.7;
+}
+
+/* Inline code */
+.markdown code {
+    font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+    font-size: 0.85em;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: 4px;
+    padding: 0.1em 0.4em;
+    color: var(--accent-secondary, #8fbf6a);
+}
+
+/* Fenced code blocks */
+.markdown pre {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    padding: 10px 13px;
+    overflow-x: auto;
+    margin: 0.6em 0;
+    font-size: 0.82em;
+    line-height: 1.5;
+}
+.markdown pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: inherit;
+    color: var(--text-primary);
+}
+
+/* Lists */
+.markdown ul,
+.markdown ol {
+    margin: 0.4em 0 0.6em;
+    padding-left: 1.4em;
+}
+.markdown ul {
+    list-style: disc;
+}
+.markdown ol {
+    list-style: decimal;
+}
+.markdown li {
+    margin: 0.2em 0;
+}
+.markdown li > ul,
+.markdown li > ol {
+    margin: 0.15em 0;
+}
+
+/* Blockquote */
+.markdown blockquote {
+    margin: 0.6em 0;
+    padding: 0.3em 0.75em;
+    border-left: 3px solid var(--accent-primary);
+    background: var(--bg-elevated);
+    border-radius: 0 6px 6px 0;
+    color: var(--text-secondary);
+    font-style: italic;
+}
+.markdown blockquote p {
+    margin: 0;
+}
+
+/* Horizontal rule */
+.markdown hr {
+    border: none;
+    border-top: 1px solid var(--border-subtle);
+    margin: 0.8em 0;
+}
+
+/* Links */
+.markdown a {
+    color: var(--accent-primary);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+.markdown a:hover {
+    opacity: 0.8;
+}
+
+/* GFM tables */
+.markdown table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 0.6em 0;
+    font-size: 0.88em;
+}
+.markdown th,
+.markdown td {
+    border: 1px solid var(--border-subtle);
+    padding: 5px 10px;
+    text-align: left;
+}
+.markdown th {
+    background: var(--bg-elevated);
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+.markdown tr:nth-child(even) td {
+    background: var(--bg-elevated);
+}
+
+/* GFM task list checkboxes */
+.markdown input[type="checkbox"] {
+    margin-right: 0.4em;
+    accent-color: var(--accent-primary);
+}
+
+.bubbleUser {
+    background: var(--bubble-user);
+    border-radius: 12px 12px 4px 12px;
+    white-space: pre-wrap;
+}
+
+.bubbleAgent {
+    background: var(--bubble-agent);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px 12px 12px 4px;
+}
+
+.bubbleRoutine {
+    background: var(--bubble-routine);
+    border: 1px solid #3a4a60;
+    border-radius: 12px 12px 12px 4px;
+}
+
+/* ── Routine label inside bubble ── */
+.routineLabel {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--info);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 6px;
+}
+
+/* ── Timestamp ── */
+.meta {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    margin-top: 3px;
+    padding: 0 2px;
+}
+
+.metaUser {
+    text-align: right;
+}
+
+/* ── Streaming bubble ── */
+.streamingIndicator {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 0 2px;
+}
+
+.dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent-primary);
+}

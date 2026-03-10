@@ -1,6 +1,9 @@
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type { Message } from "@/types";
 import { formatMessageTime } from "@/hooks/useTimeFormat";
 import { StreamingIndicator } from "./StreamingIndicator";
+import styles from "./MessageBubble.module.css";
 
 interface MessageBubbleProps {
   message: Message;
@@ -9,27 +12,17 @@ interface MessageBubbleProps {
 }
 
 function UserAvatar() {
-  return (
-    <div className="w-7 h-7 rounded-full bg-accent-muted flex items-center justify-center text-[12px] font-semibold text-text-primary shrink-0 mt-0.5">
-      M
-    </div>
-  );
+  return <div className={`${styles.avatar} ${styles.avatarUser}`}>M</div>;
 }
 
 function AgentAvatar({ emoji }: { emoji: string }) {
   return (
-    <div className="w-7 h-7 rounded-full bg-bg-elevated flex items-center justify-center text-[13px] shrink-0 mt-0.5">
-      {emoji}
-    </div>
+    <div className={`${styles.avatar} ${styles.avatarAgent}`}>{emoji}</div>
   );
 }
 
 function RoutineAvatar() {
-  return (
-    <div className="w-7 h-7 rounded-full bg-bubble-routine border border-[#3a4a60] flex items-center justify-center text-[13px] shrink-0 mt-0.5">
-      ⚡
-    </div>
-  );
+  return <div className={`${styles.avatar} ${styles.avatarRoutine}`}>⚡</div>;
 }
 
 export function MessageBubble({
@@ -47,18 +40,17 @@ export function MessageBubble({
       ? `Routine · ${timeStr}`
       : `${personaName} · ${timeStr}`;
 
-  const bubbleClasses = isUser
-    ? "bg-bubble-user rounded-[12px] rounded-br-[4px]"
+  const bubbleClass = isUser
+    ? styles.bubbleUser
     : isRoutine
-      ? "bg-bubble-routine border border-[#3a4a60] rounded-[12px] rounded-bl-[4px]"
-      : "bg-bubble-agent border border-border-subtle rounded-[12px] rounded-bl-[4px]";
+      ? styles.bubbleRoutine
+      : styles.bubbleAgent;
 
   return (
     <div
-      className={[
-        "flex gap-2.5 px-[18px] py-[3px]",
-        isUser ? "flex-row-reverse" : "flex-row",
-      ].join(" ")}
+      className={[styles.row, isUser ? styles.rowUser : styles.rowAgent].join(
+        " ",
+      )}
     >
       {isUser ? (
         <UserAvatar />
@@ -68,26 +60,20 @@ export function MessageBubble({
         <AgentAvatar emoji={personaEmoji} />
       )}
 
-      <div className={isUser ? "flex flex-col items-end" : ""}>
-        <div
-          className={[
-            "max-w-[68%] px-[13px] py-[9px] text-[13.5px] leading-[1.55] text-text-primary break-words whitespace-pre-wrap",
-            bubbleClasses,
-          ].join(" ")}
-        >
-          {isRoutine && (
-            <div className="flex items-center gap-1 text-[10px] font-semibold text-info uppercase tracking-[0.06em] mb-1.5">
-              ⚡ Routine
+      <div className={[styles.col, isUser ? styles.colUser : ""].join(" ")}>
+        <div className={`${styles.bubble} ${bubbleClass}`}>
+          {isRoutine && <div className={styles.routineLabel}>⚡ Routine</div>}
+          {isUser ? (
+            message.content
+          ) : (
+            <div className={styles.markdown}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {message.content}
+              </ReactMarkdown>
             </div>
           )}
-          {message.content}
         </div>
-        <div
-          className={[
-            "text-[11px] text-text-tertiary mt-[3px] px-0.5",
-            isUser ? "text-right" : "",
-          ].join(" ")}
-        >
+        <div className={[styles.meta, isUser ? styles.metaUser : ""].join(" ")}>
           {metaText}
         </div>
       </div>
@@ -108,16 +94,20 @@ export function StreamingBubble({
   content,
 }: StreamingBubbleProps) {
   return (
-    <div className="flex flex-row gap-2.5 px-[18px] py-[3px]">
+    <div className={`${styles.row} ${styles.rowAgent}`}>
       <AgentAvatar emoji={personaEmoji} />
-      <div>
-        <div className="max-w-[68%] px-[13px] py-[9px] text-[13.5px] leading-[1.55] text-text-primary break-words whitespace-pre-wrap bg-bubble-agent border border-border-subtle rounded-[12px] rounded-bl-[4px]">
-          {content && <span>{content}</span>}
+      <div className={styles.col}>
+        <div className={`${styles.bubble} ${styles.bubbleAgent}`}>
+          {content && (
+            <div className={styles.markdown}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {content}
+              </ReactMarkdown>
+            </div>
+          )}
           <StreamingIndicator />
         </div>
-        <div className="text-[11px] text-text-tertiary mt-[3px] px-0.5">
-          {personaName} · now
-        </div>
+        <div className={styles.meta}>{personaName} · now</div>
       </div>
     </div>
   );

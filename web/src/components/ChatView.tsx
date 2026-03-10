@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback } from "react";
-import type { Thread } from "@/types";
+import { useEffect, useState, useCallback, useRef } from "react";
+import type { Thread, Message } from "@/types";
 import { useMessageStore } from "@/stores/useMessageStore";
 import { useSseStore } from "@/stores/useSseStore";
 import { useThreadStore } from "@/stores/useThreadStore";
@@ -9,18 +9,31 @@ import { MessageBubble, StreamingBubble } from "./MessageBubble";
 import { MessageInput } from "./MessageInput";
 import { ChatHeader } from "./ChatHeader";
 import { ConfigPane } from "./ConfigPane";
+import styles from "./ChatView.module.css";
 
 interface ChatViewProps {
   thread: Thread;
   onMobileMenuOpen?: () => void;
 }
 
+// Stable fallbacks — same reference every render, so Zustand's getSnapshot
+// never thinks the value changed when the thread key is simply absent.
+const EMPTY_MESSAGES: Message[] = [];
+const EMPTY_STRING = "";
+
 export function ChatView({ thread, onMobileMenuOpen }: ChatViewProps) {
   const [configOpen, setConfigOpen] = useState(false);
 
-  const messages = useMessageStore((s) => s.messagesByThread[thread.id] ?? []);
+  // Keep the thread id in a ref so selector closures don't go stale when the
+  // prop changes between renders but before the effect re-runs.
+  const threadIdRef = useRef(thread.id);
+  threadIdRef.current = thread.id;
+
+  const messages = useMessageStore(
+    (s) => s.messagesByThread[thread.id] ?? EMPTY_MESSAGES,
+  );
   const streamingContent = useMessageStore(
-    (s) => s.streamingContent[thread.id] ?? "",
+    (s) => s.streamingContent[thread.id] ?? EMPTY_STRING,
   );
   const isStreaming = useMessageStore((s) => s.isStreaming[thread.id] ?? false);
   const isSending = useMessageStore((s) => s.isSending[thread.id] ?? false);
@@ -77,7 +90,7 @@ export function ChatView({ thread, onMobileMenuOpen }: ChatViewProps) {
   const modelName = thread.active_model ?? undefined;
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden relative min-w-0">
+    <div className={styles.chatView}>
       {/* ── Header ── */}
       <ChatHeader
         thread={thread}
@@ -86,27 +99,19 @@ export function ChatView({ thread, onMobileMenuOpen }: ChatViewProps) {
       />
 
       {/* ── Messages area ── */}
-      <div
-        ref={containerRef}
-        className="flex-1 overflow-y-auto scrollbar-thin flex flex-col pt-6 pb-3"
-      >
+      <div ref={containerRef} className={`${styles.messages} scrollbar-thin`}>
         {isLoadingMessages ? (
-          <div className="flex-1 flex items-center justify-center text-text-tertiary text-[13px]">
-            Loading messages…
-          </div>
+          <div className={styles.loading}>Loading messages…</div>
         ) : visibleMessages.length === 0 && !isStreaming ? (
           /* Empty thread */
-          <div className="flex-1 flex flex-col items-center justify-center gap-3 px-10">
-            <div className="text-[40px] opacity-20">{personaEmoji}</div>
-            <div className="text-[15px] font-semibold text-text-secondary">
+          <div className={styles.emptyThread}>
+            <div className={styles.emptyEmoji}>{personaEmoji}</div>
+            <div className={styles.emptyTitle}>
               Start a conversation with {personaName}
             </div>
-            <div className="text-[13px] text-text-tertiary text-center max-w-[320px] leading-relaxed">
-              Send a message below to begin. Use{" "}
-              <code className="bg-bg-elevated px-[5px] py-px rounded-[3px] font-mono text-[12px]">
-                /help
-              </code>{" "}
-              to see available slash commands.
+            <div className={styles.emptyHint}>
+              Send a message below to begin. Use <code>/help</code> to see
+              available slash commands.
             </div>
           </div>
         ) : (
@@ -140,9 +145,7 @@ export function ChatView({ thread, onMobileMenuOpen }: ChatViewProps) {
 
         {/* Error banner */}
         {messageError && !isStreaming && (
-          <div className="mx-[18px] my-2 px-3.5 py-2.5 bg-error/10 border border-error/30 rounded-[8px] text-[13px] text-error leading-snug">
-            ⚠ {messageError}
-          </div>
+          <div className={styles.errorBanner}>⚠ {messageError}</div>
         )}
       </div>
 

@@ -206,12 +206,20 @@ pub async fn send(
 
     // Spawn the agent run-loop as a background Tokio task.
     // We clone state (cheap — it's all Arc/clone-cheap handles) and move
-    // the thread_id + content in.  The task streams tokens to any SSE clients
-    // connected to this thread and persists the completed assistant message.
+    // the thread_id + content in.  The task waits briefly for the client's
+    // EventSource to connect before starting to stream tokens, so that tokens
+    // aren't fired into the void before the browser is ready to receive them.
     let run_state = state.clone();
     let run_thread_id = thread_id.clone();
     let run_content = payload.content.clone();
     tokio::spawn(async move {
+        // Wait up to 3 seconds for the client SSE connection to be established.
+        // If no subscriber appears in time we proceed anyway — the message_complete
+        // event and DB persistence still happen, so the user sees the response on
+        // the next load or manual refresh.
+        run_state
+            .wait_for_subscriber(&run_thread_id, std::time::Duration::from_secs(3))
+            .await;
         agent::run(run_state, run_thread_id, run_content).await;
     });
 
@@ -225,7 +233,8 @@ pub async fn send(
 #[derive(Debug, Deserialize)]
 pub struct SlashCommandRequest {
     pub command: String,
-    pub args: Option<Vec<String>>,
+    /// Space-separated argument string, e.g. "list" or "switch abc123"
+    pub args: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -250,7 +259,13 @@ pub async fn slash_command(
     let user_id = get_user_id(&state).await?;
     let thread = verify_thread_ownership(&state, &thread_id, &user_id).await?;
 
-    let args = payload.args.unwrap_or_default();
+    // Split the args string into words so handlers can index by position.
+    let args: Vec<String> = payload
+        .args
+        .unwrap_or_default()
+        .split_whitespace()
+        .map(|s| s.to_string())
+        .collect();
     let command = payload.command.trim().to_lowercase();
 
     match command.as_str() {

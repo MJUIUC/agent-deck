@@ -3,6 +3,7 @@ import type { Thread, AgentPersona } from "@/types";
 import { ThreadItem } from "./ThreadItem";
 import { PersonaPickerModal } from "./PersonaPickerModal";
 import { Plus, Settings, Archive } from "lucide-react";
+import styles from "./Sidebar.module.css";
 
 interface SidebarProps {
   threads: Thread[];
@@ -98,35 +99,25 @@ export function Sidebar({
     <>
       {/* ── Sidebar panel ── */}
       <aside
-        className={[
-          "w-[260px] min-w-[260px] bg-bg-secondary border-r border-border-subtle",
-          "flex flex-col overflow-hidden",
-          // Mobile: fixed, slides in from left
-          "max-sm:fixed max-sm:inset-y-0 max-sm:left-0 max-sm:z-50",
-          "max-sm:shadow-[4px_0_24px_rgba(0,0,0,0.4)]",
-          "max-sm:transition-transform max-sm:duration-250",
-          isMobileOpen ? "max-sm:translate-x-0" : "max-sm:-translate-x-full",
-        ]
+        className={[styles.sidebar, isMobileOpen ? styles.sidebarOpen : ""]
           .filter(Boolean)
           .join(" ")}
         aria-label="Thread list"
       >
         {/* ── Header ── */}
-        <div className="px-3.5 pt-4 pb-3 border-b border-border-subtle shrink-0">
+        <div className={styles.header}>
           {/* Brand row */}
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <span className="text-lg">🤖</span>
-              <span className="text-[15px] font-semibold text-text-primary tracking-tight">
-                agent-deck
-              </span>
+          <div className={styles.brand}>
+            <div className={styles.brandInner}>
+              <span className={styles.brandEmoji}>🤖</span>
+              <span className={styles.brandName}>agent-deck</span>
             </div>
             {/* Mobile close button */}
             {onMobileClose && (
               <button
                 onClick={onMobileClose}
                 aria-label="Close sidebar"
-                className="hidden max-sm:flex items-center justify-center w-7 h-7 rounded text-text-tertiary hover:text-text-primary hover:bg-bg-elevated transition-colors"
+                className={styles.mobileCloseBtn}
               >
                 ✕
               </button>
@@ -135,7 +126,7 @@ export function Sidebar({
 
           {/* New Chat button */}
           <button
-            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-accent-primary hover:bg-accent-secondary text-text-inverse text-[13px] font-semibold rounded-[7px] transition-colors disabled:opacity-60 disabled:cursor-default"
+            className={styles.newChatBtn}
             onClick={handleNewChat}
             disabled={isCreating}
           >
@@ -145,9 +136,9 @@ export function Sidebar({
         </div>
 
         {/* ── Search ── */}
-        <div className="px-3.5 py-2.5 border-b border-border-subtle shrink-0">
+        <div className={styles.searchWrap}>
           <input
-            className="search-input w-full bg-bg-tertiary border border-border-subtle rounded-[6px] py-1.5 pr-2.5 pl-[30px] text-text-primary text-[13px] outline-none placeholder:text-text-tertiary focus:border-border-default transition-colors"
+            className={styles.searchInput}
             type="text"
             placeholder="Search threads…"
             value={searchQuery}
@@ -157,37 +148,29 @@ export function Sidebar({
         </div>
 
         {/* ── Thread list ── */}
-        <div className="flex-1 overflow-y-auto py-1.5 scrollbar-thin">
+        <div className={`${styles.threadList} scrollbar-thin`}>
           {isLoading ? (
-            <div className="py-8 text-center text-text-tertiary text-[13px]">
-              Loading…
-            </div>
+            <div className={styles.loadingText}>Loading…</div>
           ) : threads.length === 0 ? (
-            <div className="flex flex-col items-center justify-center gap-2 px-5 py-10 text-center">
-              <div className="text-3xl opacity-30 mb-1">💬</div>
-              <div className="text-[13px] font-semibold text-text-secondary">
-                No threads yet
-              </div>
-              <div className="text-[12px] text-text-tertiary leading-snug max-w-[180px]">
+            <div className={styles.emptyState}>
+              <div className={styles.emptyIcon}>💬</div>
+              <div className={styles.emptyTitle}>No threads yet</div>
+              <div className={styles.emptyDesc}>
                 Start a new chat to begin a conversation with your agent.
               </div>
             </div>
           ) : filteredThreads.length === 0 ? (
-            <div className="flex flex-col items-center justify-center gap-2 px-5 py-10 text-center">
-              <div className="text-2xl opacity-30 mb-1">🔍</div>
-              <div className="text-[13px] font-semibold text-text-secondary">
-                No results
-              </div>
-              <div className="text-[12px] text-text-tertiary leading-snug">
+            <div className={styles.emptyState}>
+              <div className={styles.emptyIcon}>🔍</div>
+              <div className={styles.emptyTitle}>No results</div>
+              <div className={styles.emptyDesc}>
                 Try a different search term.
               </div>
             </div>
           ) : (
             groupedThreads.map(({ label, threads: groupThreads }) => (
               <div key={label}>
-                <div className="px-3.5 pt-2 pb-1 text-[10px] font-semibold text-text-tertiary uppercase tracking-[0.08em]">
-                  {label}
-                </div>
+                <div className={styles.groupLabel}>{label}</div>
                 {groupThreads.map((thread) => (
                   <ThreadItem
                     key={thread.id}
@@ -202,15 +185,12 @@ export function Sidebar({
         </div>
 
         {/* ── Footer ── */}
-        <div className="px-3.5 py-2.5 border-t border-border-subtle flex gap-2 shrink-0">
-          <button
-            className="flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 bg-transparent border border-border-subtle rounded-[6px] text-text-secondary text-[12px] cursor-pointer hover:bg-bg-elevated hover:text-text-primary transition-colors"
-            onClick={onOpenSettings}
-          >
+        <div className={styles.footer}>
+          <button className={styles.footerBtn} onClick={onOpenSettings}>
             <Settings size={13} />
             Settings
           </button>
-          <button className="flex-1 flex items-center justify-center gap-1.5 px-2.5 py-1.5 bg-transparent border border-border-subtle rounded-[6px] text-text-secondary text-[12px] cursor-pointer hover:bg-bg-elevated hover:text-text-primary transition-colors">
+          <button className={styles.footerBtn}>
             <Archive size={13} />
             Archived
           </button>

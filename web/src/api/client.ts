@@ -12,7 +12,7 @@ import type {
 // Base fetch helper — throws on non-OK responses with the error body
 async function apiFetch<T>(
   path: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
 ): Promise<T> {
   const res = await fetch(path, {
     ...options,
@@ -59,6 +59,26 @@ export const personasApi = {
       body: JSON.stringify(payload),
     });
   },
+
+  update(
+    id: string,
+    payload: {
+      name?: string;
+      emoji?: string;
+      system_prompt?: string;
+      default_model?: string;
+      default_provider?: string;
+    },
+  ): Promise<{ data: AgentPersona }> {
+    return apiFetch(`/api/personas/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  delete(id: string): Promise<{ data: { deleted: boolean } }> {
+    return apiFetch(`/api/personas/${id}`, { method: "DELETE" });
+  },
 };
 
 // ── Threads ───────────────────────────────────────────────────────────────────
@@ -91,7 +111,7 @@ export const threadsApi = {
       active_model?: string;
       active_provider?: string;
       system_prompt_addendum?: string;
-    }
+    },
   ): Promise<{ data: Thread }> {
     return apiFetch(`/api/threads/${id}`, {
       method: "PUT",
@@ -109,7 +129,7 @@ export const threadsApi = {
 export const messagesApi = {
   list(
     threadId: string,
-    opts: { limit?: number; before?: string } = {}
+    opts: { limit?: number; before?: string } = {},
   ): Promise<{ data: Message[] }> {
     const params = new URLSearchParams();
     if (opts.limit != null) params.set("limit", String(opts.limit));
@@ -118,10 +138,7 @@ export const messagesApi = {
     return apiFetch(`/api/threads/${threadId}/messages${qs ? `?${qs}` : ""}`);
   },
 
-  send(
-    threadId: string,
-    content: string
-  ): Promise<{ data: Message }> {
+  send(threadId: string, content: string): Promise<{ data: Message }> {
     return apiFetch(`/api/threads/${threadId}/messages`, {
       method: "POST",
       body: JSON.stringify({ content }),
@@ -131,7 +148,7 @@ export const messagesApi = {
   sendCommand(
     threadId: string,
     command: string,
-    args?: string
+    args?: string,
   ): Promise<{ data: SlashCommandResponse }> {
     return apiFetch(`/api/threads/${threadId}/command`, {
       method: "POST",
@@ -146,6 +163,48 @@ export const providersApi = {
   list(): Promise<{ data: Provider[] }> {
     return apiFetch("/api/providers");
   },
+
+  get(id: string): Promise<{ data: Provider }> {
+    return apiFetch(`/api/providers/${id}`);
+  },
+
+  create(payload: {
+    name: string;
+    kind: string;
+    base_url: string;
+    api_key?: string;
+  }): Promise<{ data: Provider }> {
+    return apiFetch("/api/providers", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  update(
+    id: string,
+    payload: {
+      name?: string;
+      kind?: string;
+      base_url?: string;
+      api_key?: string;
+      enabled?: boolean;
+    },
+  ): Promise<{ data: Provider }> {
+    return apiFetch(`/api/providers/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  delete(id: string): Promise<{ data: { deleted: boolean } }> {
+    return apiFetch(`/api/providers/${id}`, { method: "DELETE" });
+  },
+
+  test(
+    id: string,
+  ): Promise<{ data: { models: string[]; connected: boolean } }> {
+    return apiFetch(`/api/providers/${id}/test`, { method: "POST" });
+  },
 };
 
 // ── Models ────────────────────────────────────────────────────────────────────
@@ -153,6 +212,68 @@ export const providersApi = {
 export const modelsApi = {
   list(providerId: string): Promise<{ data: Model[] }> {
     return apiFetch(`/api/providers/${providerId}/models`);
+  },
+
+  sync(providerId: string): Promise<{ data: Model[] }> {
+    return apiFetch(`/api/providers/${providerId}/models`, { method: "POST" });
+  },
+
+  update(
+    providerId: string,
+    modelId: string,
+    payload: { enabled?: boolean; display_name?: string },
+  ): Promise<{ data: Model }> {
+    return apiFetch(`/api/providers/${providerId}/models/${modelId}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  delete(
+    providerId: string,
+    modelId: string,
+  ): Promise<{ data: { deleted: boolean } }> {
+    return apiFetch(`/api/providers/${providerId}/models/${modelId}`, {
+      method: "DELETE",
+    });
+  },
+};
+
+// ── Copilot auth ──────────────────────────────────────────────────────────────
+
+export const copilotApi = {
+  authStatus(): Promise<{
+    data: {
+      process_status: string;
+      authenticated: boolean;
+      reason?: string;
+    };
+  }> {
+    return apiFetch("/api/providers/copilot/auth-status");
+  },
+
+  authStart(): Promise<{
+    data: {
+      device_code: string;
+      user_code: string;
+      verification_uri: string;
+      expires_in: number;
+      interval: number;
+    };
+  }> {
+    return apiFetch("/api/providers/copilot/auth-start", { method: "POST" });
+  },
+
+  authPoll(deviceCode: string): Promise<{
+    data: {
+      authenticated: boolean;
+      reason?: string;
+    };
+  }> {
+    return apiFetch("/api/providers/copilot/auth-poll", {
+      method: "POST",
+      body: JSON.stringify({ device_code: deviceCode }),
+    });
   },
 };
 
