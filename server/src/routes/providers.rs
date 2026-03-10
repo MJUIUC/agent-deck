@@ -10,7 +10,7 @@ use crate::{
     error::{AppError, AppResult},
     models::provider::{CreateProvider, Provider, ProviderResponse, UpdateProvider},
     routes::AppState,
-    services::{encryption, provider as provider_service},
+    services::{copilot as copilot_service, encryption, provider as provider_service},
 };
 
 /// Helper: get the single user id from the DB.
@@ -277,4 +277,119 @@ pub async fn test_connection(
         StatusCode::OK,
         Json(json!({ "data": { "models": models, "connected": true } })),
     ))
+}
+
+// ─── Copilot auth endpoints ───────────────────────────────────────────────────
+
+/// GET /api/providers/copilot/auth-status
+///
+/// Returns whether copilot-api currently holds a valid GitHub token.
+/// Also reflects the process status (not running, connecting, etc.).
+pub async fn copilot_auth_status(State(state): State<AppState>) -> AppResult<impl IntoResponse> {
+    let Some(ref copilot) = state.copilot else {
+        return Ok((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({
+                "data": {
+                    "process_status": "unavailable",
+                    "authenticated": false,
+                    "reason": "copilot-api service is not configured"
+                }
+            })),
+        ));
+    };
+
+    let process_status = copilot.status().await;
+    let process_status_str = process_status.as_str().to_string();
+
+    if !copilot.is_available().await {
+        return Ok((
+            StatusCode::OK,
+            Json(json!({
+                "data": {
+                    "process_status": process_status_str,
+                    "authenticated": false,
+                    "reason": "copilot-api process is not ready"
+                }
+            })),
+        ));
+    }
+
+    // Proxy is up — check whether it has a valid GitHub token
+    let auth = copilot_service::check_auth_status(copilot.base_url())
+        .await
+        .map_err(|e| AppError::Provider(e.to_string()))?;
+
+    Ok((
+        StatusCode::OK,
+        Json(json!({
+            "data": {
+                "process_status": process_status_str,
+                "authenticated": auth.authenticated,
+                "reason": auth.reason
+            }
+        })),
+    ))
+}
+
+/// POST /api/providers/copilot/auth-start
+///
+/// Triggers the GitHub device auth flow through copilot-api.
+/// Returns the device code and verification URL for the UI to display.
+///
+/// The user visits the verification URL, enters the user code, and authorises
+/// the application.  Once complete copilot-api will hold a valid token and
+/// subsequent calls to `/auth-status` will return `authenticated: true`.
+pub async fn copilot_auth_start(State(state): State<AppState>) -> AppResult<impl IntoResponse> {
+    let Some(ref copilot) = state.copilot else {
+        return Err(AppError::Provider(
+            "copilot-api service is not configured".to_string(),
+        ));
+    };
+
+    if !copilot.is_available().await {
+        return Err(AppError::Provider(format!(
+            "copilot-api is not ready (status: {}). \
+             Wait for the process to start before initiating auth.",
+            copilot.status().await.as_str()
+        )));
+    }
+
+    // The copilot-api `auth` subcommand handles the device flow internally.
+    // We trigger it by hitting the `/token` endpoint with a POST — the proxy
+    // starts the GitHub device auth flow and returns the device code details.
+    //
+    // NOTE: The exact endpoint depends on the copilot-api version.  We use
+    // the base URL without `/v1` since the auth endpoint lives at the root.
+    let base = copilot
+        .base_url()
+        .trim_end_matches("/v1")
+        .trim_end_matches('/');
+    let url = format!("{}/token", base);
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("HTTP client error: {}", e)))?;
+
+    let resp = client
+        .post(&url)
+        .send()
+        .await
+        .map_err(|e| AppError::Provider(format!("Failed to reach copilot-api: {}", e)))?;
+
+    let status = resp.status();
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .unwrap_or_else(|_| json!({ "error": "invalid response from copilot-api" }));
+
+    if status.is_success() {
+        Ok((StatusCode::OK, Json(json!({ "data": body }))))
+    } else {
+        Err(AppError::Provider(format!(
+            "copilot-api auth start failed: {}",
+            body
+        )))
+    }
 }

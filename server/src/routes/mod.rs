@@ -8,12 +8,16 @@ use axum::{
     Router,
 };
 use sqlx::SqlitePool;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use tokio::sync::broadcast;
 use tower_http::{services::ServeDir, trace::TraceLayer};
 use tracing::warn;
 
 use crate::config::Config;
 use crate::error::AppError;
 use crate::services::auth as auth_service;
+use crate::services::copilot::{CopilotApiService, GlobalEvent};
 
 pub mod auth;
 pub mod config;
@@ -31,12 +35,23 @@ pub mod threads;
 pub mod tokens;
 
 /// Application state shared across all handlers via Axum's `State` extractor.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AppState {
     pub pool: SqlitePool,
     pub config: Config,
     pub machine_secret: String,
     pub auth_token: String,
+    /// Global SSE broadcast channel.  All connected global-stream clients
+    /// subscribe via `global_tx.subscribe()`.
+    pub global_tx: broadcast::Sender<GlobalEvent>,
+    /// Per-thread SSE senders.  Keyed by thread ID; each value is a list of
+    /// senders — one per currently connected client.
+    pub thread_senders: Arc<
+        Mutex<HashMap<String, Vec<tokio::sync::mpsc::Sender<crate::routes::sse::ThreadEvent>>>>,
+    >,
+    /// Handle to the copilot-api side-car service.  `None` when the service
+    /// could not be started (e.g. `bun` not on PATH).
+    pub copilot: Option<CopilotApiService>,
 }
 
 /// Build the main application router.
@@ -55,12 +70,29 @@ pub async fn build_router(pool: SqlitePool, config: Config) -> anyhow::Result<Ro
     tracing::info!("║  Copy this token to authenticate from remote devices.   ║");
     tracing::info!("╚══════════════════════════════════════════════════════════╝");
 
+    // ── SSE broadcast channel ─────────────────────────────────────────────────
+    // Capacity of 256 gives global-stream clients some slack before they start
+    // lagging on bursts of events.
+    let (global_tx, _global_rx) = broadcast::channel::<GlobalEvent>(256);
+
+    // ── copilot-api side-car ──────────────────────────────────────────────────
+    let copilot = CopilotApiService::new(global_tx.clone());
+    let copilot_handle = copilot.clone();
+
     let state = AppState {
         pool,
         config: config.clone(),
         machine_secret,
         auth_token,
+        global_tx,
+        thread_senders: Arc::new(Mutex::new(HashMap::new())),
+        copilot: Some(copilot_handle),
     };
+
+    // Start copilot-api supervision in the background.
+    // This is non-blocking — the server starts immediately regardless of whether
+    // copilot-api becomes available.
+    copilot.start();
 
     // Public API routes (no auth required)
     let public_api = Router::new()
@@ -214,9 +246,25 @@ pub async fn build_router(pool: SqlitePool, config: Config) -> anyhow::Result<Ro
         )),
     );
 
+    // ── Copilot provider auth routes (public — auth handled by copilot-api itself) ──
+    let copilot_routes = Router::new()
+        .route(
+            "/api/providers/copilot/auth-status",
+            get(providers::copilot_auth_status),
+        )
+        .route(
+            "/api/providers/copilot/auth-start",
+            axum::routing::post(providers::copilot_auth_start),
+        )
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ));
+
     let app = Router::new()
         .merge(public_api)
         .merge(protected_api)
+        .merge(copilot_routes)
         .fallback_service(static_files)
         .layer(TraceLayer::new_for_http())
         .with_state(state);
@@ -306,6 +354,8 @@ mod tests {
         let token = auth_service::get_or_create_auth_token(&pool)
             .await
             .expect("token");
+        // build_router starts copilot supervision — that's fine in tests,
+        // it will fail to spawn bun (not installed in CI) and back off quietly.
         let app = build_router(pool, config).await.expect("router");
         (app, token)
     }
