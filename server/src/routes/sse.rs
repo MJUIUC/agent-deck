@@ -63,7 +63,7 @@ impl ThreadEvent {
             ThreadEvent::Token { .. } => "token",
             ThreadEvent::MessageComplete { .. } => "message_complete",
             ThreadEvent::RoutineMessage { .. } => "routine_message",
-            ThreadEvent::Error { .. } => "error",
+            ThreadEvent::Error { .. } => "stream_error",
         }
     }
 }
@@ -463,7 +463,9 @@ mod tests {
             code: "PROVIDER_UNAVAILABLE".to_string(),
             message: "copilot-api is down".to_string(),
         };
-        assert_eq!(e.event_name(), "error");
+        // Named "stream_error" to avoid collision with EventSource's built-in
+        // "error" event (which fires for connection errors, not server errors).
+        assert_eq!(e.event_name(), "stream_error");
     }
 
     #[test]

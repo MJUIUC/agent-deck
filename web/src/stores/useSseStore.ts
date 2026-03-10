@@ -146,10 +146,12 @@ export const useSseStore = create<SseStore>((set, get) => ({
         }
       };
 
+      // Handles server-sent "stream_error" events (distinct from the built-in
+      // EventSource connection error, which is handled by onerror below).
       const handleError = (e: MessageEvent) => {
         try {
           const data = JSON.parse(e.data) as SseThreadEvent;
-          if (data.event === "error") {
+          if (data.event === "stream_error" || data.event === "error") {
             useMessageStore
               .getState()
               .setStreamingError(threadId, data.message);
@@ -190,47 +192,9 @@ export const useSseStore = create<SseStore>((set, get) => ({
       es.addEventListener("token", handleToken);
       es.addEventListener("message_complete", handleMessageComplete);
       es.addEventListener("routine_message", handleRoutineMessage);
-      es.addEventListener("error_event", handleError);
-      // Also listen on the generic "message" event as a fallback
-      es.addEventListener("message", (e: MessageEvent) => {
-        try {
-          const data = JSON.parse(e.data);
-          if (!data.event) return;
-          if (data.event === "token")
-            useMessageStore.getState().appendToken(threadId, data.token);
-          else if (data.event === "message_complete") {
-            useMessageStore.getState().finalizeStream(threadId, {
-              id: data.id,
-              thread_id: data.thread_id,
-              role: data.role,
-              content: data.content,
-              source: "chat",
-              routine_id: null,
-              visibility: "visible",
-              execution_id: null,
-              created_at: data.created_at,
-            });
-          } else if (data.event === "routine_message") {
-            useMessageStore.getState().addMessage({
-              id: data.id,
-              thread_id: data.thread_id,
-              role: data.role,
-              content: data.content,
-              source: "routine",
-              routine_id: data.routine_id,
-              visibility: "visible",
-              execution_id: null,
-              created_at: data.created_at,
-            });
-          } else if (data.event === "error") {
-            useMessageStore
-              .getState()
-              .setStreamingError(threadId, data.message);
-          }
-        } catch {
-          // ignore
-        }
-      });
+      // Named "stream_error" to avoid collision with EventSource's built-in
+      // "error" event (which fires for connection drops, not server errors).
+      es.addEventListener("stream_error", handleError);
 
       es.addEventListener("open", () => {
         if (get().threadConnectionId === threadId) {
@@ -248,7 +212,7 @@ export const useSseStore = create<SseStore>((set, get) => ({
         es.removeEventListener("token", handleToken);
         es.removeEventListener("message_complete", handleMessageComplete);
         es.removeEventListener("routine_message", handleRoutineMessage);
-        es.removeEventListener("error_event", handleError);
+        es.removeEventListener("stream_error", handleError);
         es.close();
       };
 
@@ -315,23 +279,6 @@ export const useSseStore = create<SseStore>((set, get) => ({
         }
       };
 
-      const handleMessage = (e: MessageEvent) => {
-        try {
-          const data = JSON.parse(e.data);
-          if (data.event === "thread_updated") {
-            useThreadStore
-              .getState()
-              .updateThreadPreview(
-                data.thread_id,
-                data.last_message,
-                data.updated_at,
-              );
-          }
-        } catch {
-          // ignore
-        }
-      };
-
       const handleConnError = () => {
         set({
           globalConnected: false,
@@ -355,7 +302,6 @@ export const useSseStore = create<SseStore>((set, get) => ({
       };
 
       es.addEventListener("thread_updated", handleThreadUpdated);
-      es.addEventListener("message", handleMessage);
 
       es.addEventListener("open", () => {
         set({
@@ -369,7 +315,6 @@ export const useSseStore = create<SseStore>((set, get) => ({
 
       const cleanup = () => {
         es.removeEventListener("thread_updated", handleThreadUpdated);
-        es.removeEventListener("message", handleMessage);
         es.close();
       };
 
