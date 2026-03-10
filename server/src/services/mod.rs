@@ -1,5 +1,7 @@
 pub mod agent;
 pub mod auth;
+pub mod context;
+pub mod copilot;
 pub mod encryption;
 pub mod memory;
 pub mod provider;

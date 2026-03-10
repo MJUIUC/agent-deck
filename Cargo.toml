@@ -30,4 +30,5 @@ sha2 = "0.10"
 cookie = "0.18"
 axum-extra = { version = "0.9", features = ["cookie"] }
 futures = "0.3"
-tokio-stream = "0.1"
+tokio-stream = { version = "0.1", features = ["sync"] }
+async-trait = "0.1"
