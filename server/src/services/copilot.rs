@@ -242,7 +242,14 @@ impl CopilotApiService {
             "dist/main.js"
         };
 
-        let child = Command::new("bun")
+        // Resolve the bun binary: prefer whatever is on PATH, then fall back to
+        // the default install location used by the official installer on macOS/Linux
+        // (~/.bun/bin/bun).  This handles the common case where the shell profile
+        // has added ~/.bun/bin to PATH but the server is launched outside of an
+        // interactive shell (e.g. from an IDE or a launchd service).
+        let bun_bin = Self::resolve_bun_binary();
+
+        let child = Command::new(&bun_bin)
             .args(["run", entry, "start", "--port", &COPILOT_PORT.to_string()])
             .current_dir(&copilot_dir)
             // Pipe stdout/stderr so we don't clutter the server's terminal by default.
@@ -253,8 +260,8 @@ impl CopilotApiService {
             .map_err(|e| {
                 if e.kind() == std::io::ErrorKind::NotFound {
                     anyhow!(
-                        "`bun` not found on PATH. Install Bun (https://bun.sh) to use \
-                         the GitHub Copilot provider."
+                        "`bun` not found on PATH or at ~/.bun/bin/bun. \
+                         Install Bun (https://bun.sh) to use the GitHub Copilot provider."
                     )
                 } else {
                     anyhow!("Failed to spawn copilot-api: {}", e)
@@ -262,6 +269,34 @@ impl CopilotApiService {
             })?;
 
         Ok(child)
+    }
+
+    /// Resolve the path to the `bun` binary.
+    ///
+    /// Checks (in order):
+    /// 1. `bun` on the current `PATH` (fast path for most environments).
+    /// 2. `~/.bun/bin/bun` — the default location used by the official Bun
+    ///    installer on macOS and Linux, which may not be on PATH when the server
+    ///    is launched outside of an interactive shell.
+    fn resolve_bun_binary() -> std::ffi::OsString {
+        // Quick check: is `bun` already visible on PATH?
+        if which_bun_on_path() {
+            return "bun".into();
+        }
+
+        // Fall back to the well-known default install location.
+        if let Some(home) = std::env::var_os("HOME") {
+            let candidate = std::path::Path::new(&home)
+                .join(".bun")
+                .join("bin")
+                .join("bun");
+            if candidate.exists() {
+                return candidate.into_os_string();
+            }
+        }
+
+        // Give up and let the OS return NotFound so the caller can log a clear error.
+        "bun".into()
     }
 
     /// Poll `http://localhost:4141/` until it returns HTTP 200, or until
@@ -349,6 +384,18 @@ impl CopilotApiService {
 }
 
 // ─── Auth helpers ─────────────────────────────────────────────────────────────
+
+/// Returns `true` if `bun` can be found somewhere on the current `PATH`.
+fn which_bun_on_path() -> bool {
+    if let Ok(path_var) = std::env::var("PATH") {
+        for dir in std::env::split_paths(&path_var) {
+            if dir.join("bun").exists() {
+                return true;
+            }
+        }
+    }
+    false
+}
 
 /// Response from `GET /token` on the copilot-api proxy.
 #[derive(Debug, Serialize, Deserialize)]

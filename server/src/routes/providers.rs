@@ -280,53 +280,57 @@ pub async fn test_connection(
 }
 
 // ─── Copilot auth endpoints ───────────────────────────────────────────────────
+//
+// These endpoints implement the GitHub OAuth device flow directly in the server
+// so the web UI can drive authentication without needing terminal access.
+//
+// The GitHub token is written to ~/.local/share/copilot-api/github_token —
+// exactly the path that copilot-api reads on startup, so once auth completes
+// the sidecar will pick up the token automatically on next startup (or restart).
+
+/// Path where copilot-api stores the GitHub OAuth token.
+fn github_token_path() -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+    std::path::Path::new(&home)
+        .join(".local")
+        .join("share")
+        .join("copilot-api")
+        .join("github_token")
+}
+
+/// Read the stored GitHub token, returning None if missing or empty.
+async fn read_github_token() -> Option<String> {
+    let path = github_token_path();
+    let contents = tokio::fs::read_to_string(&path).await.ok()?;
+    let trimmed = contents.trim().to_string();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
 
 /// GET /api/providers/copilot/auth-status
 ///
-/// Returns whether copilot-api currently holds a valid GitHub token.
-/// Also reflects the process status (not running, connecting, etc.).
+/// Returns whether a GitHub token is present in the copilot-api token file.
+/// Also reflects the sidecar process status when available.
 pub async fn copilot_auth_status(State(state): State<AppState>) -> AppResult<impl IntoResponse> {
-    let Some(ref copilot) = state.copilot else {
-        return Ok((
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({
-                "data": {
-                    "process_status": "unavailable",
-                    "authenticated": false,
-                    "reason": "copilot-api service is not configured"
-                }
-            })),
-        ));
+    let process_status = match state.copilot {
+        Some(ref svc) => svc.status().await.as_str().to_string(),
+        None => "unavailable".to_string(),
     };
 
-    let process_status = copilot.status().await;
-    let process_status_str = process_status.as_str().to_string();
-
-    if !copilot.is_available().await {
-        return Ok((
-            StatusCode::OK,
-            Json(json!({
-                "data": {
-                    "process_status": process_status_str,
-                    "authenticated": false,
-                    "reason": "copilot-api process is not ready"
-                }
-            })),
-        ));
-    }
-
-    // Proxy is up — check whether it has a valid GitHub token
-    let auth = copilot_service::check_auth_status(copilot.base_url())
-        .await
-        .map_err(|e| AppError::Provider(e.to_string()))?;
+    let authenticated = read_github_token().await.is_some();
 
     Ok((
         StatusCode::OK,
         Json(json!({
             "data": {
-                "process_status": process_status_str,
-                "authenticated": auth.authenticated,
-                "reason": auth.reason
+                "process_status": process_status,
+                "authenticated": authenticated,
+                "reason": if authenticated { serde_json::Value::Null } else {
+                    serde_json::Value::String("No GitHub token found. Please authenticate.".to_string())
+                }
             }
         })),
     ))
@@ -334,38 +338,13 @@ pub async fn copilot_auth_status(State(state): State<AppState>) -> AppResult<imp
 
 /// POST /api/providers/copilot/auth-start
 ///
-/// Triggers the GitHub device auth flow through copilot-api.
-/// Returns the device code and verification URL for the UI to display.
-///
-/// The user visits the verification URL, enters the user code, and authorises
-/// the application.  Once complete copilot-api will hold a valid token and
-/// subsequent calls to `/auth-status` will return `authenticated: true`.
-pub async fn copilot_auth_start(State(state): State<AppState>) -> AppResult<impl IntoResponse> {
-    let Some(ref copilot) = state.copilot else {
-        return Err(AppError::Provider(
-            "copilot-api service is not configured".to_string(),
-        ));
-    };
-
-    if !copilot.is_available().await {
-        return Err(AppError::Provider(format!(
-            "copilot-api is not ready (status: {}). \
-             Wait for the process to start before initiating auth.",
-            copilot.status().await.as_str()
-        )));
-    }
-
-    // The copilot-api `auth` subcommand handles the device flow internally.
-    // We trigger it by hitting the `/token` endpoint with a POST — the proxy
-    // starts the GitHub device auth flow and returns the device code details.
-    //
-    // NOTE: The exact endpoint depends on the copilot-api version.  We use
-    // the base URL without `/v1` since the auth endpoint lives at the root.
-    let base = copilot
-        .base_url()
-        .trim_end_matches("/v1")
-        .trim_end_matches('/');
-    let url = format!("{}/token", base);
+/// Calls GitHub's device-code endpoint directly and returns the user_code +
+/// verification_uri for the UI to display.  The device_code is also returned
+/// so the UI can poll /auth-poll to complete the flow.
+pub async fn copilot_auth_start(_state: State<AppState>) -> AppResult<impl IntoResponse> {
+    // Same client_id and scopes used by copilot-api itself.
+    let client_id = "Iv1.b507a08c87ecfe98";
+    let scope = "read:user";
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
@@ -373,23 +352,95 @@ pub async fn copilot_auth_start(State(state): State<AppState>) -> AppResult<impl
         .map_err(|e| AppError::Internal(anyhow::anyhow!("HTTP client error: {}", e)))?;
 
     let resp = client
-        .post(&url)
+        .post("https://github.com/login/device/code")
+        .header("content-type", "application/json")
+        .header("accept", "application/json")
+        .json(&serde_json::json!({ "client_id": client_id, "scope": scope }))
         .send()
         .await
-        .map_err(|e| AppError::Provider(format!("Failed to reach copilot-api: {}", e)))?;
+        .map_err(|e| AppError::Provider(format!("Failed to reach GitHub: {}", e)))?;
 
-    let status = resp.status();
+    if !resp.status().is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        return Err(AppError::Provider(format!(
+            "GitHub device code request failed: {}",
+            body
+        )));
+    }
+
     let body: serde_json::Value = resp
         .json()
         .await
-        .unwrap_or_else(|_| json!({ "error": "invalid response from copilot-api" }));
+        .map_err(|e| AppError::Provider(format!("Invalid response from GitHub: {}", e)))?;
 
-    if status.is_success() {
-        Ok((StatusCode::OK, Json(json!({ "data": body }))))
-    } else {
-        Err(AppError::Provider(format!(
-            "copilot-api auth start failed: {}",
-            body
-        )))
+    Ok((StatusCode::OK, Json(json!({ "data": body }))))
+}
+
+/// POST /api/providers/copilot/auth-poll
+///
+/// Polls GitHub's OAuth access-token endpoint with the device_code.
+/// Returns `{ "data": { "authenticated": true } }` once the user has approved,
+/// or `{ "data": { "authenticated": false, "reason": "..." } }` while pending.
+/// On success the token is written to ~/.local/share/copilot-api/github_token.
+pub async fn copilot_auth_poll(
+    _state: State<AppState>,
+    Json(body): Json<serde_json::Value>,
+) -> AppResult<impl IntoResponse> {
+    let device_code = body
+        .get("device_code")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AppError::BadRequest("device_code is required".to_string()))?
+        .to_string();
+
+    let client_id = "Iv1.b507a08c87ecfe98";
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("HTTP client error: {}", e)))?;
+
+    let resp = client
+        .post("https://github.com/login/oauth/access_token")
+        .header("content-type", "application/json")
+        .header("accept", "application/json")
+        .json(&serde_json::json!({
+            "client_id": client_id,
+            "device_code": device_code,
+            "grant_type": "urn:ietf:params:oauth:grant-type:device_code"
+        }))
+        .send()
+        .await
+        .map_err(|e| AppError::Provider(format!("Failed to reach GitHub: {}", e)))?;
+
+    let poll_body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| AppError::Provider(format!("Invalid response from GitHub: {}", e)))?;
+
+    if let Some(token) = poll_body.get("access_token").and_then(|v| v.as_str()) {
+        // Write the token to the file copilot-api reads on startup.
+        let token_path = github_token_path();
+        if let Some(parent) = token_path.parent() {
+            tokio::fs::create_dir_all(parent).await.ok();
+        }
+        tokio::fs::write(&token_path, token)
+            .await
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to write token: {}", e)))?;
+
+        return Ok((
+            StatusCode::OK,
+            Json(json!({ "data": { "authenticated": true } })),
+        ));
     }
+
+    // Still pending or an error — surface the reason to the UI.
+    let reason = poll_body
+        .get("error")
+        .and_then(|v| v.as_str())
+        .unwrap_or("authorization_pending");
+
+    Ok((
+        StatusCode::OK,
+        Json(json!({ "data": { "authenticated": false, "reason": reason } })),
+    ))
 }

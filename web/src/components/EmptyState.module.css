@@ -1,0 +1,128 @@
+.root {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+    min-width: 0;
+}
+
+.body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+    padding: 0 40px;
+}
+
+/* ── Mobile menu button ── */
+.menuBtn {
+    display: none;
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.menuBtn:hover {
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+}
+
+@media (max-width: 640px) {
+    .menuBtn {
+        display: flex;
+    }
+}
+
+/* ── Shared text ── */
+.icon {
+    font-size: 48px;
+    opacity: 0.18;
+}
+
+.title {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    letter-spacing: -0.01em;
+}
+
+.desc {
+    font-size: 13px;
+    color: var(--text-tertiary);
+    text-align: center;
+    max-width: 340px;
+    line-height: 1.6;
+}
+
+.actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 6px;
+}
+
+/* ── Buttons ── */
+.btnPrimary {
+    padding: 8px 16px;
+    background: var(--accent-primary);
+    color: var(--text-inverse);
+    font-size: 13px;
+    font-weight: 500;
+    border-radius: 7px;
+    border: none;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.btnPrimary:hover {
+    background: var(--accent-secondary);
+}
+
+/* ── No-provider warning banner ── */
+.banner {
+    width: 100%;
+    max-width: 400px;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    background: rgba(196, 162, 74, 0.07);
+    border: 1px solid rgba(196, 162, 74, 0.28);
+    border-radius: 10px;
+    padding: 16px 20px;
+}
+
+.bannerIcon {
+    font-size: 20px;
+    flex-shrink: 0;
+    margin-top: 1px;
+}
+
+.bannerBody {
+    min-width: 0;
+}
+
+.bannerTitle {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+}
+
+.bannerDesc {
+    font-size: 12px;
+    color: var(--text-secondary);
+    line-height: 1.55;
+    margin-bottom: 12px;
+}
