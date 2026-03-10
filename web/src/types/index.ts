@@ -100,7 +100,10 @@ export interface SseRoutineMessageEvent {
 }
 
 export interface SseErrorEvent {
-  event: "error";
+  // Named "stream_error" on the wire to avoid collision with EventSource's
+  // built-in "error" connection event. The client handler also accepts the
+  // legacy "error" name for backwards compatibility during the transition.
+  event: "stream_error" | "error";
   code: string;
   message: string;
 }
