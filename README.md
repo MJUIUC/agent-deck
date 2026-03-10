@@ -12,7 +12,6 @@ Agent-Deck lets you run your own AI assistant on hardware you own. Everything st
 - Multiple agent personas with distinct personalities and system prompts
 - Persistent memory per persona (cross-thread, searchable)
 - Scheduled routines (cron-based prompts that run automatically)
-- Skills (experimental tool-call based capabilities)
 - MCP server integration
 - Android mobile app with push notifications
 - GitHub Copilot support via `copilot-api` proxy
@@ -197,13 +196,13 @@ The project is built in phases. See `PLAN.md` §10 for the full execution plan.
 
 | Phase | Status | Description |
 |---|---|---|
-| 1 — Skeleton | 🚧 In progress | Rust server, SQLite schema, React SPA shell, auth, all CRUD |
-| 2 — First Chat | ⏳ Pending | Agent run-loop, LLM streaming via SSE |
+| 1 — Skeleton | ✅ Complete | Rust server, SQLite schema, React SPA shell, auth, all CRUD |
+| 2 — First Chat | ✅ Complete | Agent run-loop, LLM streaming via SSE, chat UI |
 | 3 — Config UI | ⏳ Pending | Setup wizard, provider/persona/thread management UI |
 | 4 — Memory & Routines | ⏳ Pending | Persistent memory, cron scheduler |
 | 5 — Mobile App | ⏳ Pending | React Native screens |
 | 6 — Push Notifications | ⏳ Pending | FCM integration |
-| 7 — Skills | ⏳ Pending | Experimental tool-call skills |
+| 7 — MCP Depth | ⏳ Pending | Tool inspector, local process management |
 | 8 — Polish | ⏳ Pending | Error handling, empty states, hardening |
 
 ---
