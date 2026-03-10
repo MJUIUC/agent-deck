@@ -105,7 +105,7 @@ async fn run_inner(state: &AppState, thread_id: &str, user_message: &str) -> Res
         .as_deref()
         .or(persona.default_model.as_deref());
 
-    let (provider_id, model_id) = match (provider_id, model_id) {
+    let (provider_id, model_uuid) = match (provider_id, model_id) {
         (Some(p), Some(m)) => (p.to_string(), m.to_string()),
         _ => {
             state.send_thread_event(
@@ -119,6 +119,27 @@ async fn run_inner(state: &AppState, thread_id: &str, user_message: &str) -> Res
                 },
             );
             return Ok(());
+        }
+    };
+
+    // Resolve the model UUID (FK stored on the thread) to the actual model_id
+    // string (e.g. "gpt-4o") that the provider API expects.
+    let model_row: Option<(String,)> = sqlx::query_as("SELECT model_id FROM models WHERE id = ?")
+        .bind(&model_uuid)
+        .fetch_optional(&state.pool)
+        .await?;
+
+    let model_id = match model_row {
+        Some((mid,)) => mid,
+        None => {
+            // Fall back to using the value as-is in case it was already a
+            // raw model string rather than a UUID (e.g. during manual testing).
+            warn!(
+                thread_id = %thread_id,
+                model_uuid = %model_uuid,
+                "Model UUID not found in DB — using value as raw model_id"
+            );
+            model_uuid
         }
     };
 

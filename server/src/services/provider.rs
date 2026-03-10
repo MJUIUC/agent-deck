@@ -14,14 +14,12 @@ use std::pin::Pin;
 use anyhow::{anyhow, Result};
 use async_openai::{
     config::OpenAIConfig,
-    types::{
-        ChatCompletionRequestMessage, ChatCompletionTool, CreateChatCompletionRequest,
-        CreateChatCompletionStreamResponse,
-    },
+    types::{ChatCompletionRequestMessage, ChatCompletionTool, CreateChatCompletionRequest},
     Client as OpenAIClient,
 };
 use futures::Stream;
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -102,6 +100,10 @@ pub trait LlmProvider: Send + Sync {
 pub struct OpenAiProvider {
     name: String,
     client: OpenAIClient<OpenAIConfig>,
+    /// Raw base URL stored for the custom streaming implementation.
+    base_url: String,
+    /// Optional API key stored for the custom streaming implementation.
+    api_key: Option<String>,
 }
 
 impl OpenAiProvider {
@@ -111,13 +113,17 @@ impl OpenAiProvider {
         base_url: impl Into<String>,
         api_key: Option<impl Into<String>>,
     ) -> Self {
-        let mut config = OpenAIConfig::new().with_api_base(base_url.into());
-        if let Some(key) = api_key {
-            config = config.with_api_key(key.into());
+        let base_url_str: String = base_url.into();
+        let api_key_str: Option<String> = api_key.map(|k| k.into());
+        let mut config = OpenAIConfig::new().with_api_base(base_url_str.clone());
+        if let Some(ref key) = api_key_str {
+            config = config.with_api_key(key.clone());
         }
         Self {
             name: name.into(),
             client: OpenAIClient::with_config(config),
+            base_url: base_url_str,
+            api_key: api_key_str,
         }
     }
 }
@@ -191,26 +197,15 @@ impl LlmProvider for OpenAiProvider {
         messages: Vec<ChatCompletionRequestMessage>,
         tools: Vec<ChatCompletionTool>,
     ) -> Result<TokenStream> {
-        let mut req = CreateChatCompletionRequest {
-            model: model.to_string(),
+        stream_via_reqwest(
+            &self.base_url,
+            self.api_key.as_deref(),
+            &self.name,
+            model,
             messages,
-            stream: Some(true),
-            ..Default::default()
-        };
-
-        if !tools.is_empty() {
-            req.tools = Some(tools);
-        }
-
-        let raw_stream = self
-            .client
-            .chat()
-            .create_stream(req)
-            .await
-            .map_err(|e| anyhow!("Streaming chat completion failed ({}): {}", self.name, e))?;
-
-        let mapped = map_openai_stream(raw_stream);
-        Ok(Box::pin(mapped))
+            tools,
+        )
+        .await
     }
 }
 
@@ -292,63 +287,223 @@ impl LlmProvider for CopilotProvider {
     }
 }
 
-// ─── Stream mapping helper ────────────────────────────────────────────────────
+// ─── Custom SSE streaming via reqwest ────────────────────────────────────────
+//
+// We implement our own SSE/streaming parser rather than relying on the
+// `async-openai` `create_stream` method.  The reason is that several proxies
+// (including the GitHub Copilot proxy used in development) emit non-standard
+// chunks that are missing required fields like `model`, which causes
+// `async-openai`'s strict serde deserialiser to return an error even for
+// otherwise valid token chunks.
+//
+// Our parser:
+//   1. Sends the chat-completion request with `stream: true` via `reqwest`.
+//   2. Reads the response body line-by-line.
+//   3. For each `data: <json>` line, attempts a lenient parse.
+//   4. Skips lines that don't carry token/tool-call data (e.g. Azure filter
+//      result chunks, keep-alive `: ping` lines, `data: [DONE]`).
+//   5. Emits one `TokenChunk` per line that carries useful data.
 
-/// Map the raw `async-openai` stream into our `TokenChunk` stream.
-fn map_openai_stream<S>(stream: S) -> impl Stream<Item = Result<TokenChunk>> + Send + 'static
-where
-    S: Stream<
-            Item = std::result::Result<
-                CreateChatCompletionStreamResponse,
-                async_openai::error::OpenAIError,
-            >,
-        > + Send
-        + 'static,
-{
-    use futures::StreamExt;
+/// Lenient per-chunk shapes — all fields optional so we don't fail on
+/// non-standard Azure / copilot-proxy response shapes.
+#[derive(Debug, Deserialize)]
+struct StreamChunk {
+    #[serde(default)]
+    choices: Vec<StreamChoice>,
+}
 
-    stream.map(|item| {
-        let response = item.map_err(|e| anyhow!("Stream error: {}", e))?;
+#[derive(Debug, Deserialize)]
+struct StreamChoice {
+    delta: StreamDelta,
+    finish_reason: Option<serde_json::Value>,
+}
 
-        let choice = match response.choices.into_iter().next() {
-            Some(c) => c,
-            None => {
-                return Ok(TokenChunk {
-                    delta: String::new(),
-                    finish_reason: None,
+#[derive(Debug, Default, Deserialize)]
+struct StreamDelta {
+    content: Option<String>,
+    tool_calls: Option<Vec<StreamToolCall>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StreamToolCall {
+    index: Option<u32>,
+    id: Option<String>,
+    function: Option<StreamFunction>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StreamFunction {
+    name: Option<String>,
+    arguments: Option<String>,
+}
+
+/// Build a `reqwest` client, POST a streaming chat-completion request to
+/// `<base_url>/chat/completions`, and return a `TokenStream`.
+async fn stream_via_reqwest(
+    base_url: &str,
+    api_key: Option<&str>,
+    provider_name: &str,
+    model: &str,
+    messages: Vec<ChatCompletionRequestMessage>,
+    tools: Vec<ChatCompletionTool>,
+) -> Result<TokenStream> {
+    use tokio_stream::wrappers::ReceiverStream;
+
+    // Build the request body manually so we control every field.
+    let mut body = serde_json::json!({
+        "model": model,
+        "messages": messages,
+        "stream": true,
+    });
+
+    if !tools.is_empty() {
+        body["tools"] = serde_json::to_value(&tools)?;
+    }
+
+    // Normalise base_url: strip trailing slash, then append the path.
+    let base = base_url.trim_end_matches('/');
+    let url = format!("{}/chat/completions", base);
+
+    let client = reqwest::Client::new();
+    let mut req = client
+        .post(&url)
+        .header("Content-Type", "application/json")
+        .header("Accept", "text/event-stream");
+
+    if let Some(key) = api_key {
+        req = req.bearer_auth(key);
+    }
+
+    let response = req
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| anyhow!("HTTP request to {} failed: {}", provider_name, e))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let body_text = response.text().await.unwrap_or_default();
+        return Err(anyhow!(
+            "Provider {} returned {} — {}",
+            provider_name,
+            status,
+            body_text
+        ));
+    }
+
+    // Spawn a task that reads the SSE byte stream line-by-line and sends
+    // parsed TokenChunks through a channel.  This lets us return a clean
+    // `Stream` without holding a reference to the response across an await.
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<TokenChunk>>(64);
+
+    let provider_name_owned = provider_name.to_string();
+    tokio::spawn(async move {
+        use axum::body::Bytes;
+        use futures::StreamExt;
+
+        let mut byte_stream = response.bytes_stream();
+        let mut line_buf = String::new();
+
+        while let Some(chunk_result) = byte_stream.next().await {
+            let bytes: Bytes = match chunk_result {
+                Ok(b) => b,
+                Err(e) => {
+                    let _ = tx.send(Err(anyhow!("stream failed: {}", e))).await;
+                    return;
+                }
+            };
+
+            // Append bytes to the line buffer and process complete lines.
+            let text = match std::str::from_utf8(&bytes) {
+                Ok(s) => s.to_string(),
+                Err(_) => String::from_utf8_lossy(&bytes).into_owned(),
+            };
+
+            line_buf.push_str(&text);
+
+            // Process all complete lines (terminated by \n).
+            while let Some(pos) = line_buf.find('\n') {
+                let line = line_buf[..pos].trim_end_matches('\r').to_string();
+                line_buf = line_buf[pos + 1..].to_string();
+
+                // SSE keep-alive / comment lines
+                if line.is_empty() || line.starts_with(':') {
+                    continue;
+                }
+
+                // Only process `data:` lines
+                let data = match line.strip_prefix("data:") {
+                    Some(d) => d.trim(),
+                    None => continue,
+                };
+
+                // Stream terminator
+                if data == "[DONE]" {
+                    return;
+                }
+
+                // Parse the JSON chunk leniently.
+                let chunk: StreamChunk = match serde_json::from_str(data) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        warn!(
+                            provider = %provider_name_owned,
+                            error = %e,
+                            data = %data,
+                            "Skipping unparseable SSE chunk"
+                        );
+                        continue;
+                    }
+                };
+
+                let choice = match chunk.choices.into_iter().next() {
+                    Some(c) => c,
+                    None => continue, // e.g. Azure prompt_filter_results chunk
+                };
+
+                let delta = choice.delta;
+
+                // ── Tool call fragments ────────────────────────────────────
+                if let Some(tool_calls) = delta.tool_calls {
+                    for tc in tool_calls {
+                        let chunk = TokenChunk {
+                            delta: String::new(),
+                            finish_reason: None,
+                            tool_call_name: tc.function.as_ref().and_then(|f| f.name.clone()),
+                            tool_call_args: tc.function.as_ref().and_then(|f| f.arguments.clone()),
+                            tool_call_index: tc.index,
+                            tool_call_id: tc.id,
+                        };
+                        if tx.send(Ok(chunk)).await.is_err() {
+                            return; // receiver dropped
+                        }
+                    }
+                    continue;
+                }
+
+                // ── Text delta ─────────────────────────────────────────────
+                let text_delta = delta.content.unwrap_or_default();
+                // Emit even empty deltas so the caller can detect the first
+                // chunk (used as a signal that the stream has started).
+                let token_chunk = TokenChunk {
+                    delta: text_delta,
+                    finish_reason: choice
+                        .finish_reason
+                        .and_then(|v| v.as_str().map(|s| s.to_string())),
                     tool_call_name: None,
                     tool_call_args: None,
                     tool_call_index: None,
                     tool_call_id: None,
-                })
+                };
+                if tx.send(Ok(token_chunk)).await.is_err() {
+                    return; // receiver dropped
+                }
             }
-        };
+        }
+    });
 
-        let finish_reason = choice.finish_reason.map(|r| format!("{:?}", r));
-        let delta = choice.delta;
-
-        // Extract tool call fragments if present
-        let (tc_name, tc_args, tc_index, tc_id) = if let Some(tool_calls) = delta.tool_calls {
-            if let Some(tc) = tool_calls.into_iter().next() {
-                let name = tc.function.as_ref().and_then(|f| f.name.clone());
-                let args = tc.function.as_ref().and_then(|f| f.arguments.clone());
-                (name, args, Some(tc.index as u32), tc.id)
-            } else {
-                (None, None, None, None)
-            }
-        } else {
-            (None, None, None, None)
-        };
-
-        Ok(TokenChunk {
-            delta: delta.content.unwrap_or_default(),
-            finish_reason,
-            tool_call_name: tc_name,
-            tool_call_args: tc_args,
-            tool_call_index: tc_index,
-            tool_call_id: tc_id,
-        })
-    })
+    let stream = ReceiverStream::new(rx);
+    Ok(Box::pin(stream))
 }
 
 // ─── Registry ─────────────────────────────────────────────────────────────────
