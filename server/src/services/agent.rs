@@ -34,7 +34,6 @@ const TOOL_RECALL_MEMORY: &str = "recall_memory";
 // ─── Max content length for save_memory ───────────────────────────────────────
 
 const MEMORY_CONTENT_MAX_CHARS: usize = 500;
-const MEMORY_CAP_PER_PERSONA: i64 = 500;
 const MEMORY_RECALL_LIMIT: i64 = 10;
 
 // ─── Public entry point ────────────────────────────────────────────────────────
@@ -495,25 +494,20 @@ async fn execute_tool(
             // Truncate to 500 chars.
             let content: String = content.chars().take(MEMORY_CONTENT_MAX_CHARS).collect();
 
-            // Check cap before inserting.
-            let count: (i64,) =
-                sqlx::query_as("SELECT COUNT(*) FROM memory WHERE user_id = ? AND persona_id = ?")
-                    .bind(user_id)
-                    .bind(persona_id)
-                    .fetch_one(pool)
-                    .await?;
-
-            if count.0 >= MEMORY_CAP_PER_PERSONA {
-                return Ok(
+            // Cap enforcement is handled entirely inside memory_service::save_memory.
+            // If the cap is reached it returns Err; we convert that to a structured
+            // tool result rather than propagating it as a hard error so the model
+            // can decide what to do next (e.g. recall and discard something).
+            match memory_service::save_memory(pool, user_id, persona_id, Some(thread_id), &content)
+                .await
+            {
+                Ok(_) => Ok("Memory saved successfully.".to_string()),
+                Err(e) if e.to_string().contains("Memory cap reached") => Ok(
                     "Memory store is full (500 entries). Cannot save new memory until some are deleted."
                         .to_string(),
-                );
+                ),
+                Err(e) => Err(e),
             }
-
-            memory_service::save_memory(pool, user_id, persona_id, Some(thread_id), &content)
-                .await?;
-
-            Ok("Memory saved successfully.".to_string())
         }
 
         TOOL_RECALL_MEMORY => {

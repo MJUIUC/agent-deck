@@ -14,8 +14,10 @@ use sqlx::SqlitePool;
 use crate::models::memory::{Memory, MemoryEntry, MemoryListResponse};
 
 /// Save a new memory entry for a persona.
-/// Enforces the 500-entry cap — if at capacity, the oldest entry is deleted
-/// before inserting the new one.
+/// Enforces the 500-entry cap — if at capacity, returns `Err` so the caller
+/// can surface a "memory store is full" message to the model.
+/// Does NOT silently evict old entries; the model is responsible for deciding
+/// what to delete via the memory management UI or future tooling.
 #[allow(dead_code)]
 pub async fn save_memory(
     pool: &SqlitePool,
@@ -35,19 +37,13 @@ pub async fn save_memory(
             .await?;
 
     if count.0 >= MAX_MEMORIES {
-        // Delete the oldest entry to make room
-        sqlx::query(
-            "DELETE FROM memory WHERE id = (
-                SELECT id FROM memory
-                WHERE user_id = ? AND persona_id = ?
-                ORDER BY created_at ASC
-                LIMIT 1
-            )",
-        )
-        .bind(user_id)
-        .bind(persona_id)
-        .execute(pool)
-        .await?;
+        // Reject — cap is enforced here as the single source of truth.
+        // The agent run-loop catches this error and returns a structured
+        // "memory store is full" tool result to the model.
+        return Err(anyhow::anyhow!(
+            "Memory cap reached: {} entries already stored for this persona.",
+            count.0
+        ));
     }
 
     let memory = Memory::new_for_thread(user_id, persona_id, thread_id.unwrap_or(""), content);
@@ -207,4 +203,105 @@ pub async fn delete_memory(pool: &SqlitePool, memory_id: &str, user_id: &str) ->
         .await?;
 
     Ok(result.rows_affected() > 0)
+}
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    /// Create an in-memory SQLite pool with the minimal schema needed for
+    /// memory service tests.
+    async fn test_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .connect("sqlite::memory:")
+            .await
+            .expect("in-memory pool");
+
+        sqlx::query(
+            "CREATE TABLE memory (
+                id          TEXT PRIMARY KEY,
+                user_id     TEXT NOT NULL,
+                persona_id  TEXT NOT NULL,
+                thread_id   TEXT,
+                content     TEXT NOT NULL,
+                created_at  TEXT NOT NULL
+            )",
+        )
+        .execute(&pool)
+        .await
+        .expect("create memory table");
+
+        // memory_fts is referenced by save_memory — create a stub that accepts
+        // the same INSERT … SELECT pattern.
+        sqlx::query(
+            "CREATE VIRTUAL TABLE memory_fts USING fts5(content, content=memory, content_rowid=rowid)",
+        )
+        .execute(&pool)
+        .await
+        .expect("create memory_fts table");
+
+        pool
+    }
+
+    /// Saving up to 499 entries must succeed; the 500th must also succeed;
+    /// the 501st must return an `Err` containing "Memory cap reached" and must
+    /// NOT silently evict an existing entry.
+    #[tokio::test]
+    async fn save_memory_rejects_at_cap_without_eviction() {
+        let pool = test_pool().await;
+        let user_id = "user-1";
+        let persona_id = "persona-1";
+
+        // Fill the store to exactly the cap.
+        for i in 0..500_i64 {
+            save_memory(
+                &pool,
+                user_id,
+                persona_id,
+                None,
+                &format!("memory entry {}", i),
+            )
+            .await
+            .unwrap_or_else(|e| panic!("unexpected error at entry {}: {}", i, e));
+        }
+
+        // Confirm exactly 500 entries are stored.
+        let count: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM memory WHERE user_id = ? AND persona_id = ?")
+                .bind(user_id)
+                .bind(persona_id)
+                .fetch_one(&pool)
+                .await
+                .expect("count query");
+        assert_eq!(
+            count.0, 500,
+            "should have exactly 500 entries after filling"
+        );
+
+        // The 501st save must fail with the cap error.
+        let result = save_memory(&pool, user_id, persona_id, None, "one too many").await;
+        assert!(result.is_err(), "save_memory should return Err when at cap");
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Memory cap reached"),
+            "error should mention 'Memory cap reached', got: {}",
+            err_msg
+        );
+
+        // The store must still have exactly 500 entries — no eviction occurred.
+        let count_after: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM memory WHERE user_id = ? AND persona_id = ?")
+                .bind(user_id)
+                .bind(persona_id)
+                .fetch_one(&pool)
+                .await
+                .expect("count query after cap");
+        assert_eq!(
+            count_after.0, 500,
+            "entry count must not change when cap is reached (no eviction)"
+        );
+    }
 }
