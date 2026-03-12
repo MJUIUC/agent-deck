@@ -26,6 +26,7 @@ export interface PersonaConfig {
 
 interface Step4PersonaProps {
   models: Model[];
+  modelsLoading?: boolean;
   onBack: () => void;
   onNext: (config: PersonaConfig | null) => void;
 }
@@ -72,7 +73,12 @@ const PRESETS: {
   },
 ];
 
-export function Step4Persona({ models, onBack, onNext }: Step4PersonaProps) {
+export function Step4Persona({
+  models,
+  modelsLoading = false,
+  onBack,
+  onNext,
+}: Step4PersonaProps) {
   const [selectedKey, setSelectedKey] = useState<PresetKey>("aldous");
   const [customName, setCustomName] = useState("");
   const [customEmoji, setCustomEmoji] = useState("⚒");
@@ -82,6 +88,7 @@ export function Step4Persona({ models, onBack, onNext }: Step4PersonaProps) {
 
   const isCustom = selectedKey === "custom";
   const hasModels = models.length > 0;
+  const showModelLoading = modelsLoading;
 
   // Resolve the persona config to submit
   const getPersonaConfig = (): PersonaConfig => {
@@ -263,7 +270,21 @@ export function Step4Persona({ models, onBack, onNext }: Step4PersonaProps) {
         }}
       >
         <FieldLabel>Default Model</FieldLabel>
-        {hasModels ? (
+        {showModelLoading ? (
+          <div
+            style={{
+              background: "var(--bg-tertiary)",
+              border: "1px solid var(--border-subtle)",
+              borderRadius: 7,
+              padding: "9px 12px",
+              fontSize: 13,
+              color: "var(--text-tertiary)",
+              fontStyle: "italic",
+            }}
+          >
+            Loading models…
+          </div>
+        ) : hasModels ? (
           <FieldSelect
             value={selectedModel}
             onChange={(e) => setSelectedModel(e.target.value)}
@@ -291,9 +312,11 @@ export function Step4Persona({ models, onBack, onNext }: Step4PersonaProps) {
           </div>
         )}
         <FieldHint>
-          {hasModels
-            ? "The model this persona uses by default. Can be changed per thread."
-            : "You can configure a model later in Settings → Providers."}
+          {showModelLoading
+            ? "Fetching available models…"
+            : hasModels
+              ? "The model this persona uses by default. Can be changed per thread."
+              : "You can configure a model later in Settings → Providers."}
         </FieldHint>
       </div>
 

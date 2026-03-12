@@ -9,6 +9,7 @@ import { Step4Persona } from "./Step4Persona";
 import type { PersonaConfig } from "./Step4Persona";
 import { Step5Done } from "./Step5Done";
 import { personasApi, modelsApi, setupApi, providersApi } from "@/api/client";
+import type { Provider } from "@/types";
 import type { Model } from "@/types";
 
 // ── SetupWizard ───────────────────────────────────────────────────────────────
@@ -49,6 +50,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   // Track whether the user explicitly skipped each optional step
   const [providerSkipped, setProviderSkipped] = useState(false);
   const [personaSkipped, setPersonaSkipped] = useState(false);
+  const [modelsLoading, setModelsLoading] = useState(false);
   const [persona, setPersona] = useState<PersonaConfig | null>(null);
   // models are populated after provider creation in Step 5, but we pre-fetch
   // a preview from the draft in Step 4 only when a copilot token already exists
@@ -65,24 +67,52 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
 
-  // ── Step 3 completion — just store the draft, no API call yet ───────────────
+  // ── Step 3 completion — store draft, then try to pre-fetch models ───────────
   // If draft is null the user skipped — jump straight to Step 5 (Step 4 is
   // meaningless without a provider).
+  //
+  // For Copilot (and any provider kind that may already exist in the DB from a
+  // previous setup attempt), we look up the matching provider and load its
+  // models now so the Step 4 dropdown is populated immediately.
 
   const handleProviderNext = useCallback(
-    (draft: ProviderDraft | null) => {
+    async (draft: ProviderDraft | null) => {
       setProviderDraft(draft);
-      setModels([]); // models unknown until provider is actually created in Step 5
+
       if (draft === null) {
         // Skipped provider — also mark persona as skipped and go straight to done
         setProviderSkipped(true);
         setPersonaSkipped(true);
         setPersona(null);
+        setModels([]);
         goTo(5);
-      } else {
-        setProviderSkipped(false);
-        goTo(4);
+        return;
       }
+
+      setProviderSkipped(false);
+
+      // Try to find an existing provider of this kind in the DB and load its
+      // models. This handles Copilot (always pre-existing after auth) and any
+      // provider the user may have created on a previous run.
+      setModelsLoading(true);
+      try {
+        const res = await providersApi.list();
+        const existing: Provider | undefined = res.data.find(
+          (p) => p.kind === draft.kind,
+        );
+        if (existing) {
+          const mRes = await modelsApi.list(existing.id);
+          setModels(mRes.data.filter((m) => m.enabled !== false));
+        } else {
+          setModels([]);
+        }
+      } catch {
+        setModels([]);
+      } finally {
+        setModelsLoading(false);
+      }
+
+      goTo(4);
     },
     [goTo],
   );
@@ -197,6 +227,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       {step === 4 && (
         <Step4Persona
           models={models}
+          modelsLoading={modelsLoading}
           onBack={() => goTo(3)}
           onNext={handlePersonaNext}
         />
