@@ -353,9 +353,8 @@ pub async fn copilot_auth_start(_state: State<AppState>) -> AppResult<impl IntoR
 
     let resp = client
         .post("https://github.com/login/device/code")
-        .header("content-type", "application/json")
-        .header("accept", "application/json")
-        .json(&serde_json::json!({ "client_id": client_id, "scope": scope }))
+        .header("Accept", "application/x-www-form-urlencoded")
+        .form(&[("client_id", client_id), ("scope", scope)])
         .send()
         .await
         .map_err(|e| AppError::Provider(format!("Failed to reach GitHub: {}", e)))?;
@@ -368,10 +367,29 @@ pub async fn copilot_auth_start(_state: State<AppState>) -> AppResult<impl IntoR
         )));
     }
 
-    let body: serde_json::Value = resp
-        .json()
+    // GitHub returns application/x-www-form-urlencoded regardless of Accept header.
+    // Parse the form-encoded body into a JSON object manually.
+    let raw = resp
+        .text()
         .await
-        .map_err(|e| AppError::Provider(format!("Invalid response from GitHub: {}", e)))?;
+        .map_err(|e| AppError::Provider(format!("Failed to read GitHub response: {}", e)))?;
+
+    let mut map = serde_json::Map::new();
+    for pair in raw.split('&') {
+        if let Some((k, v)) = pair.split_once('=') {
+            let key = urlencoding_decode(k);
+            let val = urlencoding_decode(v);
+            // expires_in and interval are integers; everything else is a string
+            if key == "expires_in" || key == "interval" {
+                if let Ok(n) = val.parse::<u64>() {
+                    map.insert(key, serde_json::Value::Number(n.into()));
+                    continue;
+                }
+            }
+            map.insert(key, serde_json::Value::String(val));
+        }
+    }
+    let body = serde_json::Value::Object(map);
 
     Ok((StatusCode::OK, Json(json!({ "data": body }))))
 }
@@ -402,23 +420,30 @@ pub async fn copilot_auth_poll(
 
     let resp = client
         .post("https://github.com/login/oauth/access_token")
-        .header("content-type", "application/json")
-        .header("accept", "application/json")
-        .json(&serde_json::json!({
-            "client_id": client_id,
-            "device_code": device_code,
-            "grant_type": "urn:ietf:params:oauth:grant-type:device_code"
-        }))
+        .header("Accept", "application/x-www-form-urlencoded")
+        .form(&[
+            ("client_id", client_id),
+            ("device_code", device_code.as_str()),
+            ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
+        ])
         .send()
         .await
         .map_err(|e| AppError::Provider(format!("Failed to reach GitHub: {}", e)))?;
 
-    let poll_body: serde_json::Value = resp
-        .json()
+    // GitHub returns application/x-www-form-urlencoded regardless of Accept header.
+    // Parse the form-encoded body into key/value pairs.
+    let raw = resp
+        .text()
         .await
-        .map_err(|e| AppError::Provider(format!("Invalid response from GitHub: {}", e)))?;
+        .map_err(|e| AppError::Provider(format!("Failed to read GitHub response: {}", e)))?;
 
-    if let Some(token) = poll_body.get("access_token").and_then(|v| v.as_str()) {
+    let poll_body: std::collections::HashMap<String, String> = raw
+        .split('&')
+        .filter_map(|pair| pair.split_once('='))
+        .map(|(k, v)| (urlencoding_decode(k), urlencoding_decode(v)))
+        .collect();
+
+    if let Some(token) = poll_body.get("access_token").map(|s| s.as_str()) {
         // Write the token to the file copilot-api reads on startup.
         let token_path = github_token_path();
         if let Some(parent) = token_path.parent() {
@@ -444,11 +469,38 @@ pub async fn copilot_auth_poll(
     // Still pending or an error — surface the reason to the UI.
     let reason = poll_body
         .get("error")
-        .and_then(|v| v.as_str())
-        .unwrap_or("authorization_pending");
+        .map(|s| s.as_str())
+        .unwrap_or("authorization_pending")
+        .to_string();
 
     Ok((
         StatusCode::OK,
         Json(json!({ "data": { "authenticated": false, "reason": reason } })),
     ))
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/// Minimal percent-decoding for URL-encoded form values.
+/// Handles `+` as space and `%XX` hex sequences.
+fn urlencoding_decode(s: &str) -> String {
+    let with_spaces = s.replace('+', " ");
+    let bytes = with_spaces.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let (Some(hi), Some(lo)) = (
+                (bytes[i + 1] as char).to_digit(16),
+                (bytes[i + 2] as char).to_digit(16),
+            ) {
+                out.push((hi * 16 + lo) as u8);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
