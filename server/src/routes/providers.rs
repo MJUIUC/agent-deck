@@ -10,7 +10,7 @@ use crate::{
     error::{AppError, AppResult},
     models::provider::{CreateProvider, Provider, ProviderResponse, UpdateProvider},
     routes::AppState,
-    services::{copilot as copilot_service, encryption, provider as provider_service},
+    services::{encryption, provider as provider_service},
 };
 
 /// Helper: get the single user id from the DB.
@@ -381,9 +381,10 @@ pub async fn copilot_auth_start(_state: State<AppState>) -> AppResult<impl IntoR
 /// Polls GitHub's OAuth access-token endpoint with the device_code.
 /// Returns `{ "data": { "authenticated": true } }` once the user has approved,
 /// or `{ "data": { "authenticated": false, "reason": "..." } }` while pending.
-/// On success the token is written to ~/.local/share/copilot-api/github_token.
+/// On success the token is written to ~/.local/share/copilot-api/github_token
+/// and the copilot-api sidecar is restarted so it loads the new token.
 pub async fn copilot_auth_poll(
-    _state: State<AppState>,
+    State(state): State<AppState>,
     Json(body): Json<serde_json::Value>,
 ) -> AppResult<impl IntoResponse> {
     let device_code = body
@@ -426,6 +427,13 @@ pub async fn copilot_auth_poll(
         tokio::fs::write(&token_path, token)
             .await
             .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to write token: {}", e)))?;
+
+        // Restart the sidecar so it boots fresh and loads the newly written
+        // token from disk. The supervise_loop is already running — killing the
+        // child causes it to respawn automatically with a clean slate.
+        if let Some(ref svc) = state.copilot {
+            svc.restart().await;
+        }
 
         return Ok((
             StatusCode::OK,

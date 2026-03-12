@@ -157,6 +157,31 @@ impl CopilotApiService {
         self.set_status(CopilotStatus::Stopped, None).await;
     }
 
+    /// Restart the sidecar so it re-reads the GitHub token from disk.
+    ///
+    /// Kills the current child (if any) and lets the supervision loop
+    /// relaunch it automatically.  The caller does not need to call `start()`
+    /// again — the loop is already running.
+    pub async fn restart(&self) {
+        info!("copilot-api: restart requested (new GitHub token written to disk)");
+        let mut guard = self.inner.child.lock().await;
+        if let Some(child) = guard.as_mut() {
+            if let Err(e) = child.start_kill() {
+                warn!("copilot-api: failed to kill child during restart: {}", e);
+            }
+            // Don't wait — the supervise_loop's wait_for_exit will unblock and
+            // immediately queue a fresh spawn with the correct backoff reset.
+        }
+        // Clearing the slot signals wait_for_exit to return, which causes the
+        // supervise_loop to fall through to the respawn path.
+        *guard = None;
+        self.set_status(
+            CopilotStatus::Reconnecting,
+            Some("Restarting to load new token".to_string()),
+        )
+        .await;
+    }
+
     // ─── Internal ─────────────────────────────────────────────────────────────
 
     /// Main supervision loop.  Runs forever until the Tokio runtime shuts down.
