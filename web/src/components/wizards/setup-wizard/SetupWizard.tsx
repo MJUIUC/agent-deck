@@ -158,6 +158,8 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       await setupApi.complete(displayName.trim() || "User");
 
       let createdProviderId: string | null = null;
+      // DB row ID of the synced model matching the user's selection, or null
+      let resolvedModelId: string | null = null;
 
       // 2 — Create provider
       if (providerDraft) {
@@ -170,11 +172,22 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           });
           createdProviderId = provRes.data.id;
 
-          // 3 — Sync models (best-effort, non-fatal)
+          // 3 — Sync models then resolve the selected model to its DB row ID.
+          // persona.default_model holds the raw sidecar model_id (e.g. "gpt-4o"),
+          // which is NOT the DB primary key. We must look it up after sync or
+          // the FK constraint on agent_personas.default_model will fail.
           try {
-            await modelsApi.sync(createdProviderId);
+            const syncedModels = await modelsApi.sync(createdProviderId);
+            if (persona?.default_model) {
+              const match = syncedModels.data.find(
+                (m) =>
+                  m.model_id === persona.default_model ||
+                  m.id === persona.default_model,
+              );
+              resolvedModelId = match?.id ?? null;
+            }
           } catch {
-            // ignore
+            // ignore — persona will just have no default model
           }
         } catch {
           // Provider creation failed — non-fatal, user can add via Settings
@@ -188,7 +201,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             name: persona.name,
             emoji: persona.emoji,
             system_prompt: persona.system_prompt,
-            default_model: persona.default_model ?? undefined,
+            default_model: resolvedModelId ?? undefined,
             default_provider: createdProviderId ?? undefined,
           });
         } catch {
