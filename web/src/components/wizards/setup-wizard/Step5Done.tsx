@@ -10,6 +10,8 @@ interface Step5DoneProps {
   displayName: string;
   providerName: string | null;
   persona: PersonaConfig | null;
+  /** True when the user skipped both the provider and persona steps. */
+  bothSkipped?: boolean;
   saving: boolean;
   saveError: string | null;
   onComplete: () => void;
@@ -19,6 +21,7 @@ export function Step5Done({
   displayName,
   providerName,
   persona,
+  bothSkipped = false,
   saving,
   saveError,
   onComplete,
@@ -96,11 +99,23 @@ export function Step5Done({
             marginBottom: 6,
           }}
         >
-          You're all set,{" "}
-          <span style={{ color: "var(--accent-secondary)" }}>
-            {displayName || "friend"}
-          </span>
-          !
+          {bothSkipped ? (
+            <>
+              You're in,{" "}
+              <span style={{ color: "var(--accent-secondary)" }}>
+                {displayName || "friend"}
+              </span>
+              !
+            </>
+          ) : (
+            <>
+              You're all set,{" "}
+              <span style={{ color: "var(--accent-secondary)" }}>
+                {displayName || "friend"}
+              </span>
+              !
+            </>
+          )}
         </h2>
         <p
           style={{
@@ -110,8 +125,26 @@ export function Step5Done({
             marginBottom: 24,
           }}
         >
-          agent-deck is ready. Here's a summary of what was configured.
+          {bothSkipped
+            ? "Finish setup in Settings when you're ready — add a provider and create a persona to start chatting."
+            : "agent-deck is ready. Here's a summary of what was configured."}
         </p>
+
+        {/* CTA buttons shown when both were skipped */}
+        {bothSkipped && (
+          <div
+            style={{
+              display: "flex",
+              gap: 10,
+              justifyContent: "center",
+              marginBottom: 24,
+              flexWrap: "wrap",
+            }}
+          >
+            <SkipCta label="Add a Provider →" />
+            <SkipCta label="Create a Persona →" variant="secondary" />
+          </div>
+        )}
 
         {/* Summary list */}
         <div
@@ -201,6 +234,47 @@ export function Step5Done({
         <OpenAppBtn onClick={onComplete} disabled={saving} />
       </div>
     </div>
+  );
+}
+
+// ── SkipCta ───────────────────────────────────────────────────────────────────
+// Inline reminder buttons shown on Step 5 when both steps were skipped.
+// These are purely visual — actual navigation happens after the wizard closes
+// and the user opens Settings from the empty state.
+
+function SkipCta({
+  label,
+  variant = "primary",
+}: {
+  label: string;
+  variant?: "primary" | "secondary";
+}) {
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        padding: "8px 18px",
+        borderRadius: 7,
+        fontSize: 13,
+        fontWeight: 600,
+        cursor: "default",
+        userSelect: "none",
+        letterSpacing: "-0.01em",
+        ...(variant === "primary"
+          ? {
+              background: "var(--accent-primary)",
+              color: "var(--text-inverse)",
+              border: "none",
+            }
+          : {
+              background: "transparent",
+              color: "var(--text-secondary)",
+              border: "1px solid var(--border-default)",
+            }),
+      }}
+    >
+      {label}
+    </span>
   );
 }
 

@@ -46,6 +46,9 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const [providerDraft, setProviderDraft] = useState<ProviderDraft | null>(
     null,
   );
+  // Track whether the user explicitly skipped each optional step
+  const [providerSkipped, setProviderSkipped] = useState(false);
+  const [personaSkipped, setPersonaSkipped] = useState(false);
   const [persona, setPersona] = useState<PersonaConfig | null>(null);
   // models are populated after provider creation in Step 5, but we pre-fetch
   // a preview from the draft in Step 4 only when a copilot token already exists
@@ -63,12 +66,23 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   }, []);
 
   // ── Step 3 completion — just store the draft, no API call yet ───────────────
+  // If draft is null the user skipped — jump straight to Step 5 (Step 4 is
+  // meaningless without a provider).
 
   const handleProviderNext = useCallback(
     (draft: ProviderDraft | null) => {
       setProviderDraft(draft);
       setModels([]); // models unknown until provider is actually created in Step 5
-      goTo(4);
+      if (draft === null) {
+        // Skipped provider — also mark persona as skipped and go straight to done
+        setProviderSkipped(true);
+        setPersonaSkipped(true);
+        setPersona(null);
+        goTo(5);
+      } else {
+        setProviderSkipped(false);
+        goTo(4);
+      }
     },
     [goTo],
   );
@@ -78,6 +92,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const handlePersonaNext = useCallback(
     (config: PersonaConfig | null) => {
       setPersona(config);
+      setPersonaSkipped(config === null);
       goTo(5);
     },
     [goTo],
@@ -192,6 +207,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           displayName={displayName}
           providerName={providerDraft?.name ?? null}
           persona={persona}
+          bothSkipped={providerSkipped && personaSkipped}
           saving={saving}
           saveError={saveError}
           onComplete={handleComplete}

@@ -34,59 +34,81 @@ export function EmptyState({
   onOpenPersonas,
   onMobileMenuOpen,
 }: EmptyStateProps) {
-  // ── No provider ──────────────────────────────────────────────────────────
-  if (!hasProviders) {
+  // ── No provider, no personas ──────────────────────────────────────────────
+  if (!hasProviders && !hasPersonas) {
     return (
       <div className={styles.root}>
         {onMobileMenuOpen && <MobileMenuButton onClick={onMobileMenuOpen} />}
         <div className={styles.body}>
           <div className={styles.icon}>🔌</div>
-          <div className={styles.title}>No provider connected</div>
+          <div className={styles.title}>
+            You need a provider to get started.
+          </div>
           <div className={styles.desc}>
             Connect an AI provider (OpenAI, Anthropic, GitHub Copilot, or any
             OpenAI-compatible API) to start chatting.
           </div>
-          {/* Warning banner */}
-          <div className={styles.banner}>
-            <span className={styles.bannerIcon}>⚠️</span>
-            <div className={styles.bannerBody}>
-              <div className={styles.bannerTitle}>Setup required</div>
-              <div className={styles.bannerDesc}>
-                Add a provider and at least one model to begin. You can also
-                create agent personas to give your AI a consistent personality.
-              </div>
-              <button
-                onClick={onOpenProviders ?? onOpenSettings}
-                className={styles.btnPrimary}
-              >
-                Add a Provider
-              </button>
-            </div>
+          <div className={styles.actions}>
+            <button
+              onClick={onOpenProviders ?? onOpenSettings}
+              className={styles.btnPrimary}
+            >
+              Add a Provider →
+            </button>
           </div>
         </div>
       </div>
     );
   }
 
-  // ── No personas ───────────────────────────────────────────────────────────
-  if (!hasPersonas) {
+  // ── Provider exists, no personas ──────────────────────────────────────────
+  if (hasProviders && !hasPersonas) {
     return (
       <div className={styles.root}>
         {onMobileMenuOpen && <MobileMenuButton onClick={onMobileMenuOpen} />}
         <div className={styles.body}>
           <div className={styles.icon}>🤖</div>
-          <div className={styles.title}>No personas yet</div>
+          <div className={styles.title}>Almost there.</div>
           <div className={styles.desc}>
-            Create an agent persona to define your AI's name, personality, and
-            default model before starting a chat.
+            Create your first agent persona to define your AI's name,
+            personality, and default model — then you're ready to chat.
           </div>
           <div className={styles.actions}>
             <button
               onClick={onOpenPersonas ?? onOpenSettings}
               className={styles.btnPrimary}
             >
-              Create a persona
+              Create a Persona →
             </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Personas exist, no provider ───────────────────────────────────────────
+  if (!hasProviders && hasPersonas) {
+    return (
+      <div className={styles.root}>
+        {onMobileMenuOpen && <MobileMenuButton onClick={onMobileMenuOpen} />}
+        <div className={styles.body}>
+          <div className={styles.icon}>🔌</div>
+          <div className={styles.title}>No provider connected.</div>
+          <div className={styles.desc}>
+            You have personas ready to go, but no AI provider is connected yet.
+            Add a provider and your personas will be available immediately.
+          </div>
+          <div className={styles.actions}>
+            <button
+              onClick={onOpenProviders ?? onOpenSettings}
+              className={styles.btnPrimary}
+            >
+              Add a Provider →
+            </button>
+          </div>
+          <div className={styles.hint}>
+            Your existing personas will be available once a provider is
+            connected.
           </div>
         </div>
       </div>

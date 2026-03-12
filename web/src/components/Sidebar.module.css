@@ -68,7 +68,9 @@
     color: var(--text-tertiary);
     cursor: pointer;
     font-size: 16px;
-    transition: background 0.15s, color 0.15s;
+    transition:
+        background 0.15s,
+        color 0.15s;
 }
 
 .mobileCloseBtn:hover {
@@ -106,6 +108,36 @@
 .newChatBtn:disabled {
     opacity: 0.6;
     cursor: default;
+}
+
+.newChatBtnDisabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.newChatBtnDisabled:hover {
+    background: var(--accent-primary);
+}
+
+/* ── No-personas inline note ── */
+.noPersonasNote {
+    margin-top: 6px;
+    font-size: 11px;
+    color: var(--text-tertiary);
+    text-align: center;
+    line-height: 1.4;
+    animation: fadeInNote 0.15s ease;
+}
+
+@keyframes fadeInNote {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 /* ── Search ── */
@@ -214,7 +246,9 @@
     color: var(--text-secondary);
     font-size: 12px;
     cursor: pointer;
-    transition: background 0.15s, color 0.15s;
+    transition:
+        background 0.15s,
+        color 0.15s;
 }
 
 .footerBtn:hover {
