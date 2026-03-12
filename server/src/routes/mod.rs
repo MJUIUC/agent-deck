@@ -261,6 +261,10 @@ pub async fn build_router(pool: SqlitePool, config: Config) -> anyhow::Result<Ro
         .route(
             "/api/providers/copilot/auth-poll",
             axum::routing::post(providers::copilot_auth_poll),
+        )
+        .route(
+            "/api/providers/copilot/models",
+            get(providers::copilot_models),
         );
 
     let app = Router::new()

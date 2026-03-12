@@ -8,8 +8,7 @@ import type { ProviderDraft } from "./Step3Provider";
 import { Step4Persona } from "./Step4Persona";
 import type { PersonaConfig } from "./Step4Persona";
 import { Step5Done } from "./Step5Done";
-import { personasApi, modelsApi, setupApi, providersApi } from "@/api/client";
-import type { Provider } from "@/types";
+import { personasApi, setupApi, providersApi, modelsApi } from "@/api/client";
 import type { Model } from "@/types";
 
 // ── SetupWizard ───────────────────────────────────────────────────────────────
@@ -91,25 +90,39 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
       setProviderSkipped(false);
 
-      // Try to find an existing provider of this kind in the DB and load its
-      // models. This handles Copilot (always pre-existing after auth) and any
-      // provider the user may have created on a previous run.
-      setModelsLoading(true);
-      try {
-        const res = await providersApi.list();
-        const existing: Provider | undefined = res.data.find(
-          (p) => p.kind === draft.kind,
-        );
-        if (existing) {
-          const mRes = await modelsApi.list(existing.id);
-          setModels(mRes.data.filter((m) => m.enabled !== false));
-        } else {
+      // For Copilot, fetch models directly from the sidecar via the public
+      // /api/providers/copilot/models endpoint — no auth or DB required, so
+      // this works before setup is complete.
+      // For other provider kinds there are no models yet (the provider hasn't
+      // been created in the DB), so we leave the list empty.
+      if (draft.kind === "copilot") {
+        setModelsLoading(true);
+        try {
+          const res = await fetch("/api/providers/copilot/models");
+          if (res.ok) {
+            const json = await res.json();
+            const items: Model[] = (json.data ?? []).map(
+              (m: { id: string; display_name: string }) => ({
+                id: m.id,
+                provider_id: "copilot",
+                model_id: m.id,
+                display_name: m.display_name,
+                enabled: true,
+                created_at: "",
+                updated_at: "",
+              }),
+            );
+            setModels(items);
+          } else {
+            setModels([]);
+          }
+        } catch {
           setModels([]);
+        } finally {
+          setModelsLoading(false);
         }
-      } catch {
+      } else {
         setModels([]);
-      } finally {
-        setModelsLoading(false);
       }
 
       goTo(4);

@@ -453,3 +453,56 @@ pub async fn copilot_auth_poll(
         Json(json!({ "data": { "authenticated": false, "reason": reason } })),
     ))
 }
+
+/// GET /api/providers/copilot/models
+///
+/// Public endpoint (no auth, no DB) — proxies the model list from the
+/// copilot-api sidecar. Used by the setup wizard before setup is complete
+/// so Step 4 can populate the model dropdown without a user row in the DB.
+pub async fn copilot_models(State(state): State<AppState>) -> AppResult<impl IntoResponse> {
+    let base_url = match state.copilot {
+        Some(ref svc) => svc.base_url(),
+        None => {
+            return Ok((StatusCode::OK, Json(json!({ "data": [] }))));
+        }
+    };
+
+    let url = format!("{}/v1/models", base_url.trim_end_matches('/'));
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("HTTP client error: {}", e)))?;
+
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|_| AppError::Provider("copilot-api sidecar is not reachable".to_string()))?;
+
+    if !resp.status().is_success() {
+        return Ok((StatusCode::OK, Json(json!({ "data": [] }))));
+    }
+
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| AppError::Provider(format!("Invalid response from copilot-api: {}", e)))?;
+
+    // The sidecar returns { "data": [...], "object": "list" } — extract the array
+    // and reshape each entry into { id, display_name } for the wizard dropdown.
+    let models = body
+        .get("data")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .map(|m| {
+                    let id = m.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                    let display_name = m.get("display_name").and_then(|v| v.as_str()).unwrap_or(id);
+                    json!({ "id": id, "display_name": display_name })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    Ok((StatusCode::OK, Json(json!({ "data": models }))))
+}
