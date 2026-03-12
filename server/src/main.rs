@@ -69,7 +69,7 @@ async fn main() -> Result<()> {
     let pool = db::init(&config.database_url).await?;
 
     // Auto-complete setup on first run
-    ensure_setup(&pool).await?;
+    // ensure_setup(&pool).await?;
 
     // Build and run the application
     let app = routes::build_router(pool.clone(), config.clone()).await?;

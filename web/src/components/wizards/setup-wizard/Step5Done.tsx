@@ -11,6 +11,7 @@ interface Step5DoneProps {
   providerName: string | null;
   persona: PersonaConfig | null;
   saving: boolean;
+  saveError: string | null;
   onComplete: () => void;
 }
 
@@ -19,6 +20,7 @@ export function Step5Done({
   providerName,
   persona,
   saving,
+  saveError,
   onComplete,
 }: Step5DoneProps) {
   const [checkVisible, setCheckVisible] = useState(false);
@@ -69,7 +71,8 @@ export function Step5Done({
           margin: "0 auto 20px",
           fontSize: 30,
           color: checkVisible ? "var(--text-inverse)" : "var(--text-tertiary)",
-          transition: "background 0.4s ease, border-color 0.4s ease, color 0.4s ease",
+          transition:
+            "background 0.4s ease, border-color 0.4s ease, color 0.4s ease",
           transform: checkVisible ? "scale(1)" : "scale(0.85)",
         }}
       >
@@ -158,10 +161,9 @@ export function Step5Done({
               <span
                 style={{
                   fontSize: 13,
-                  color:
-                    row.value.startsWith("None")
-                      ? "var(--text-tertiary)"
-                      : "var(--text-primary)",
+                  color: row.value.startsWith("None")
+                    ? "var(--text-tertiary)"
+                    : "var(--text-primary)",
                   fontStyle: row.value.startsWith("None") ? "italic" : "normal",
                   fontWeight: 500,
                   flex: 1,
@@ -176,6 +178,24 @@ export function Step5Done({
             </div>
           ))}
         </div>
+
+        {/* Save error */}
+        {saveError && (
+          <div
+            style={{
+              marginBottom: 16,
+              fontSize: 12,
+              color: "var(--error)",
+              background: "rgba(196,90,90,0.08)",
+              border: "1px solid rgba(196,90,90,0.25)",
+              borderRadius: 7,
+              padding: "8px 12px",
+              textAlign: "left",
+            }}
+          >
+            ⚠ {saveError}
+          </div>
+        )}
 
         {/* Open agent-deck button */}
         <OpenAppBtn onClick={onComplete} disabled={saving} />
@@ -208,9 +228,10 @@ function OpenAppBtn({
         fontWeight: 600,
         cursor: disabled ? "default" : "pointer",
         border: "none",
-        background: hovered && !disabled
-          ? "var(--accent-secondary)"
-          : "var(--accent-primary)",
+        background:
+          hovered && !disabled
+            ? "var(--accent-secondary)"
+            : "var(--accent-primary)",
         color: "var(--text-inverse)",
         transition: "background 0.15s",
         opacity: disabled ? 0.6 : 1,

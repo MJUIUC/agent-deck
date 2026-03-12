@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useCallback } from "react";
 import { WizardShell } from "../shared/WizardShell";
 import type { WizardStepMeta } from "../shared/types";
 import { Step1Welcome } from "./Step1Welcome";
 import { Step2Name } from "./Step2Name";
 import { Step3Provider } from "./Step3Provider";
+import type { ProviderDraft } from "./Step3Provider";
 import { Step4Persona } from "./Step4Persona";
 import type { PersonaConfig } from "./Step4Persona";
 import { Step5Done } from "./Step5Done";
@@ -31,7 +32,7 @@ const STEPS: WizardStepMeta[] = [
 ];
 
 interface SetupWizardProps {
-  /** Called after POST /api/setup/complete succeeds */
+  /** Called after all setup persistence succeeds */
   onComplete: () => void;
 }
 
@@ -39,102 +40,118 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   // ── Step state ──────────────────────────────────────────────────────────────
   const [step, setStep] = useState(1);
 
-  // ── Wizard data ─────────────────────────────────────────────────────────────
+  // ── Wizard data — collected across steps, persisted all at once in Step 5 ──
   const [displayName, setDisplayName] = useState("");
-  const [providerId, setProviderId] = useState<string | null>(null);
-  const [providerName, setProviderName] = useState<string | null>(null);
+  // providerDraft holds the raw form data; nothing is written to DB until Step 5
+  const [providerDraft, setProviderDraft] = useState<ProviderDraft | null>(
+    null,
+  );
   const [persona, setPersona] = useState<PersonaConfig | null>(null);
+  // models are populated after provider creation in Step 5, but we pre-fetch
+  // a preview from the draft in Step 4 only when a copilot token already exists
   const [models, setModels] = useState<Model[]>([]);
 
   // ── Completion state ────────────────────────────────────────────────────────
   const [saving, setSaving] = useState(false);
-
-  // When a provider is selected in Step 3, load its models for Step 4
-  useEffect(() => {
-    if (!providerId) {
-      setModels([]);
-      return;
-    }
-    modelsApi
-      .list(providerId)
-      .then((res) => setModels(res.data.filter((m) => m.enabled !== false)))
-      .catch(() => setModels([]));
-  }, [providerId]);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // ── Navigation helpers ──────────────────────────────────────────────────────
 
   const goTo = useCallback((s: number) => {
     setStep(s);
-    // Scroll to top of wizard on step change (in case card content is tall)
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
 
-  // ── Step 3 completion ───────────────────────────────────────────────────────
+  // ── Step 3 completion — just store the draft, no API call yet ───────────────
 
   const handleProviderNext = useCallback(
-    async (newProviderId: string | null) => {
-      setProviderId(newProviderId);
-
-      // Resolve provider display name for the Step 5 summary
-      if (newProviderId) {
-        try {
-          const provRes = await providersApi.get(newProviderId);
-          setProviderName(provRes.data.name);
-        } catch {
-          setProviderName("Configured");
-        }
-      } else {
-        setProviderName(null);
-      }
-
+    (draft: ProviderDraft | null) => {
+      setProviderDraft(draft);
+      setModels([]); // models unknown until provider is actually created in Step 5
       goTo(4);
     },
     [goTo],
   );
 
-  // ── Step 4 completion ───────────────────────────────────────────────────────
+  // ── Step 4 completion — store persona config, no API call yet ──────────────
 
   const handlePersonaNext = useCallback(
-    async (config: PersonaConfig | null) => {
+    (config: PersonaConfig | null) => {
       setPersona(config);
-
-      if (config) {
-        try {
-          await personasApi.create({
-            name: config.name,
-            emoji: config.emoji,
-            system_prompt: config.system_prompt,
-            default_model: config.default_model ?? undefined,
-            default_provider: providerId ?? undefined,
-          });
-        } catch {
-          // Non-fatal in wizard flow — user can configure via Settings
-        }
-      }
-
       goTo(5);
     },
-    [goTo, providerId],
+    [goTo],
   );
 
-  // ── Step 5 completion ───────────────────────────────────────────────────────
+  // ── Step 5 completion — persist everything in order ────────────────────────
+  //
+  // Order matters:
+  //   1. POST /api/setup/complete  → creates the user row (required by all below)
+  //   2. POST /api/providers       → creates the provider (if one was configured)
+  //   3. POST /api/providers/:id/models  → syncs models for the new provider
+  //   4. POST /api/personas        → creates the persona (if one was configured)
 
   const handleComplete = useCallback(async () => {
     setSaving(true);
+    setSaveError(null);
+
     try {
+      // 1 — Create the user row
       await setupApi.complete(displayName.trim() || "User");
+
+      let createdProviderId: string | null = null;
+
+      // 2 — Create provider
+      if (providerDraft) {
+        try {
+          const provRes = await providersApi.create({
+            name: providerDraft.name,
+            kind: providerDraft.kind,
+            base_url: providerDraft.base_url,
+            api_key: providerDraft.api_key || undefined,
+          });
+          createdProviderId = provRes.data.id;
+
+          // 3 — Sync models (best-effort, non-fatal)
+          try {
+            await modelsApi.sync(createdProviderId);
+          } catch {
+            // ignore
+          }
+        } catch {
+          // Provider creation failed — non-fatal, user can add via Settings
+        }
+      }
+
+      // 4 — Create persona
+      if (persona) {
+        try {
+          await personasApi.create({
+            name: persona.name,
+            emoji: persona.emoji,
+            system_prompt: persona.system_prompt,
+            default_model: persona.default_model ?? undefined,
+            default_provider: createdProviderId ?? undefined,
+          });
+        } catch {
+          // Non-fatal — user can create via Settings
+        }
+      }
+
       onComplete();
     } catch (err) {
-      // If already complete (409 Conflict), treat as success
+      // setup/complete itself failed
       const msg = err instanceof Error ? err.message : "";
+      // 409 = already complete from a previous attempt, treat as success
       if (msg.includes("409") || msg.toLowerCase().includes("already")) {
         onComplete();
+        return;
       }
-      // Otherwise keep saving state to show feedback — don't throw
+      setSaveError("Something went wrong. Please try again.");
     } finally {
       setSaving(false);
     }
-  }, [displayName, onComplete]);
+  }, [displayName, providerDraft, persona, onComplete]);
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
@@ -155,7 +172,11 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       )}
 
       {step === 3 && (
-        <Step3Provider onBack={() => goTo(2)} onNext={handleProviderNext} />
+        <Step3Provider
+          initialDraft={providerDraft}
+          onBack={() => goTo(2)}
+          onNext={handleProviderNext}
+        />
       )}
 
       {step === 4 && (
@@ -169,9 +190,10 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       {step === 5 && (
         <Step5Done
           displayName={displayName}
-          providerName={providerName}
+          providerName={providerDraft?.name ?? null}
           persona={persona}
           saving={saving}
+          saveError={saveError}
           onComplete={handleComplete}
         />
       )}

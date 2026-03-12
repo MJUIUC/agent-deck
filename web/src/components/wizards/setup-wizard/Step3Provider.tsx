@@ -1,32 +1,25 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { WizardNavRow } from "../shared/WizardNavRow";
 import { FieldInput, FieldLabel, FieldHint } from "../../settings/shared";
 import { CopilotAuthSection } from "../../settings/CopilotAuthSection";
-import { providersApi, modelsApi, copilotApi } from "@/api/client";
-import type { Provider } from "@/types";
+import { copilotApi } from "@/api/client";
 
-// ── Step3Provider ─────────────────────────────────────────────────────────────
-// Third step of the setup wizard. Provider kind picker cards with a dynamic
-// config panel below. Copilot uses the embedded CopilotAuthSection. Other
-// providers get name/base_url/api_key fields.
-// On Next: creates the provider + syncs models, stores provider ID in wizard state.
-// Skippable.
+// ── Types ─────────────────────────────────────────────────────────────────────
 
-export type ProviderKind = "copilot" | "openai" | "anthropic" | "custom" | null;
+export type ProviderKind = "copilot" | "openai" | "anthropic" | "custom";
 
-interface ProviderConfig {
+/** Raw form data collected in Step 3. Nothing is persisted until Step 5. */
+export interface ProviderDraft {
+  kind: ProviderKind;
   name: string;
   base_url: string;
   api_key: string;
 }
 
-interface Step3ProviderProps {
-  onBack: () => void;
-  onNext: (providerId: string | null) => void;
-}
+// ── Provider option metadata ──────────────────────────────────────────────────
 
 const PROVIDER_OPTIONS: {
-  kind: ProviderKind & string;
+  kind: ProviderKind;
   icon: string;
   name: string;
   desc: string;
@@ -77,19 +70,34 @@ const PROVIDER_OPTIONS: {
   },
 ];
 
-export function Step3Provider({ onBack, onNext }: Step3ProviderProps) {
-  const [selectedKind, setSelectedKind] = useState<ProviderKind>(null);
-  const [config, setConfig] = useState<ProviderConfig>({
-    name: "",
-    base_url: "",
-    api_key: "",
-  });
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  // For Copilot: track whether auth has completed so we can enable Next
+// ── Props ─────────────────────────────────────────────────────────────────────
+
+interface Step3ProviderProps {
+  /** Re-hydrate form state when user navigates back to this step. */
+  initialDraft: ProviderDraft | null;
+  onBack: () => void;
+  /** Passes the collected draft up (or null if skipped). No API calls here. */
+  onNext: (draft: ProviderDraft | null) => void;
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
+export function Step3Provider({
+  initialDraft,
+  onBack,
+  onNext,
+}: Step3ProviderProps) {
+  const [selectedKind, setSelectedKind] = useState<ProviderKind | null>(
+    initialDraft?.kind ?? null,
+  );
+  const [name, setName] = useState(initialDraft?.name ?? "");
+  const [baseUrl, setBaseUrl] = useState(initialDraft?.base_url ?? "");
+  const [apiKey, setApiKey] = useState(initialDraft?.api_key ?? "");
+
+  // Copilot auth state — only relevant for validation before advancing
   const [copilotAuthed, setCopilotAuthed] = useState(false);
 
-  // Check Copilot auth status when Copilot is selected
+  // Check Copilot auth status whenever Copilot is selected
   useEffect(() => {
     if (selectedKind !== "copilot") return;
     let cancelled = false;
@@ -106,116 +114,60 @@ export function Step3Provider({ onBack, onNext }: Step3ProviderProps) {
     };
   }, [selectedKind]);
 
-  // When kind changes, pre-fill config defaults
-  const handleSelectKind = (kind: ProviderKind) => {
+  // Poll auth status every 3s while copilot is selected so the Next button
+  // activates automatically once the user completes the GitHub flow.
+  useEffect(() => {
+    if (selectedKind !== "copilot" || copilotAuthed) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await copilotApi.authStatus();
+        if (res.data.authenticated) setCopilotAuthed(true);
+      } catch {
+        /* ignore */
+      }
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [selectedKind, copilotAuthed]);
+
+  // When kind changes, pre-fill config defaults (unless re-hydrating)
+  const handleSelectKind = useCallback((kind: ProviderKind) => {
     setSelectedKind(kind);
-    setError(null);
-    const opt = PROVIDER_OPTIONS.find((o) => o.kind === kind);
-    if (opt) {
-      setConfig({
-        name: opt.defaultName,
-        base_url: opt.defaultUrl,
-        api_key: "",
-      });
-    }
+    const opt = PROVIDER_OPTIONS.find((o) => o.kind === kind)!;
+    setName(opt.defaultName);
+    setBaseUrl(opt.defaultUrl);
+    setApiKey("");
     if (kind === "copilot") {
-      // Re-check auth when switching to copilot
+      // Re-check immediately when switching to copilot
       copilotApi
         .authStatus()
         .then((res) => setCopilotAuthed(res.data.authenticated))
         .catch(() => setCopilotAuthed(false));
     }
-  };
+  }, []);
 
   const handleSkip = () => onNext(null);
 
-  const handleNext = async () => {
+  const handleNext = () => {
     if (!selectedKind) {
-      // Nothing selected — treat as skip
       onNext(null);
       return;
     }
-
-    setSaving(true);
-    setError(null);
-
-    try {
-      if (selectedKind === "copilot") {
-        // Check that auth is complete
-        const status = await copilotApi.authStatus();
-        if (!status.data.authenticated) {
-          setError("Please complete GitHub authentication before continuing.");
-          setSaving(false);
-          return;
-        }
-
-        // Check if a Copilot provider already exists
-        const existing = await providersApi.list();
-        let copilotProvider: Provider | undefined = existing.data.find(
-          (p) => p.kind === "copilot",
-        );
-
-        if (!copilotProvider) {
-          const created = await providersApi.create({
-            name: "GitHub Copilot",
-            kind: "copilot",
-            base_url: "http://localhost:4141/v1",
-          });
-          copilotProvider = created.data;
-        }
-
-        // Sync models
-        try {
-          await modelsApi.sync(copilotProvider.id);
-        } catch {
-          // Model sync failure is non-fatal in setup wizard
-        }
-
-        onNext(copilotProvider.id);
-      } else {
-        // API-key / custom provider
-        if (!config.name.trim()) {
-          setError("Provider name is required.");
-          setSaving(false);
-          return;
-        }
-        if (!config.base_url.trim()) {
-          setError("Base URL is required.");
-          setSaving(false);
-          return;
-        }
-
-        const created = await providersApi.create({
-          name: config.name.trim(),
-          kind: "api_key",
-          base_url: config.base_url.trim(),
-          api_key: config.api_key.trim() || undefined,
-        });
-
-        // Sync models (best-effort)
-        try {
-          await modelsApi.sync(created.data.id);
-        } catch {
-          // Non-fatal
-        }
-
-        onNext(created.data.id);
-      }
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to save provider.",
-      );
-    } finally {
-      setSaving(false);
-    }
+    onNext({
+      kind: selectedKind,
+      name: name.trim() || selectedKind,
+      base_url: baseUrl.trim(),
+      api_key: apiKey.trim(),
+    });
   };
 
+  // Next is disabled when:
+  // - Copilot selected but not yet authenticated
+  // - Non-copilot selected but missing required fields
   const isNextDisabled =
-    saving ||
     (selectedKind === "copilot" && !copilotAuthed) ||
     (selectedKind !== null &&
       selectedKind !== "copilot" &&
-      (!config.name.trim() || !config.base_url.trim()));
+      (!name.trim() || !baseUrl.trim()));
 
   return (
     <div>
@@ -258,7 +210,7 @@ export function Step3Provider({ onBack, onNext }: Step3ProviderProps) {
             <button
               key={opt.kind}
               type="button"
-              onClick={() => handleSelectKind(opt.kind as ProviderKind)}
+              onClick={() => handleSelectKind(opt.kind)}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -337,10 +289,14 @@ export function Step3Provider({ onBack, onNext }: Step3ProviderProps) {
           }}
         >
           {selectedKind === "copilot" ? (
-            /* Copilot — embed existing auth section */
+            /* Copilot — embed the existing auth section. Auth itself is handled
+               by the existing device-code flow in CopilotAuthSection. The token
+               is written to disk by the server's auth-poll endpoint. On Step 5,
+               SetupWizard will create the provider record once the user row
+               exists. */
             <div>
               <CopilotAuthSection />
-              {copilotAuthed ? null : (
+              {!copilotAuthed && (
                 <p
                   style={{
                     fontSize: 12,
@@ -356,20 +312,16 @@ export function Step3Provider({ onBack, onNext }: Step3ProviderProps) {
                   to continue.
                 </p>
               )}
-              {/* Poll auth status periodically so Next button activates automatically */}
-              <CopilotAuthPoller onAuthenticated={() => setCopilotAuthed(true)} />
             </div>
           ) : (
-            /* OpenAI / Anthropic / Custom — name + base_url + api_key */
+            /* OpenAI / Anthropic / Custom */
             <>
               <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                 <FieldLabel>Provider Name</FieldLabel>
                 <FieldInput
                   type="text"
-                  value={config.name}
-                  onChange={(e) =>
-                    setConfig((c) => ({ ...c, name: e.target.value }))
-                  }
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
                   placeholder="e.g. OpenAI"
                 />
               </div>
@@ -378,10 +330,8 @@ export function Step3Provider({ onBack, onNext }: Step3ProviderProps) {
                 <FieldLabel>Base URL</FieldLabel>
                 <FieldInput
                   type="text"
-                  value={config.base_url}
-                  onChange={(e) =>
-                    setConfig((c) => ({ ...c, base_url: e.target.value }))
-                  }
+                  value={baseUrl}
+                  onChange={(e) => setBaseUrl(e.target.value)}
                   placeholder="https://api.openai.com/v1"
                   mono
                 />
@@ -394,10 +344,8 @@ export function Step3Provider({ onBack, onNext }: Step3ProviderProps) {
                 <FieldLabel>API Key</FieldLabel>
                 <FieldInput
                   type="password"
-                  value={config.api_key}
-                  onChange={(e) =>
-                    setConfig((c) => ({ ...c, api_key: e.target.value }))
-                  }
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
                   placeholder="sk-…"
                   mono
                   autoComplete="new-password"
@@ -411,57 +359,13 @@ export function Step3Provider({ onBack, onNext }: Step3ProviderProps) {
         </div>
       )}
 
-      {/* Error message */}
-      {error && (
-        <div
-          style={{
-            marginTop: 10,
-            fontSize: 12,
-            color: "var(--error)",
-            background: "rgba(196,90,90,0.08)",
-            border: "1px solid rgba(196,90,90,0.25)",
-            borderRadius: 7,
-            padding: "8px 12px",
-          }}
-        >
-          ⚠ {error}
-        </div>
-      )}
-
       <WizardNavRow
         onBack={onBack}
         onNext={handleNext}
         onSkip={handleSkip}
-        nextLabel={saving ? "Saving…" : "Next →"}
+        nextLabel="Next →"
         nextDisabled={isNextDisabled}
       />
     </div>
   );
-}
-
-// ── CopilotAuthPoller ─────────────────────────────────────────────────────────
-// Polls the Copilot auth status every 3s and calls onAuthenticated when it
-// flips to true. Mounts/unmounts with the Copilot config panel.
-
-function CopilotAuthPoller({
-  onAuthenticated,
-}: {
-  onAuthenticated: () => void;
-}) {
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      try {
-        const res = await copilotApi.authStatus();
-        if (res.data.authenticated) {
-          onAuthenticated();
-          clearInterval(interval);
-        }
-      } catch {
-        // ignore
-      }
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [onAuthenticated]);
-
-  return null;
 }
