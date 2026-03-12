@@ -467,7 +467,7 @@ pub async fn copilot_models(State(state): State<AppState>) -> AppResult<impl Int
         }
     };
 
-    let url = format!("{}/v1/models", base_url.trim_end_matches('/'));
+    let url = format!("{}/models", base_url.trim_end_matches('/'));
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
         .build()
