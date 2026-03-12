@@ -163,6 +163,62 @@ export interface WizardStepMeta {
 
 ---
 
+### Story 3.1a — Wizard Skip Flow and Empty State Routing
+
+**Branch:** `feature/phase3-setup-wizard` (delta on the same branch — part of the human review story)
+
+#### ⚠️ This story requires human review before merging.
+
+#### Background
+
+During implementation and testing of Story 3.1, two related gaps were identified:
+
+1. **The wizard's skip flow leads to a broken app state.** If the user skips Step 3 (provider), the current implementation still shows Step 4 (persona), which is meaningless without a provider — the model dropdown is disabled, no models exist, and any persona created here can't actually be used for chat. Skipping the provider should skip the persona step entirely and go straight to Step 5.
+
+2. **The main app's empty state does not account for missing prerequisites.** After the wizard completes, the app can be in one of four states depending on what the user configured. Each state requires a different call to action — just showing "start a new chat" is wrong when the user has no provider or no persona to chat with.
+
+#### What to Build
+
+**Wizard flow correction (`SetupWizard.tsx`, `Step3Provider.tsx`, `Step5Done.tsx`):**
+
+- When the user skips Step 3, go directly to Step 5 — do not show Step 4.
+- When the user is on Step 4 and clicks Back, return to Step 3.
+- Step 5 Done summary must correctly reflect that no provider and no persona were configured when both were skipped. The "You're all set" copy should be adjusted when the user has skipped both — e.g. "You're in — finish setup in Settings when you're ready." with clear CTAs pointing to Providers and Personas settings.
+- The step indicator should visually reflect skipped steps (treat them the same as done — ✓) so the indicator always advances correctly.
+
+**Empty state routing (`web/src/components/EmptyState.tsx`):**
+
+The empty state is shown when there is no active thread. It must handle four cases based on the current app state:
+
+| Provider exists | Persona exists | What to show |
+|---|---|---|
+| ❌ | ❌ | "You need a provider to get started." Primary CTA: "Add a Provider →" opens Settings → Providers tab. |
+| ✅ | ❌ | "Almost there — create your first agent persona." Primary CTA: "Create a Persona →" opens Settings → Personas tab. |
+| ❌ | ✅ | "You have personas but no provider connected." Primary CTA: "Add a Provider →" opens Settings → Providers tab. Secondary note: existing personas will be available once a provider is connected. |
+| ✅ | ✅ | Normal empty state — "Start a new chat" CTA. This is the current behavior. |
+
+`App.tsx` already fetches provider state on mount and passes `hasProviders` to `EmptyState`. It also has `personas` from the thread store. Pass both through correctly so `EmptyState` can branch on them.
+
+**New chat button guard (`Sidebar.tsx`, `PersonaPickerModal.tsx`):**
+
+- The "New Chat" button in the sidebar must be disabled (with a tooltip) when there are no personas. Clicking it while disabled should not open the persona picker — instead show a brief inline note: "Add a persona in Settings first."
+- Do not disable the button when there are personas but no provider — the user can still create a thread, they just can't send messages. The empty state routing handles that case.
+
+#### Acceptance Criteria
+
+- [ ] Skipping Step 3 (provider) skips Step 4 (persona) entirely and goes to Step 5
+- [ ] Step 5 summary copy is adjusted when both provider and persona were skipped
+- [ ] Back navigation from Step 4 returns to Step 3 correctly
+- [ ] Step indicator always reflects current progress correctly across all skip paths
+- [ ] Empty state shows correct CTA for all four provider/persona combinations
+- [ ] "Add a Provider →" CTA opens Settings modal on the Providers tab
+- [ ] "Create a Persona →" CTA opens Settings modal on the Personas tab
+- [ ] "New Chat" button is disabled with a note when no personas exist
+- [ ] All four empty state cases are visually distinct and clearly communicate what the user needs to do
+- [ ] `npm run build` passes
+
+---
+
 ### Story 3.2 Delta — Provider Settings Polish
 
 **Branch:** `feature/phase3-provider-settings-delta`
@@ -645,6 +701,8 @@ Add a **Default MCP Servers** section to the persona edit view:
 Before declaring Phase 3 done, verify the complete flow:
 
 1. [ ] Fresh database → setup wizard shows and completes successfully
+1a. [ ] Skipping provider in wizard skips persona step and goes to Step 5 directly
+1b. [ ] Empty state routes correctly based on provider/persona state across all four cases
 2. [ ] Settings: all tabs load (Providers, Personas, MCP Servers, Credentials, Mobile, General)
 3. [ ] Provider CRUD works with Copilot auth, OpenAI, and custom providers
 4. [ ] Persona CRUD works with default MCP servers section
@@ -669,7 +727,7 @@ Before declaring Phase 3 done, verify the complete flow:
 5. **Never expose `encrypted_data` in API responses.** Hard security rule.
 6. **Hidden messages stay hidden.** Default filter on `GET /api/threads/:id/messages`.
 7. **Mockups are the visual reference.** Match them for every UI story.
-8. **Human review stories:** 3.1, 3.5, 3.6 — do not merge without human review.
+8. **Human review stories:** 3.1, 3.1a, 3.5, 3.6 — do not merge without human review.
 
 ---
 
