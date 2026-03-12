@@ -1534,6 +1534,39 @@ RUST_LOG=info
 FCM_SERVICE_ACCOUNT_JSON=./config/firebase-service-account.json
 ```
 
+### 9.5 Frontend Component Design Principles
+
+These principles apply to the React SPA. They exist to keep the codebase maintainable as the UI grows in complexity across phases.
+
+**Build chrome separately from content.**
+Any UI pattern that has a reusable visual frame — a modal shell, a wizard overlay, a slide-in pane — must separate the chrome (the frame, header, transitions, layout) from the content (the step or page rendered inside it). The chrome goes in a shared component; only the content is specific to the feature. This prevents the pattern of rebuilding the same visual container for every new instance of a similar UI.
+
+Examples:
+- `wizards/shared/WizardShell` owns the full-screen overlay, brand header, step indicator, and card — `setup-wizard/` only provides step content
+- `SettingsModal` owns the modal shell and tab nav — individual settings panels (`ProviderSettings`, `PersonaSettings`, etc.) only provide their own content
+
+**Shared components must be independently usable.**
+A component in a `shared/` directory must have no knowledge of the specific feature it was first built for. If a shared component imports from a sibling feature directory, it is not actually shared — it is a coupled component living in the wrong place. Acceptance criteria for any story that introduces shared components must explicitly verify this.
+
+**Co-locate feature components.**
+Components that are only ever used by one feature live next to that feature, not in a global `components/` directory. Global `components/` is for things used in three or more unrelated places. This keeps the blast radius of feature changes small and makes it obvious what can be deleted when a feature is removed.
+
+**Directory structure for the SPA:**
+```
+web/src/
+  components/          # Truly global, used across 3+ unrelated features
+  components/wizards/
+    shared/            # Wizard chrome — WizardShell, WizardStepIndicator, WizardNavRow, WizardCard, types.ts
+    setup-wizard/      # Setup wizard steps — only used by the setup flow
+  components/settings/ # Settings modal chrome and all settings panels
+  stores/              # Zustand stores — one file per domain
+  api/                 # Typed API client — one file, all endpoints
+  types/               # Shared TypeScript types
+```
+
+**Props over context for shared components.**
+Shared chrome components receive everything they need via props. They do not reach into Zustand stores or call API functions directly. This makes them trivially testable and reusable in any context.
+
 ---
 
 ## 10. Phased Execution Plan
