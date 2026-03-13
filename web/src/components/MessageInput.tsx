@@ -8,7 +8,6 @@ interface MessageInputProps {
   modelName?: string;
   isSending: boolean;
   onSend: (content: string) => void;
-  onCommand: (input: string) => void;
 }
 
 export function MessageInput({
@@ -17,7 +16,6 @@ export function MessageInput({
   modelName,
   isSending,
   onSend,
-  onCommand,
 }: MessageInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [value, setValue] = useState("");
@@ -48,18 +46,12 @@ export function MessageInput({
   const handleSubmit = useCallback(() => {
     const trimmed = value.trim();
     if (!trimmed || isSending) return;
-
-    if (trimmed.startsWith("/")) {
-      onCommand(trimmed);
-    } else {
-      onSend(trimmed);
-    }
-
+    onSend(trimmed);
     setValue("");
     if (textareaRef.current) {
       textareaRef.current.style.height = "22px";
     }
-  }, [value, isSending, onSend, onCommand]);
+  }, [value, isSending, onSend]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -72,11 +64,6 @@ export function MessageInput({
   );
 
   const isEmpty = value.trim().length === 0;
-  const isSlashCommand = value.trim().startsWith("/");
-
-  const placeholder = isSlashCommand
-    ? "Type a command…"
-    : `Message ${personaName}… (type / for commands)`;
 
   return (
     <div className={styles.wrap}>
@@ -85,7 +72,7 @@ export function MessageInput({
         <textarea
           ref={textareaRef}
           rows={1}
-          placeholder={placeholder}
+          placeholder={`Message ${personaName}…`}
           value={value}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
@@ -110,9 +97,7 @@ export function MessageInput({
 
       {/* Hints row */}
       <div className={styles.hints}>
-        <span className={styles.hint}>
-          ↵ send · Shift+↵ newline · / for commands
-        </span>
+        <span className={styles.hint}>↵ send · Shift+↵ newline</span>
         {modelName && <span className={styles.hint}>{modelName}</span>}
       </div>
     </div>

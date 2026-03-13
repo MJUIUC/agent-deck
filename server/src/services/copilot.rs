@@ -8,6 +8,7 @@
 //! - Emit `provider_status` events on the global SSE broadcast channel
 //! - Kill the child cleanly on server shutdown
 
+use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -244,7 +245,48 @@ impl CopilotApiService {
         }
     }
 
+    /// Kill any stale process already listening on COPILOT_PORT.
+    ///
+    /// When the Rust server is hard-killed (SIGKILL, IDE restart, etc.) the
+    /// supervised `bun` child becomes an orphan — its Tokio `Child` handle is
+    /// dropped without calling `start_kill()`, so it keeps running and holds
+    /// the port.  We do a best-effort `lsof`-based kill before spawning so the
+    /// new process can bind successfully.
+    async fn kill_stale_port_holder() {
+        // `lsof -t -i :<port>` prints the PID(s) listening on the port, one per line.
+        let output = Command::new("lsof")
+            .args(["-t", "-i", &format!(":{}", COPILOT_PORT)])
+            .output()
+            .await;
+
+        let pids = match output {
+            Ok(o) if o.status.success() => o.stdout,
+            _ => return, // lsof not available or no process found — nothing to do
+        };
+
+        let current_pid = std::process::id();
+
+        for line in std::str::from_utf8(&pids).unwrap_or("").lines() {
+            if let Ok(pid) = line.trim().parse::<u32>() {
+                // Never kill ourselves
+                if pid == current_pid {
+                    continue;
+                }
+                info!("copilot-api: killing stale port holder PID {}", pid);
+                // Use `kill` via Command — no libc dependency needed.
+                let _ = Command::new("kill")
+                    .args(["-TERM", &pid.to_string()])
+                    .output()
+                    .await;
+            }
+        }
+
+        // Brief pause to let the processes release the port before we bind.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    }
+
     /// Spawn the copilot-api process.
+
     async fn spawn_child(&self) -> Result<Child> {
         // Resolve the absolute path to vendor/copilot-api so this works regardless
         // of the working directory the server binary is started from.
@@ -276,13 +318,22 @@ impl CopilotApiService {
         // interactive shell (e.g. from an IDE or a launchd service).
         let bun_bin = Self::resolve_bun_binary();
 
-        let child = Command::new(&bun_bin)
+        // Kill any stale orphan that may be holding the port from a previous
+        // server run that was hard-killed before it could clean up its child.
+        Self::kill_stale_port_holder().await;
+
+        let mut child = Command::new(&bun_bin)
             .args(["run", entry, "start", "--port", &COPILOT_PORT.to_string()])
             .current_dir(&copilot_dir)
             // Pipe stdout/stderr so we don't clutter the server's terminal by default.
             // Flip to `Stdio::inherit()` for debugging.
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            // Send SIGKILL to the child automatically when the Child handle is
+            // dropped.  This covers the case where the Tokio runtime tears down
+            // the supervision task without going through our explicit shutdown
+            // path (e.g. the server binary is SIGKILL'd by cargo-watch / an IDE).
+            .kill_on_drop(true)
             .spawn()
             .map_err(|e| {
                 if e.kind() == std::io::ErrorKind::NotFound {
@@ -295,6 +346,8 @@ impl CopilotApiService {
                 }
             })?;
 
+        // Ensure the child handle stays alive in the caller's Arc<Mutex<Option<Child>>>
+        // slot — dropping it would immediately SIGKILL the process.
         Ok(child)
     }
 

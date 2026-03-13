@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { messagesApi } from "@/api/client";
-import type { Message } from "@/types";
+import type { Message, SlashCommandResponse } from "@/types";
 
 interface MessageStore {
   // State
@@ -17,7 +17,7 @@ interface MessageStore {
   sendCommand: (
     threadId: string,
     input: string,
-  ) => Promise<{ type: string; message: string } | null>;
+  ) => Promise<SlashCommandResponse | null>;
   appendToken: (threadId: string, token: string) => void;
   finalizeStream: (threadId: string, message: Message) => void;
   addMessage: (message: Message) => void;
@@ -131,13 +131,13 @@ export const useMessageStore = create<MessageStore>((set) => ({
   },
 
   sendCommand: async (threadId, input) => {
-    // Parse "/<command> <args>"
+    // Parse "/<command> [arg1] [arg2] ..." into separate fields.
+    // e.g. "/model switch gpt-4o" → command: "model", args: ["switch", "gpt-4o"]
     const trimmed = input.trim();
     const withoutSlash = trimmed.startsWith("/") ? trimmed.slice(1) : trimmed;
-    const spaceIdx = withoutSlash.indexOf(" ");
-    const command =
-      spaceIdx === -1 ? withoutSlash : withoutSlash.slice(0, spaceIdx);
-    const args = spaceIdx === -1 ? "" : withoutSlash.slice(spaceIdx + 1).trim();
+    const parts = withoutSlash.split(/\s+/).filter(Boolean);
+    const command = parts[0] ?? "";
+    const args: string[] = parts.slice(1);
 
     set((state) => ({
       isSending: { ...state.isSending, [threadId]: true },

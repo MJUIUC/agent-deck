@@ -1,0 +1,114 @@
+/* ── Toast stack ──────────────────────────────────────────────────────────── */
+
+.stack {
+    position: fixed;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    pointer-events: none;
+    min-width: 280px;
+    max-width: 480px;
+    width: max-content;
+}
+
+/* ── Individual toast ─────────────────────────────────────────────────────── */
+
+.toast {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-radius: 9px;
+    border: 1px solid transparent;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45), 0 1px 4px rgba(0, 0, 0, 0.3);
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.4;
+    pointer-events: all;
+    animation: slideDown 0.18s ease-out;
+    width: 100%;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* ── Variants ─────────────────────────────────────────────────────────────── */
+
+.neutral {
+    background: var(--bg-elevated);
+    border-color: var(--border-default);
+    color: var(--text-primary);
+}
+
+.success {
+    background: rgba(106, 158, 91, 0.15);
+    border-color: rgba(106, 158, 91, 0.35);
+    color: var(--success);
+}
+
+.error {
+    background: rgba(196, 90, 90, 0.15);
+    border-color: rgba(196, 90, 90, 0.35);
+    color: var(--error);
+}
+
+/* ── Icon ─────────────────────────────────────────────────────────────────── */
+
+.icon {
+    flex-shrink: 0;
+    font-size: 13px;
+    font-weight: 700;
+    width: 16px;
+    text-align: center;
+}
+
+.neutral .icon {
+    color: var(--text-tertiary);
+}
+
+/* ── Message ──────────────────────────────────────────────────────────────── */
+
+.message {
+    flex: 1;
+    min-width: 0;
+    color: var(--text-primary);
+}
+
+.success .message {
+    color: var(--text-primary);
+}
+
+.error .message {
+    color: var(--text-primary);
+}
+
+/* ── Close button ─────────────────────────────────────────────────────────── */
+
+.close {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    color: var(--text-tertiary);
+    padding: 0 0 0 4px;
+    transition: color 0.12s;
+}
+
+.close:hover {
+    color: var(--text-primary);
+}

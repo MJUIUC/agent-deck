@@ -126,9 +126,7 @@ export const threadsApi = {
     return apiFetch(`/api/threads/${id}/archive`, { method: "POST" });
   },
 
-  listMcpServers(
-    threadId: string,
-  ): Promise<{
+  listMcpServers(threadId: string): Promise<{
     data: Array<{
       id: string;
       thread_id: string;
@@ -190,11 +188,11 @@ export const messagesApi = {
   sendCommand(
     threadId: string,
     command: string,
-    args?: string,
+    args: string[],
   ): Promise<{ data: SlashCommandResponse }> {
     return apiFetch(`/api/threads/${threadId}/command`, {
       method: "POST",
-      body: JSON.stringify({ command, args: args ?? "" }),
+      body: JSON.stringify({ command, args }),
     });
   },
 };

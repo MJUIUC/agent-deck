@@ -47,7 +47,6 @@ export function ChatView({ thread, onMobileMenuOpen }: ChatViewProps) {
   const messageError = useMessageStore((s) => s.error);
   const loadMessages = useMessageStore((s) => s.loadMessages);
   const sendMessage = useMessageStore((s) => s.sendMessage);
-  const sendCommand = useMessageStore((s) => s.sendCommand);
 
   const connectThread = useSseStore((s) => s.connectThread);
   const disconnectThread = useSseStore((s) => s.disconnectThread);
@@ -90,11 +89,6 @@ export function ChatView({ thread, onMobileMenuOpen }: ChatViewProps) {
     [thread.id, sendMessage],
   );
 
-  const handleCommand = useCallback(
-    (input: string) => sendCommand(thread.id, input),
-    [thread.id, sendCommand],
-  );
-
   const handleThreadUpdated = useCallback(
     (updated: Thread) => {
       upsertThread({ ...updated, persona: thread.persona });
@@ -125,8 +119,7 @@ export function ChatView({ thread, onMobileMenuOpen }: ChatViewProps) {
               Start a conversation with {personaName}
             </div>
             <div className={styles.emptyHint}>
-              Send a message below to begin. Use <code>/help</code> to see
-              available slash commands.
+              Send a message below to begin.
             </div>
           </div>
         ) : (
@@ -174,7 +167,6 @@ export function ChatView({ thread, onMobileMenuOpen }: ChatViewProps) {
         modelName={modelName}
         isSending={isSending || isStreaming}
         onSend={handleSend}
-        onCommand={handleCommand}
       />
 
       {/* ── Config pane (slides in from right) ── */}

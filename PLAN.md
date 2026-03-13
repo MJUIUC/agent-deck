@@ -762,8 +762,10 @@ OAuth flow providers: `google`, `github`. Additional providers are registered in
 | `POST` | `/api/threads` | Create a thread |
 | `GET` | `/api/threads/:id` | Get a thread with config |
 | `PATCH` | `/api/threads/:id` | Update thread (title, model, addendum) |
+| `DELETE` | `/api/threads/:id` | Hard-delete a thread (only if zero messages — used to discard pending threads) |
 | `POST` | `/api/threads/:id/archive` | Archive a thread |
 | `POST` | `/api/threads/:id/unarchive` | Restore a thread |
+| `POST` | `/api/threads/:id/generate-title` | Ask the LLM to generate a title from the first exchange; falls back to truncation |
 | `GET` | `/api/threads/:id/mcp-servers` | List MCP servers for thread |
 | `POST` | `/api/threads/:id/mcp-servers` | Attach MCP server to thread |
 | `DELETE` | `/api/threads/:id/mcp-servers/:mcpId` | Detach MCP server from thread |
@@ -775,7 +777,7 @@ OAuth flow providers: `google`, `github`. Additional providers are registered in
 }
 ```
 
-Title is not provided at creation — it is auto-generated from the first message.
+Title is not provided at creation — it defaults to "New Chat". The thread is not created at all until the user sends their first message (pending thread pattern — see §7.2). After the first agent response completes, the client calls `POST /api/threads/:id/generate-title` which uses the LLM to produce a short title from the first user+agent exchange (max 8 words, truncated to 60 chars). Falls back to the `generate_title_from_message()` truncation if the LLM call fails.
 
 ### 6.8 Messages
 
@@ -827,6 +829,8 @@ Slash commands are intercepted client-side (the UI detects the `/` prefix) and s
 }
 ```
 
+`args` is a `Vec<String>` / `string[]` — the client is responsible for splitting the input. The server receives a pre-split array and passes it directly to command handlers with no further parsing.
+
 **Response:**
 ```json
 {
@@ -838,16 +842,33 @@ Slash commands are intercepted client-side (the UI detects the `/` prefix) and s
 }
 ```
 
+`payload` shape varies by command type. The TypeScript client treats it as a loose `{ [key: string]: unknown }` map and pattern-matches on `type` to render the result. Unknown commands return `400 Bad Request` — the client displays the error message as an ephemeral chat entry.
+
 **Supported commands:**
 
 | Command | Args | Server action |
 |---|---|---|
 | `model` | `list` | Returns available models for the thread's active provider |
-| `model` | `switch <model_id>` | Updates `active_model` on the thread, returns confirmation |
+| `model` | `switch <name-or-id>` | Matches by UUID first, then case-insensitive `display_name`; updates `active_model` on the thread |
 | `routine` | `list` | Returns routines attached to this thread |
-| `routine` | `add` | Returns signal for client to open the add-routine modal |
+| `routine` | `add` | Returns `{ "type": "open_add_routine_modal" }` signal; client shows "coming soon" toast until Phase 4 |
 | `memory` | `list` | Returns last 20 memories for this thread's persona, ordered by recency |
 | `help` | (none) | Returns all available commands with descriptions |
+
+**Client autocomplete panel** — shown when the user types `/` as the first character:
+
+| Command | Icon | Arg hint | Description | Badge |
+|---|---|---|---|---|
+| `/model` | 🔄 | `list \| switch <name>` | List or switch the active model for this thread | Model |
+| `/routine` | ⚡ | `list \| add` | List routines or open the add-routine editor | System |
+| `/memory` | 🗂 | `list` | Show recent memories for this thread's persona | Memory |
+| `/help` | ❓ | *(none)* | Show all available commands | System |
+
+**Toast notifications** — a `ToastProvider` / `useToast` hook is introduced in Story 3.6 for app-level feedback:
+- Three variants: `success` (green), `error` (red), `neutral` (muted default)
+- Auto-dismisses after 3 s; toasts stack and dismiss FIFO
+- Used for: `/model switch` confirmation, `/routine add` "coming soon", future provider token refresh errors, etc.
+- Command errors (unknown command, bad args) are shown as ephemeral chat messages, **not** toasts
 
 ### 6.8.2 System Notifications
 
@@ -1031,7 +1052,9 @@ Deleting a persona is only allowed if no active threads use it. Archived threads
 
 A thread is a persistent conversation session between the user and one agent persona.
 
-**Creation:** The user selects a persona and optionally names the thread. If no name is given, the title is auto-generated from the first message by taking the first 60 characters and truncating at a word boundary. Titles are always editable.
+**Creation:** The user selects a persona. No thread record is written to the database at this point — the client enters a "pending thread" draft state. The thread is created (via `POST /api/threads`) atomically with the first message send. If the user navigates away before sending, no record is created.
+
+**Title generation:** The default title "New Chat" is replaced after the first full exchange. Once the first agent response finishes streaming, the client calls `POST /api/threads/:id/generate-title`. The server fetches the first user message and first assistant message, asks the active LLM to produce a concise title (max 8 words), strips quotes, truncates to 60 chars at a word boundary, and saves it. The sidebar updates immediately via `upsertThread`. Falls back to simple truncation of the first user message if the LLM call fails. Titles are always editable (inline edit — planned, not yet built).
 
 **Configuration pane:** Each thread has a slide-in config panel accessible from the chat UI. From here the user can:
 - See which persona the thread uses (display only, not editable)
@@ -1046,20 +1069,26 @@ A thread is a persistent conversation session between the user and one agent per
 
 ### 7.3 Slash Commands
 
-Slash commands are typed in the chat input and intercepted by the client before sending. The client detects the `/` prefix, parses the command locally, and sends it to `POST /api/threads/:id/command` instead of the message endpoint. Commands are never persisted to message history.
+Slash commands are typed in the chat input and intercepted by the client before sending. The client detects the `/` prefix, parses the command locally into `{ command: string, args: string[] }`, and sends it to `POST /api/threads/:id/command` instead of the message endpoint. Commands are never persisted to message history.
 
 The server owns all command logic via the dedicated command endpoint. This keeps the client thin (just parsing and display) while giving the server a clean, testable contract for command execution.
 
 | Command | Action |
 |---|---|
 | `/model list` | Fetches and displays available models for the active provider |
-| `/model switch <model_id>` | Updates active_model on the thread |
+| `/model switch <name-or-id>` | Updates `active_model` on the thread; accepts UUID or case-insensitive display name match |
 | `/routine list` | Shows routines attached to this thread |
-| `/routine add` | Opens the add routine modal (client reacts to server response type) |
+| `/routine add` | Client receives `open_add_routine_modal` signal; shows "coming soon" toast until Phase 4 |
 | `/memory list` | Shows last 20 memories for this thread's persona |
 | `/help` | Shows all available commands |
 
-**Client behavior:** When the user types `/`, a floating autocomplete panel appears above the input showing available commands with descriptions. Arrow keys to navigate, Enter to select, Escape to dismiss. Command responses are displayed as ephemeral messages in the chat (visible but not persisted, visually distinct from real messages).
+**Client behavior:** When the user types `/`, a floating `SlashDropdown` autocomplete panel appears above the input showing the four supported commands with icons, arg hints, descriptions, and category badges. Arrow keys navigate, Enter fills the selected command into the input (does not submit), Escape dismisses, Tab also fills. Typing after `/` filters the list by command name prefix.
+
+Command responses are displayed as **ephemeral messages** inline in the chat — visually distinct from real messages (muted background, "⚡ Slash Command" tag, italic "ephemeral — not saved" metadata). Ephemeral messages are stored in `ChatView` local state (`Record<threadId, EphemeralMessage[]>`) and are cleared on thread switch or page refresh. They are interleaved with real messages by timestamp when rendering.
+
+For `/model switch`: after a successful response the client calls `upsertThread` with the updated `active_model` so the config pane and chat header reflect the change immediately, and fires a `success` toast.
+
+See §6.8.1 for the full API contract and toast behaviour spec.
 
 ### 7.4 Routines
 
@@ -1581,6 +1610,8 @@ agent-deck/
   - `fix/<short-description>` — bug fixes
   - `chore/<short-description>` — dependency updates, config, non-functional changes
 
+- **Commit granularity** — commit after each logical task within a story, not just once at the end. A "logical task" is a self-contained unit of work that leaves the codebase in a coherent state (e.g. "server contract change", "toast component", "slash dropdown UI", "ChatView ephemeral messages"). This keeps the history readable and makes bisection easy. Commit format: `feat(phaseN): <short description>` for features, `fix(phaseN): <short description>` for fixes within a phase branch. Never batch unrelated changes into one commit.
+
 Examples:
 ```
 feature/phase1-cargo-workspace-setup
@@ -1591,12 +1622,23 @@ fix/sse-stream-disconnect-handling
 chore/update-axum-to-0-8
 ```
 
-- Each feature branch corresponds to one story in the phase plan below
+- Each feature branch corresponds to **one story** in the phase plan. Never combine multiple stories on a single branch.
 - Branches are merged to main only when:
   1. The feature is complete per its acceptance criteria
   2. All tests pass
   3. No regressions in related areas
 - **Branches are never deleted** — not after merging, not ever. Every feature branch must remain accessible for reference, bisection, and history. Do not pass `--delete` or `-d` / `-D` to `git branch`, and do not use `git push origin --delete`.
+
+### 9.3 Debugging and Bug Fixes
+
+When a bug or unexpected behaviour is discovered during development, the same plan-before-code discipline that applies to stories applies to fixes:
+
+1. **Diagnose first.** Gather evidence — logs, `ps`, `lsof`, `git log`, source reading — until the root cause is understood. Do not guess.
+2. **State the root cause clearly.** Write one or two sentences explaining exactly what is wrong and why, before touching any code.
+3. **Propose the fix and wait for confirmation.** Describe what you intend to change and why it addresses the root cause. Stop and wait for the human to confirm before writing any code.
+4. **Then implement.** Only after explicit confirmation, make the change, verify it builds and tests pass, and commit with a `fix:` prefix.
+
+This rule applies even for "obvious" single-line fixes. The cost of a 30-second plan confirmation is always lower than the cost of a wrong or incomplete fix that has to be reverted.
 
 ### 9.3 Testing Philosophy
 
