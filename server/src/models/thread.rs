@@ -11,6 +11,7 @@ pub struct Thread {
     pub active_provider: Option<String>,
     pub system_prompt_addendum: Option<String>,
     pub status: String,
+    pub show_tool_activity: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -22,6 +23,7 @@ pub struct CreateThread {
     pub active_model: Option<String>,
     pub active_provider: Option<String>,
     pub system_prompt_addendum: Option<String>,
+    pub show_tool_activity: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -30,6 +32,7 @@ pub struct UpdateThread {
     pub active_model: Option<String>,
     pub active_provider: Option<String>,
     pub system_prompt_addendum: Option<String>,
+    pub show_tool_activity: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -59,6 +62,7 @@ impl Thread {
             active_provider: req.active_provider,
             system_prompt_addendum: req.system_prompt_addendum,
             status: "active".to_string(),
+            show_tool_activity: req.show_tool_activity.unwrap_or(false),
             created_at: now.clone(),
             updated_at: now,
         }

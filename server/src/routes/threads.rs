@@ -47,7 +47,7 @@ pub async fn list(
 
     let threads: Vec<Thread> = sqlx::query_as(
         "SELECT id, user_id, persona_id, title, active_model, active_provider,
-                system_prompt_addendum, status, created_at, updated_at
+                system_prompt_addendum, status, show_tool_activity, created_at, updated_at
          FROM threads
          WHERE user_id = ? AND status = ?
          ORDER BY updated_at DESC",
@@ -69,7 +69,7 @@ pub async fn get(
 
     let thread: Option<Thread> = sqlx::query_as(
         "SELECT id, user_id, persona_id, title, active_model, active_provider,
-                system_prompt_addendum, status, created_at, updated_at
+                system_prompt_addendum, status, show_tool_activity, created_at, updated_at
          FROM threads
          WHERE id = ? AND user_id = ?",
     )
@@ -117,8 +117,8 @@ pub async fn create(
     sqlx::query(
         "INSERT INTO threads
              (id, user_id, persona_id, title, active_model, active_provider,
-              system_prompt_addendum, status, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+              system_prompt_addendum, status, show_tool_activity, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&thread.id)
     .bind(&thread.user_id)
@@ -128,6 +128,7 @@ pub async fn create(
     .bind(&thread.active_provider)
     .bind(&thread.system_prompt_addendum)
     .bind(&thread.status)
+    .bind(thread.show_tool_activity)
     .bind(&thread.created_at)
     .bind(&thread.updated_at)
     .execute(&state.pool)
@@ -170,7 +171,7 @@ pub async fn update(
 
     let existing: Option<Thread> = sqlx::query_as(
         "SELECT id, user_id, persona_id, title, active_model, active_provider,
-                system_prompt_addendum, status, created_at, updated_at
+                system_prompt_addendum, status, show_tool_activity, created_at, updated_at
          FROM threads
          WHERE id = ? AND user_id = ?",
     )
@@ -201,6 +202,10 @@ pub async fn update(
         None => existing.active_provider.as_deref(),
     };
 
+    let show_tool_activity = payload
+        .show_tool_activity
+        .unwrap_or(existing.show_tool_activity);
+
     let now = chrono::Utc::now()
         .format("%Y-%m-%dT%H:%M:%S%.3fZ")
         .to_string();
@@ -208,13 +213,14 @@ pub async fn update(
     sqlx::query(
         "UPDATE threads
          SET title = ?, active_model = ?, active_provider = ?,
-             system_prompt_addendum = ?, updated_at = ?
+             system_prompt_addendum = ?, show_tool_activity = ?, updated_at = ?
          WHERE id = ? AND user_id = ?",
     )
     .bind(title)
     .bind(active_model)
     .bind(active_provider)
     .bind(system_prompt_addendum)
+    .bind(show_tool_activity)
     .bind(&now)
     .bind(&id)
     .bind(&user_id)
@@ -230,6 +236,7 @@ pub async fn update(
         active_provider: active_provider.map(|s| s.to_string()),
         system_prompt_addendum: system_prompt_addendum.map(|s| s.to_string()),
         status: existing.status,
+        show_tool_activity,
         created_at: existing.created_at,
         updated_at: now,
     };

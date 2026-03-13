@@ -31,7 +31,7 @@ async fn verify_thread_ownership(
 ) -> AppResult<crate::models::thread::Thread> {
     let thread: Option<crate::models::thread::Thread> = sqlx::query_as(
         "SELECT id, user_id, persona_id, title, active_model, active_provider,
-                system_prompt_addendum, status, created_at, updated_at
+                system_prompt_addendum, status, show_tool_activity, created_at, updated_at
          FROM threads
          WHERE id = ? AND user_id = ?",
     )
