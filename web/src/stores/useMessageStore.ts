@@ -121,28 +121,10 @@ export const useMessageStore = create<MessageStore>((set) => ({
       // arrive via SSE (token / message_complete events).
       await messagesApi.send(threadId, content);
 
-      // After the POST returns the user message is persisted. Reload now so
-      // the optimistic placeholder is replaced with the real message (correct
-      // id, created_at, etc.) and any already-completed assistant reply is
-      // picked up in case streaming was missed while the SSE connection was
-      // still being established.
-      try {
-        const res = await messagesApi.list(threadId, { limit: 100 });
-        set((state) => ({
-          messagesByThread: {
-            ...state.messagesByThread,
-            // Merge: keep any messages already present (e.g. streaming tokens
-            // that arrived between POST return and the list response) but
-            // replace optimistic entries with real ones.
-            [threadId]: mergeMessages(
-              state.messagesByThread[threadId] ?? [],
-              res.data,
-            ),
-          },
-        }));
-      } catch {
-        // Non-fatal — SSE will still deliver the response.
-      }
+      // The real user message and assistant response arrive via SSE
+      // (token / message_complete). finalizeStream handles replacing the
+      // optimistic message with the real one. No eager list reload needed —
+      // it was causing a flicker by re-rendering mid-stream.
     } catch (err) {
       // On error, remove the optimistic message and surface the error
       set((state) => ({
@@ -161,11 +143,6 @@ export const useMessageStore = create<MessageStore>((set) => ({
     } finally {
       set((state) => ({
         isSending: { ...state.isSending, [threadId]: false },
-        // If the POST failed or SSE never fired any tokens, reset the
-        // streaming indicator so the bubble doesn't hang indefinitely.
-        isStreaming: state.streamingContent[threadId]
-          ? state.isStreaming
-          : { ...state.isStreaming, [threadId]: false },
       }));
     }
   },

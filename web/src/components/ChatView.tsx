@@ -22,20 +22,39 @@ const EMPTY_MESSAGES: Message[] = [];
 const EMPTY_STRING = "";
 
 // Keeps showBubble true for a random 400–900ms after isStreaming goes false,
-// so the typing indicator doesn't snap away the instant streaming ends.
-function useLingeringStream(isStreaming: boolean): boolean {
+// but ONLY if tokens were actually received before streaming ended.
+// Uses a ref to track whether content arrived — independent of streamingContent
+// being cleared to "" by finalizeStream at the same moment isStreaming goes false.
+function useLingeringStream(
+  isStreaming: boolean,
+  streamingContent: string,
+): boolean {
   const [showBubble, setShowBubble] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Tracks whether any tokens arrived during the current streaming session.
+  // Reset to false when a new stream starts, set to true on first token.
+  const hadContentRef = useRef(false);
+
+  // Track token arrival separately from isStreaming so we still know
+  // whether content was received even after finalizeStream clears the string.
+  useEffect(() => {
+    if (streamingContent) {
+      hadContentRef.current = true;
+    }
+  }, [streamingContent]);
 
   useEffect(() => {
     if (isStreaming) {
+      hadContentRef.current = false;
       if (timerRef.current) {
         clearTimeout(timerRef.current);
         timerRef.current = null;
       }
       setShowBubble(true);
     } else {
-      const delay = 400 + Math.random() * 500; // 400–900ms
+      // Only linger if tokens actually arrived — if nothing came through
+      // (e.g. error before first token) dismiss immediately.
+      const delay = hadContentRef.current ? 400 + Math.random() * 500 : 0;
       timerRef.current = setTimeout(() => {
         setShowBubble(false);
         timerRef.current = null;
@@ -64,7 +83,7 @@ export function ChatView({ thread, onMobileMenuOpen }: ChatViewProps) {
     (s) => s.streamingContent[thread.id] ?? EMPTY_STRING,
   );
   const isStreaming = useMessageStore((s) => s.isStreaming[thread.id] ?? false);
-  const showStreamingBubble = useLingeringStream(isStreaming);
+  const showStreamingBubble = useLingeringStream(isStreaming, streamingContent);
   const isSending = useMessageStore((s) => s.isSending[thread.id] ?? false);
   const isLoadingMessages = useMessageStore((s) => s.isLoadingMessages);
   const messageError = useMessageStore((s) => s.error);
