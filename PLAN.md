@@ -133,16 +133,18 @@ The Rust server is the central process. It:
 - Exposes a REST + SSE API consumed by both the browser and mobile app
 - Owns the agent run-loop — LLM calls happen here, not on the client
 - Manages the `copilot-api` child process (starts it, monitors it, restarts if it crashes)
-- Owns the cron scheduler for routines — routines call the agent run-loop internally (direct function call, not HTTP)
+- Owns the cron scheduler for routines — routines deliver invocations via the system notification channel (not direct function calls)
 - Dispatches FCM push notifications when no SSE client is connected for a thread
+- Enforces a per-thread agent run lock — only one agent run may execute per thread at a time; additional runs queue behind it (see section 7.x)
 
 ### 2.3 Communication Patterns
 
 - **Client → Server:** Standard HTTP REST (POST, GET, PUT, DELETE, PATCH)
-- **Server → Client (streaming):** Server-Sent Events (SSE) — used for LLM token streaming and live event delivery (new messages, routine completions)
+- **Server → Client (streaming):** Server-Sent Events (SSE) — used for LLM token streaming and live event delivery (new messages, routine completions, system events)
 - **Server → Mobile (background):** Firebase Cloud Messaging (FCM) push notifications
 - **Server → LLM Provider:** HTTP via provider abstraction layer (OpenAI-compatible API)
-- **Routine → Agent:** Direct in-process function call — no HTTP involved
+- **Routine → Agent:** Via `POST /api/threads/:id/notify` with `event_type: routine_fired` — same path as all other system notifications
+- **Config change → Agent:** Client calls `POST /api/threads/:id/notify` after any mutation the agent should be aware of (model switch, MCP attach/detach, addendum update)
 
 ### 2.4 SSE Event Streams
 
@@ -152,6 +154,7 @@ Two SSE endpoints exist:
 - `token` — a single streamed LLM token (chat streaming)
 - `message_complete` — full message object once streaming is done
 - `routine_message` — a new message produced by a routine firing
+- `system_event` — a system notification was inserted into the thread (for UI to render if `show_system_events` is on)
 - `error` — streaming error
 
 **`GET /api/events`** — global event stream (for thread list updates, notifications)
@@ -399,9 +402,11 @@ CREATE TABLE threads (
   user_id         TEXT NOT NULL,
   persona_id      TEXT NOT NULL,          -- locked at creation, never changes
   title           TEXT NOT NULL,          -- auto-generated from first message, editable
-  active_model    TEXT,                   -- overrides persona default if set
-  active_provider TEXT,                   -- overrides persona default if set
+  active_model    TEXT,                   -- overrides persona default if set (FK to models.id)
+  active_provider TEXT,                   -- overrides persona default if set (FK to providers.id)
   system_prompt_addendum TEXT,            -- thread-level addition to persona system prompt
+  show_tool_activity INTEGER NOT NULL DEFAULT 0,  -- reveal hidden tool messages in chat UI
+  show_system_events INTEGER NOT NULL DEFAULT 0,  -- reveal hidden system event messages in chat UI
   status          TEXT NOT NULL DEFAULT 'active', -- 'active' | 'archived'
   created_at      TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
@@ -436,11 +441,12 @@ CREATE TABLE messages (
   thread_id    TEXT NOT NULL,
   role         TEXT NOT NULL,             -- 'user' | 'assistant' | 'system' | 'tool'
   content      TEXT NOT NULL,
-  source       TEXT NOT NULL DEFAULT 'chat', -- 'chat' | 'routine'
+  source       TEXT NOT NULL DEFAULT 'chat', -- 'chat' | 'routine' | 'system_event'
   routine_id   TEXT,                      -- set if source = 'routine'
   visibility   TEXT NOT NULL DEFAULT 'visible' CHECK (visibility IN ('visible', 'hidden')),
-                                          -- 'hidden' for tool calls, MCP results, routine intermediate steps
+                                          -- 'hidden' for tool calls, MCP results, routine intermediate steps, and system events
   execution_id TEXT,                      -- references routine_executions(id) for routine-generated messages
+  event_type   TEXT,                      -- set if source = 'system_event', e.g. 'model_switched'
   created_at   TEXT NOT NULL DEFAULT (datetime('now')),
   FOREIGN KEY (thread_id) REFERENCES threads(id),
   FOREIGN KEY (routine_id) REFERENCES routines(id),
@@ -843,6 +849,60 @@ Slash commands are intercepted client-side (the UI detects the `/` prefix) and s
 | `memory` | `list` | Returns last 20 memories for this thread's persona, ordered by recency |
 | `help` | (none) | Returns all available commands with descriptions |
 
+### 6.8.2 System Notifications
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/threads/:id/notify` | Deliver a system notification to a thread |
+
+Used by both the client (e.g. after a model switch) and server-side services (e.g. the routine scheduler) to notify the agent of a system-level event. The server resolves the event type against the registry, inserts a message if `persist` is true, and triggers an agent run if `trigger` is true.
+
+**Request body:**
+```json
+{
+  "event_type": "model_switched",
+  "payload": { "provider_name": "OpenAI", "model_name": "gpt-4o" }
+}
+```
+
+**Event type registry** — all valid event types, their defaults, and behavior:
+
+| event_type | persist | trigger | Description |
+|---|---|---|---|
+| `model_switched` | true | false | Active model changed. Agent sees it in history context. |
+| `provider_switched` | true | false | Active provider changed. |
+| `mcp_server_attached` | true | false | An MCP server was attached to this thread. |
+| `mcp_server_detached` | true | false | An MCP server was detached from this thread. |
+| `addendum_updated` | true | false | System prompt addendum was changed. |
+| `routine_fired` | false | true | A scheduled routine should execute. Payload contains routine instructions. |
+
+Unknown event types are rejected with `400 Bad Request`.
+
+**Behavior by flag combination:**
+
+| persist | trigger | Behavior |
+|---|---|---|
+| true | false | Insert hidden system message, broadcast `system_event` SSE. No agent run. |
+| false | true | Inject payload ephemerally as triggering prompt, run agent, emit visible response. Do not store stimulus. |
+| true | true | Insert hidden system message AND trigger an agent run. |
+| false | false | Invalid — rejected by registry. |
+
+**persist: true messages** are stored with `role: system`, `source: system_event`, `visibility: hidden`, `event_type` set. They appear in agent history context on every subsequent turn. The client renders them only when `show_system_events` is enabled on the thread.
+
+**persist: false, trigger: true messages** are injected as the triggering prompt for an agent run but never written to `messages`. The agent's visible response is stored normally.
+
+**Response:**
+```json
+{
+  "data": {
+    "event_type": "model_switched",
+    "persisted": true,
+    "triggered": false,
+    "message_id": "<uuid or null>"
+  }
+}
+```
+
 ### 6.9 SSE Streams
 
 | Method | Path | Description |
@@ -861,6 +921,9 @@ data: {"id": "<id>", "thread_id": "<id>", "role": "assistant", "content": "Hello
 
 event: routine_message
 data: {"id": "<id>", "thread_id": "<id>", "role": "assistant", "content": "...", "routine_id": "<id>", "created_at": "..."}
+
+event: system_event
+data: {"id": "<id>", "thread_id": "<id>", "event_type": "model_switched", "content": "Model switched to OpenAI · gpt-4o", "created_at": "..."}
 
 event: error
 data: {"code": "PROVIDER_ERROR", "message": "Failed to connect to provider"}
@@ -1043,6 +1106,75 @@ Routines automatically pause when a thread is archived and resume when unarchive
 Routines have access to all skills and MCP servers attached to their thread.
 
 The cron expression field in the UI shows a human-friendly description below it ("Runs every day at 9:00 AM") to make scheduling accessible to non-engineers.
+
+### 7.x — System Notification Channel
+
+The system notification channel is a general-purpose mechanism for delivering structured events to a thread's agent context. It replaces all ad-hoc system message insertions with a single normalized endpoint and a server-side event registry.
+
+#### Motivation
+
+Several actors need to notify the agent of state changes or trigger autonomous agent runs:
+- The client (model switched, MCP server attached, addendum changed)
+- The cron scheduler (routine fired)
+- Future server-side services (webhooks, push triggers, external integrations)
+
+Rather than each caller inserting messages directly or using bespoke invocation formats, all of them go through `POST /api/threads/:id/notify`. This keeps the agent's context clean, auditable, and consistent.
+
+#### Two Orthogonal Flags
+
+Each event type in the registry declares two independent boolean flags:
+
+**`persist`** — should the notification be stored in `messages`?
+- `true`: inserted as `role: system`, `source: system_event`, `visibility: hidden`. Stays in agent history permanently. Use for durable state changes the agent should always remember (model switch, MCP attach/detach).
+- `false`: used only as an ephemeral triggering prompt for the current agent run. Not stored. Use for transient data (routine instructions, weather briefing) where the stimulus doesn't need to outlive the response.
+
+**`trigger`** — should this notification cause an agent run?
+- `true`: the agent is invoked with the event payload as its prompt. The agent produces a visible response. Use for anything requiring the agent to act (routines, alarms, external triggers).
+- `false`: no agent run. The message is silently inserted into history. Use for passive state updates (model switch, config changes).
+
+The combination `persist: false, trigger: false` is invalid and rejected by the registry.
+
+#### Event Type Registry
+
+All valid event types are enumerated server-side. Unknown types are rejected with `400`. The registry is the single source of truth for what the system can emit.
+
+| event_type | persist | trigger | Agent-visible content |
+|---|---|---|---|
+| `model_switched` | true | false | "Model switched to {{provider}} · {{model}}" |
+| `provider_switched` | true | false | "Provider switched to {{provider}}" |
+| `mcp_server_attached` | true | false | "MCP server '{{name}}' attached to this thread" |
+| `mcp_server_detached` | true | false | "MCP server '{{name}}' detached from this thread" |
+| `addendum_updated` | true | false | "System prompt addendum updated" |
+| `routine_fired` | false | true | Routine invocation payload (see section 7.4) |
+
+#### Per-Thread Concurrency — Agent Run Lock
+
+The agent run loop is stateless and per-message, but a single thread must never have two agent runs executing simultaneously. This becomes critical when trigger notifications (routines, system events) can fire independently of the user.
+
+Each thread is protected by a per-thread semaphore held in `AppState` (`DashMap<thread_id, Semaphore>` with a permit count of 1). Any code path that invokes the agent — user message, slash command, or notify trigger — must acquire this semaphore before running and release it when done.
+
+Incoming runs that cannot immediately acquire the semaphore queue behind it (Tokio semaphores handle this natively — no manual queue needed). If the queue depth exceeds a configurable limit (default: 3), the request is rejected with `429 Too Many Requests` and a clear message ("This thread is busy — try again in a moment").
+
+**Client-side:** The message input is already disabled while `isSending || isStreaming`. This covers the common case of a user trying to send while a response is in progress. The server lock is the correctness guarantee; the client disable is the UX affordance.
+
+#### Visibility Toggles
+
+System event messages respect two independent per-thread toggles (stored on `threads`):
+- `show_tool_activity` — reveals hidden tool call/result messages
+- `show_system_events` — reveals hidden system event messages
+
+Both default to off. Either can be toggled independently from the Thread Config pane. Both are development/power-user features — the default chat experience remains clean.
+
+#### Client Integration
+
+After any config change that warrants agent awareness, the client calls `POST /api/threads/:id/notify` immediately after the successful mutation:
+
+- After `PUT /api/threads/:id` changes `active_model` → emit `model_switched`
+- After `POST /api/threads/:id/mcp-servers` → emit `mcp_server_attached`
+- After `DELETE /api/threads/:id/mcp-servers/:id` → emit `mcp_server_detached`
+- After addendum blur-save → emit `addendum_updated`
+
+These are fire-and-forget from the client's perspective. A failure to notify is non-fatal — the config change already persisted.
 
 ### 7.5 MCP Integration
 
@@ -2011,7 +2143,43 @@ Acceptance criteria:
 
 ---
 
-**Story 4.2 — Routines CRUD endpoints**  
+**Story 4.0 — System Notification Channel + Agent Run Lock**
+Branch: `feature/phase4-notify-endpoint`
+
+This story is a prerequisite for all other Phase 4 stories. Routines, memory tools, and any future server-initiated agent trigger depend on both the notify endpoint and the concurrency lock.
+
+**Part A — Per-thread agent run lock:**
+Add a `DashMap<String, Arc<Semaphore>>` to `AppState` keyed by thread ID. Every code path that invokes `agent::run` — `POST /api/threads/:id/messages`, slash command model switch, and the new notify endpoint — must acquire a per-thread permit before running and release it on completion. Reject with `429` if queue depth exceeds 3.
+
+**Part B — System notification endpoint:**
+Implement `POST /api/threads/:id/notify` per section 6.8.2. Implement the event type registry as a Rust enum with associated `persist` and `trigger` flags and a content template. For `persist: true` events, insert into `messages` with `role: system`, `source: system_event`, `visibility: hidden`, `event_type` set, and broadcast a `system_event` SSE event. For `trigger: true` events, acquire the run lock and invoke `agent::run` with the event payload as the triggering prompt.
+
+**Part C — Schema migration:**
+Add `event_type TEXT` column to `messages`. Add `show_system_events INTEGER NOT NULL DEFAULT 0` column to `threads`. Update `Thread` model and all affected SELECT/INSERT/UPDATE queries.
+
+**Part D — Client integration:**
+After model switch in `ConfigPane`, call `POST /api/threads/:id/notify` with `event_type: model_switched`. After MCP attach/detach, emit the corresponding event. These are fire-and-forget.
+
+**Part E — `show_system_events` toggle:**
+Add the toggle to the Thread Config pane (below the existing `show_tool_activity` toggle). Wire it to `PUT /api/threads/:id`.
+
+Acceptance criteria:
+- [ ] Per-thread semaphore prevents concurrent agent runs on the same thread
+- [ ] Concurrent attempt queues and runs after the first completes
+- [ ] Queue depth > 3 returns `429` with clear message
+- [ ] `POST /api/threads/:id/notify` accepts all registered event types and rejects unknown ones with `400`
+- [ ] `persist: true` events insert a hidden system message and broadcast `system_event` SSE
+- [ ] `trigger: true` events invoke the agent run loop and produce a visible response
+- [ ] `persist: false, trigger: false` is rejected
+- [ ] `model_switched` event visible in message history (with `?include_hidden=true`)
+- [ ] Client calls notify after model switch; hidden message appears in DB
+- [ ] `show_system_events` toggle persists per-thread
+- [ ] Unit tests for event registry (valid types, invalid type rejection, flag combinations)
+- [ ] `cargo sqlx prepare` run and `.sqlx/` committed
+
+---
+
+**Story 4.2 — Routines CRUD endpoints**
 Branch: `feature/phase4-routines-crud`
 
 Implement all routine endpoints from section 6.10.
@@ -2036,7 +2204,10 @@ Acceptance criteria:
 
 ---
 
-**Story 4.4 — Routine execution**  
+**Story 4.4 — Routine execution**
+
+> **Depends on Story 4.0** — the routine scheduler uses the notify endpoint with `event_type: routine_fired` (`persist: false, trigger: true`) to invoke the agent. The bespoke routine invocation JSON described in section 7.4 is the payload for this event type. The two-phase execution model remains the same — Story 4.0 provides the infrastructure, Story 4.4 wires the scheduler into it.
+
 Branch: `feature/phase4-routine-execution`
 
 Implement the two-phase routine execution model per section 7.4. When a routine fires:
