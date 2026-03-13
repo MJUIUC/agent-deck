@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { messagesApi } from "@/api/client";
-import type { Message } from "@/types";
+import type { Message, SlashCommandResponse } from "@/types";
 
 interface MessageStore {
   // State
@@ -17,7 +17,7 @@ interface MessageStore {
   sendCommand: (
     threadId: string,
     input: string,
-  ) => Promise<{ type: string; message: string } | null>;
+  ) => Promise<SlashCommandResponse | null>;
   appendToken: (threadId: string, token: string) => void;
   finalizeStream: (threadId: string, message: Message) => void;
   addMessage: (message: Message) => void;
