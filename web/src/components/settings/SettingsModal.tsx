@@ -6,16 +6,7 @@ import { ProviderSettings } from "./ProviderSettings";
 import { PersonaSettings } from "./PersonaSettings";
 import { McpServerSettings } from "./McpServerSettings";
 import { MobileSettings } from "./MobileSettings";
-
-// Stub for 3.4d — replaced with real component in subsequent story
-
-function GeneralStub() {
-  return (
-    <div style={{ color: "var(--text-secondary)", fontSize: 13 }}>
-      General — coming in Story 3.4d
-    </div>
-  );
-}
+import { GeneralSettings } from "./GeneralSettings";
 
 export interface SettingsModalProps {
   isOpen: boolean;
@@ -137,7 +128,7 @@ export function SettingsModal({
               )}
               {tab === "mcp-servers" && <McpServerSettings />}
               {tab === "mobile" && <MobileSettings />}
-              {tab === "general" && <GeneralStub />}
+              {tab === "general" && <GeneralSettings />}
             </div>
           </div>
 

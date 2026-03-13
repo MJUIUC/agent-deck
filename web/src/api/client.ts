@@ -332,6 +332,22 @@ export const mcpServersApi = {
   },
 };
 
+// ── Auth ─────────────────────────────────────────────────────────────────────
+
+export const authApi = {
+  rotateToken(): Promise<{
+    data: { token: string; message: string };
+  }> {
+    return apiFetch("/api/auth/token/rotate", { method: "POST" });
+  },
+
+  getConfig(): Promise<{
+    data: { setup_complete: boolean; port: number; version: string };
+  }> {
+    return apiFetch("/api/config");
+  },
+};
+
 // ── Pairing ───────────────────────────────────────────────────────────────────
 
 export const pairingApi = {
