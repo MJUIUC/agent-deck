@@ -21,53 +21,6 @@ interface ChatViewProps {
 const EMPTY_MESSAGES: Message[] = [];
 const EMPTY_STRING = "";
 
-// Keeps showBubble true for a random 400–900ms after isStreaming goes false,
-// but ONLY if tokens were actually received before streaming ended.
-// Uses a ref to track whether content arrived — independent of streamingContent
-// being cleared to "" by finalizeStream at the same moment isStreaming goes false.
-function useLingeringStream(
-  isStreaming: boolean,
-  streamingContent: string,
-): boolean {
-  const [showBubble, setShowBubble] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Tracks whether any tokens arrived during the current streaming session.
-  // Reset to false when a new stream starts, set to true on first token.
-  const hadContentRef = useRef(false);
-
-  // Track token arrival separately from isStreaming so we still know
-  // whether content was received even after finalizeStream clears the string.
-  useEffect(() => {
-    if (streamingContent) {
-      hadContentRef.current = true;
-    }
-  }, [streamingContent]);
-
-  useEffect(() => {
-    if (isStreaming) {
-      hadContentRef.current = false;
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-        timerRef.current = null;
-      }
-      setShowBubble(true);
-    } else {
-      // Only linger if tokens actually arrived — if nothing came through
-      // (e.g. error before first token) dismiss immediately.
-      const delay = hadContentRef.current ? 400 + Math.random() * 500 : 0;
-      timerRef.current = setTimeout(() => {
-        setShowBubble(false);
-        timerRef.current = null;
-      }, delay);
-    }
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
-  }, [isStreaming]);
-
-  return showBubble;
-}
-
 export function ChatView({ thread, onMobileMenuOpen }: ChatViewProps) {
   const [configOpen, setConfigOpen] = useState(false);
 
@@ -83,7 +36,6 @@ export function ChatView({ thread, onMobileMenuOpen }: ChatViewProps) {
     (s) => s.streamingContent[thread.id] ?? EMPTY_STRING,
   );
   const isStreaming = useMessageStore((s) => s.isStreaming[thread.id] ?? false);
-  const showStreamingBubble = useLingeringStream(isStreaming, streamingContent);
   const isSending = useMessageStore((s) => s.isSending[thread.id] ?? false);
   const isLoadingMessages = useMessageStore((s) => s.isLoadingMessages);
   const messageError = useMessageStore((s) => s.error);
@@ -150,7 +102,7 @@ export function ChatView({ thread, onMobileMenuOpen }: ChatViewProps) {
       <div ref={containerRef} className={`${styles.messages} scrollbar-thin`}>
         {isLoadingMessages ? (
           <div className={styles.loading}>Loading messages…</div>
-        ) : visibleMessages.length === 0 && !showStreamingBubble ? (
+        ) : visibleMessages.length === 0 && !isStreaming ? (
           /* Empty thread */
           <div className={styles.emptyThread}>
             <div className={styles.emptyEmoji}>{personaEmoji}</div>
@@ -181,7 +133,7 @@ export function ChatView({ thread, onMobileMenuOpen }: ChatViewProps) {
             ))}
 
             {/* Streaming bubble */}
-            {showStreamingBubble && (
+            {isStreaming && (
               <StreamingBubble
                 personaEmoji={personaEmoji}
                 personaName={personaName}
@@ -192,7 +144,7 @@ export function ChatView({ thread, onMobileMenuOpen }: ChatViewProps) {
         )}
 
         {/* Error banner */}
-        {messageError && !showStreamingBubble && (
+        {messageError && !isStreaming && (
           <div className={styles.errorBanner}>⚠ {messageError}</div>
         )}
       </div>
