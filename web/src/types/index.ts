@@ -157,9 +157,13 @@ export interface ApiError {
 
 // ── Slash command response ────────────────────────────────────────────────────
 
+// TODO: Tighten to a discriminated union per command type (model_list,
+// memory_list, routine_list, model_switched, etc.) once the command surface
+// stabilises. For now, keep it loose and pattern-match on `type` at render time.
 export interface SlashCommandPayload {
   model_id?: string;
   display_name?: string;
+  [key: string]: unknown;
 }
 
 export interface SlashCommandResponse {
