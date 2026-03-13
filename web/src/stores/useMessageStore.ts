@@ -88,9 +88,7 @@ export const useMessageStore = create<MessageStore>((set) => ({
   sendMessage: async (threadId, content) => {
     set((state) => ({
       isSending: { ...state.isSending, [threadId]: true },
-      // Don't pre-set isStreaming here — let actual token events drive it.
-      // Pre-setting it caused a permanent "typing" indicator when the SSE
-      // connection wasn't established before the agent started firing.
+      isStreaming: { ...state.isStreaming, [threadId]: true },
       streamingContent: { ...state.streamingContent, [threadId]: "" },
       error: null,
     }));
@@ -163,6 +161,11 @@ export const useMessageStore = create<MessageStore>((set) => ({
     } finally {
       set((state) => ({
         isSending: { ...state.isSending, [threadId]: false },
+        // If the POST failed or SSE never fired any tokens, reset the
+        // streaming indicator so the bubble doesn't hang indefinitely.
+        isStreaming: state.streamingContent[threadId]
+          ? state.isStreaming
+          : { ...state.isStreaming, [threadId]: false },
       }));
     }
   },

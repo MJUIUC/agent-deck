@@ -70,19 +70,28 @@ export function ChatHeader({
 
   useEffect(() => {
     let cancelled = false;
-    resolveDisplayNames(
-      thread.active_provider ?? null,
-      thread.active_model ?? null,
-    ).then(({ providerName: pn, modelName: mn }) => {
-      if (!cancelled) {
-        setProviderName(pn);
-        setModelName(mn);
-      }
-    });
+    // Prefer thread's own active values; fall back to persona defaults (UUIDs)
+    const providerUuid =
+      thread.active_provider ?? thread.persona?.default_provider ?? null;
+    const modelUuid =
+      thread.active_model ?? thread.persona?.default_model ?? null;
+    resolveDisplayNames(providerUuid, modelUuid).then(
+      ({ providerName: pn, modelName: mn }) => {
+        if (!cancelled) {
+          setProviderName(pn);
+          setModelName(mn);
+        }
+      },
+    );
     return () => {
       cancelled = true;
     };
-  }, [thread.active_provider, thread.active_model]);
+  }, [
+    thread.active_provider,
+    thread.active_model,
+    thread.persona?.default_provider,
+    thread.persona?.default_model,
+  ]);
 
   const parts: string[] = [personaName];
   if (providerName) parts.push(providerName);
