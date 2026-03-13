@@ -21,7 +21,7 @@
 | 3.5 — Thread Config Pane | ✅ Complete | `feature/phase3-thread-config` | ⚠️ Needs merge to main. Memory section deferred. Model selector saves UUIDs. |
 | 3.6 — Slash Command UI | ✅ Complete (server only) | `feature/phase3-slash-commands` | UI removed — slash commands belong in CLI/mobile. Server endpoint intact, not exposed in web UI. Vitest added. See As-built notes in story. |
 | 3.7 — Archived Threads | ✅ Complete | `feature/phase3-archived-threads` | Scoped down per human review. Archive from config pane only (red button + confirm). Archived view in Settings → Archived Threads (read-only). Unarchive UI, restore, and export deferred. See as-built notes. |
-| 3.8 — Pending Thread + Smart Title Generation | 🔲 Not started | — | Next up after 3.7. See story spec below. |
+| 3.8 — Pending Thread + Smart Title Generation | 🔲 Not started (rewrite) | `feature/phase3-pending-thread` (dropped) | First attempt built on stale base (pre-3.5). Branch dropped and deleted. Rewrite from scratch on updated main. See implementation notes in story spec. |
 | 3.x — Credential Store | 🔲 Not started | — | Part 2 |
 | 3.3 Delta — Persona Default MCP Servers | 🔲 Not started | — | Part 2 |
 
@@ -660,7 +660,30 @@ Scope was significantly reduced after human review. The following decisions were
 
 ### Story 3.8 — Pending Thread and Smart Title Generation
 
-**Branch:** `feature/phase3-pending-thread`
+**Branch:** `feature/phase3-pending-thread` (create fresh from current `main`)
+
+#### Implementation Notes (from first attempt — read before starting)
+
+A first attempt at this story was built and dropped. The following was learned:
+
+**Server — what works, reuse it:**
+- `build_provider()` in `agent.rs` must be made `pub(crate)` so `threads.rs` can call it for the title endpoint. This is the correct approach — do not duplicate the provider factory.
+- `verify_thread_ownership()` in `threads.rs` should return the full `Thread` struct (not just the ID string) — the `generate-title` handler needs `active_provider`, `active_model`, and `persona_id` from it. All existing call sites that only need the ownership check can ignore the return value.
+- `provider.complete()` takes a `tools: Vec<ChatCompletionTool>` third argument — pass `vec![]` for the title call.
+- The title-gen block in `messages::send()` must be removed cleanly — just delete the entire `if thread.title == "New Chat"` block.
+
+**Client — three bugs from the first attempt to avoid:**
+
+**Bug A — ChatHeader shows UUID not display name.**
+`thread.active_model` and `thread.active_provider` are UUID foreign keys, not display strings. `ChatHeader` must not render them directly. Fix: resolve display names in `ChatView` with a `useEffect` that calls `providersApi.list()` and `modelsApi.list(providerId)`, computes `"<providerName> · <modelDisplayName>"`, stores it in a `resolvedSubtitle` state string, and passes it as an optional `subtitle?: string` prop to `ChatHeader`. `ChatHeader` renders `subtitle` if provided, falls back to persona name only. For draft mode, show persona name only (no resolution needed).
+
+**Bug B — UUID appears in MessageInput hints row.**
+`ChatView` was passing `thread.active_model` (a UUID) as `modelName` to `MessageInput`. Decision: **remove model name from `MessageInput` entirely** — the `modelName` prop and its hints-row span should be deleted. The hints row can keep the keyboard shortcut hint or be removed if it becomes empty.
+
+**Bug C — Two thread items appear after first send; title never generates.**
+This is a two-part race:
+1. `promotePendingThread` added the thread to `state.threads` a second time when `createThread` had already added it. Fix: `promotePendingThread` must NOT push to `threads` — it should only set `activeThreadId = thread.id`, `pendingPersona = null`, `isCreating = false`. `createThread` already handles the insert.
+2. `ChatView` remounts when transitioning from draft to real thread, resetting all refs. The `firstSendMessageCountRef` used to trigger title generation is lost. Fix: add an `isFirstSend?: boolean` prop to `ChatView`. When true, a mount-only `useEffect` (empty dep array) seeds `firstSendMessageCountRef.current = 0` before any messages arrive. `App.tsx` tracks a `pendingFirstSend` ref (`useRef<boolean>(false)`), sets it to `true` in `handleFirstSend`, and passes it to the real `<ChatView>` branch.
 
 #### Background
 
