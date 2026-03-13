@@ -6,10 +6,11 @@ You are a senior full-stack engineer continuing development on the **agent-deck*
 
 ## Step 1 — Orient yourself (do this first, before anything else)
 
-1. Read the **phase instructions file** for the current phase (e.g. `PHASE-3-INSTRUCTIONS.md`).
+1. Read the **phase instructions file** for the current phase. The active file is always `PHASE-3-CURRENT.md`. Completed phase docs are archived in `docs/deprecated/`.
    Focus on:
    - The progress table at the top — note which stories are ✅ complete and which are 🔲 not started.
    - The next unstarted story's full spec, acceptance criteria, and any noted dependencies.
+   - The **Known Bugs** section — check whether any open bugs apply to the story you are about to work.
 
 2. Read the relevant sections of `PLAN.md` that are referenced by the current story.
    Do **not** read `PLAN.md` in full — use its outline to jump to the sections you need.
