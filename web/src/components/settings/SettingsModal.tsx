@@ -4,15 +4,9 @@ import type { SettingsTab } from "./shared";
 import { SettingsSidebar } from "./SettingsNav";
 import { ProviderSettings } from "./ProviderSettings";
 import { PersonaSettings } from "./PersonaSettings";
+import { McpServerSettings } from "./McpServerSettings";
 
-// Stubs for 3.4b–3.4d — replaced with real components in subsequent stories
-function McpServersStub() {
-  return (
-    <div style={{ color: "var(--text-secondary)", fontSize: 13 }}>
-      MCP Servers — coming in Story 3.4b
-    </div>
-  );
-}
+// Stubs for 3.4c–3.4d — replaced with real components in subsequent stories
 
 function MobileStub() {
   return (
@@ -148,7 +142,7 @@ export function SettingsModal({
               {tab === "personas" && (
                 <PersonaSettings onDataChanged={handleDataChanged} />
               )}
-              {tab === "mcp-servers" && <McpServersStub />}
+              {tab === "mcp-servers" && <McpServerSettings />}
               {tab === "mobile" && <MobileStub />}
               {tab === "general" && <GeneralStub />}
             </div>

@@ -62,6 +62,25 @@ export interface Model {
   updated_at: string;
 }
 
+export interface McpServer {
+  id: string;
+  user_id: string;
+  name: string;
+  description: string | null;
+  source_url: string | null;
+  server_type: "local" | "remote";
+  config: string; // JSON string
+  status: "inactive" | "connecting" | "connected" | "error";
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface McpTool {
+  name: string;
+  description: string;
+}
+
 export interface Routine {
   id: string;
   thread_id: string;
