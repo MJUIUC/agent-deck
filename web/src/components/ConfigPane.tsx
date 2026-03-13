@@ -480,6 +480,7 @@ interface ConfigPaneProps {
   onClose: () => void;
   onThreadUpdated: (thread: Thread) => void;
   onOpenSettings?: () => void;
+  onArchiveThread?: (threadId: string) => Promise<void>;
 }
 
 export function ConfigPane({
@@ -488,10 +489,15 @@ export function ConfigPane({
   onClose,
   onThreadUpdated,
   onOpenSettings,
+  onArchiveThread,
 }: ConfigPaneProps) {
   // ── Addendum ──
   const [addendum, setAddendum] = useState(thread.system_prompt_addendum ?? "");
   const [isSavingAddendum, setIsSavingAddendum] = useState(false);
+
+  // ── Archive confirm ──
+  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
+  const [isArchiving, setIsArchiving] = useState(false);
 
   // ── Tool activity ──
   const [showToolActivity, setShowToolActivity] = useState(
@@ -515,6 +521,7 @@ export function ConfigPane({
     setAddendum(thread.system_prompt_addendum ?? "");
     setShowToolActivity(thread.show_tool_activity ?? false);
     setShowAttachPicker(false);
+    setShowArchiveConfirm(false);
   }, [thread.id, thread.system_prompt_addendum, thread.show_tool_activity]);
 
   // Load attached MCP servers whenever the pane opens or thread changes
@@ -635,6 +642,23 @@ export function ConfigPane({
       setToolsMap((prev) => ({ ...prev, [serverId]: [] }));
     }
   };
+
+  const handleArchiveClick = () => setShowArchiveConfirm(true);
+
+  const handleArchiveConfirm = async () => {
+    if (!onArchiveThread) return;
+    setIsArchiving(true);
+    try {
+      await onArchiveThread(thread.id);
+      // onArchiveThread updates the store and switches active thread;
+      // the pane will unmount or receive a new thread prop automatically.
+    } catch {
+      setIsArchiving(false);
+      setShowArchiveConfirm(false);
+    }
+  };
+
+  const handleArchiveCancel = () => setShowArchiveConfirm(false);
 
   const persona = thread.persona;
   const attachedIds = new Set(attachedEntries.map((e) => e.mcp_server_id));
@@ -829,6 +853,54 @@ export function ConfigPane({
                 : "This text is appended to the persona's system prompt for this thread only."}
             </div>
           </div>
+
+          {/* ── Archive ── */}
+          {onArchiveThread && (
+            <>
+              <div className={styles.divider} />
+              <div className={styles.section}>
+                <div className={styles.sectionHeader}>
+                  <span className={styles.sectionTitle}>Danger Zone</span>
+                </div>
+                {showArchiveConfirm ? (
+                  <div className={styles.archiveConfirm}>
+                    <p className={styles.archiveConfirmText}>
+                      Archive this thread? It will be hidden from your chat list
+                      and moved to <strong>Settings → Archived Threads</strong>.
+                    </p>
+                    <p className={styles.archiveConfirmWarning}>
+                      ⚠️ There is currently no way to restore an archived
+                      thread. Restore functionality is planned for a future
+                      update.
+                    </p>
+                    <div className={styles.archiveConfirmActions}>
+                      <button
+                        className={styles.archiveCancelBtn}
+                        onClick={handleArchiveCancel}
+                        disabled={isArchiving}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        className={styles.archiveConfirmBtn}
+                        onClick={handleArchiveConfirm}
+                        disabled={isArchiving}
+                      >
+                        {isArchiving ? "Archiving…" : "Yes, archive it"}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    className={styles.archiveBtn}
+                    onClick={handleArchiveClick}
+                  >
+                    📦 Archive Thread
+                  </button>
+                )}
+              </div>
+            </>
+          )}
         </div>
         {/* /body */}
       </div>

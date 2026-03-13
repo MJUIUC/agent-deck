@@ -7,7 +7,8 @@ export type SettingsTab =
   | "personas"
   | "mcp-servers"
   | "mobile"
-  | "general";
+  | "general"
+  | "archived-threads";
 
 export type ProviderFormData = {
   name: string;

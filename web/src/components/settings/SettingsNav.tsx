@@ -177,6 +177,12 @@ export function SettingsSidebar({
         active={tab === "general"}
         onClick={() => onTabChange("general")}
       />
+      <NavItem
+        icon="📦"
+        label="Archived Threads"
+        active={tab === "archived-threads"}
+        onClick={() => onTabChange("archived-threads")}
+      />
     </aside>
   );
 }

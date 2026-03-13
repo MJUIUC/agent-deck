@@ -52,6 +52,7 @@ export function ChatView({ thread, onMobileMenuOpen }: ChatViewProps) {
   const disconnectThread = useSseStore((s) => s.disconnectThread);
 
   const upsertThread = useThreadStore((s) => s.upsertThread);
+  const archiveThread = useThreadStore((s) => s.archiveThread);
 
   useEffect(() => {
     loadMessages(thread.id);
@@ -175,6 +176,7 @@ export function ChatView({ thread, onMobileMenuOpen }: ChatViewProps) {
         thread={thread}
         onClose={() => setConfigOpen(false)}
         onThreadUpdated={handleThreadUpdated}
+        onArchiveThread={archiveThread}
       />
     </div>
   );

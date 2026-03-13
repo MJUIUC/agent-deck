@@ -7,6 +7,7 @@ import { PersonaSettings } from "./PersonaSettings";
 import { McpServerSettings } from "./McpServerSettings";
 import { MobileSettings } from "./MobileSettings";
 import { GeneralSettings } from "./GeneralSettings";
+import { ArchivedThreadsSettings } from "./ArchivedThreadsSettings";
 
 export interface SettingsModalProps {
   isOpen: boolean;
@@ -129,6 +130,7 @@ export function SettingsModal({
               {tab === "mcp-servers" && <McpServerSettings />}
               {tab === "mobile" && <MobileSettings />}
               {tab === "general" && <GeneralSettings />}
+              {tab === "archived-threads" && <ArchivedThreadsSettings />}
             </div>
           </div>
 
