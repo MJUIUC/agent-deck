@@ -190,6 +190,7 @@ function ProviderModelSelector({
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(
     null,
   );
+  const [listOpen, setListOpen] = useState(false);
 
   // Load all providers and their models on mount
   useEffect(() => {
@@ -218,6 +219,7 @@ function ProviderModelSelector({
           setSelectedProviderId(
             current?.provider.id ?? results[0]?.provider.id ?? null,
           );
+          setListOpen(false);
         }
       } catch {
         // silently degrade
@@ -247,56 +249,88 @@ function ProviderModelSelector({
     );
   }
 
+  // Label shown on the collapsed toggle — current provider · model, or a prompt
+  const activeModel = selectedEntry?.models.find(
+    (m) =>
+      m.model_id === thread.active_model &&
+      selectedEntry.provider.name === thread.active_provider,
+  );
+  const collapsedLabel =
+    thread.active_provider && thread.active_model
+      ? `${thread.active_provider} · ${activeModel?.display_name ?? thread.active_model}`
+      : "Select a model…";
+
   return (
     <div className={styles.selectorWrap}>
-      {/* Row 1 — Provider pills */}
-      <div className={styles.providerPills}>
-        {data.map(({ provider }) => (
-          <button
-            key={provider.id}
-            className={[
-              styles.providerPill,
-              provider.id === selectedProviderId
-                ? styles.providerPillActive
-                : "",
-            ].join(" ")}
-            onClick={() => setSelectedProviderId(provider.id)}
-          >
-            {provider.name}
-          </button>
-        ))}
-      </div>
+      {/* Toggle header — always visible */}
+      <button
+        className={styles.selectorToggle}
+        onClick={() => setListOpen((o) => !o)}
+      >
+        <ChevronRight
+          size={11}
+          className={[
+            styles.selectorArrow,
+            listOpen ? styles.selectorArrowOpen : "",
+          ].join(" ")}
+        />
+        <span className={styles.selectorLabel}>{collapsedLabel}</span>
+      </button>
 
-      {/* Row 2 — Model list for selected provider */}
-      {selectedEntry && (
-        <div className={styles.modelList}>
-          {selectedEntry.models.length === 0 ? (
-            <div className={styles.modelEmpty}>
-              No models. Sync in Settings → Providers.
+      {/* Expanded panel */}
+      {listOpen && (
+        <div className={styles.selectorPanel}>
+          {/* Provider pills */}
+          <div className={styles.providerPills}>
+            {data.map(({ provider }) => (
+              <button
+                key={provider.id}
+                className={[
+                  styles.providerPill,
+                  provider.id === selectedProviderId
+                    ? styles.providerPillActive
+                    : "",
+                ].join(" ")}
+                onClick={() => setSelectedProviderId(provider.id)}
+              >
+                {provider.name}
+              </button>
+            ))}
+          </div>
+
+          {/* Model list for selected provider */}
+          {selectedEntry && (
+            <div className={styles.modelList}>
+              {selectedEntry.models.length === 0 ? (
+                <div className={styles.modelEmpty}>
+                  No models. Sync in Settings → Providers.
+                </div>
+              ) : (
+                selectedEntry.models.map((m) => {
+                  const isActive =
+                    m.model_id === thread.active_model &&
+                    selectedEntry.provider.name === thread.active_provider;
+                  return (
+                    <button
+                      key={m.id}
+                      className={[
+                        styles.modelItem,
+                        isActive ? styles.modelItemActive : "",
+                      ].join(" ")}
+                      onClick={() => {
+                        onUpdate(selectedEntry.provider.name, m.model_id);
+                        setListOpen(false);
+                      }}
+                    >
+                      {m.display_name || m.model_id}
+                      {isActive && (
+                        <span className={styles.modelActiveCheck}>✓</span>
+                      )}
+                    </button>
+                  );
+                })
+              )}
             </div>
-          ) : (
-            selectedEntry.models.map((m) => {
-              const isActive =
-                m.model_id === thread.active_model &&
-                selectedEntry.provider.name === thread.active_provider;
-              return (
-                <button
-                  key={m.id}
-                  className={[
-                    styles.modelItem,
-                    isActive ? styles.modelItemActive : "",
-                  ].join(" ")}
-                  onClick={() =>
-                    onUpdate(selectedEntry.provider.name, m.model_id)
-                  }
-                >
-                  {m.display_name || m.model_id}
-                  {isActive && (
-                    <span className={styles.modelActiveCheck}>✓</span>
-                  )}
-                </button>
-              );
-            })
           )}
         </div>
       )}

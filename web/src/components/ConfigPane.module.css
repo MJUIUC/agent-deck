@@ -189,7 +189,56 @@
 .selectorWrap {
     display: flex;
     flex-direction: column;
+    gap: 0;
+}
+
+/* Toggle header */
+.selectorToggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    text-align: left;
+    padding: 8px 12px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-default);
+    border-radius: 8px;
+    cursor: pointer;
+    transition:
+        border-color 0.15s,
+        background 0.15s;
+}
+
+.selectorToggle:hover {
+    border-color: var(--accent-primary);
+    background: var(--bg-elevated);
+}
+
+.selectorArrow {
+    flex-shrink: 0;
+    color: var(--text-tertiary);
+    transition: transform 0.15s;
+}
+
+.selectorArrowOpen {
+    transform: rotate(90deg);
+}
+
+.selectorLabel {
+    font-size: 13px;
+    color: var(--text-primary);
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Expanded panel */
+.selectorPanel {
+    display: flex;
+    flex-direction: column;
     gap: 8px;
+    margin-top: 6px;
 }
 
 .selectorLoading,
