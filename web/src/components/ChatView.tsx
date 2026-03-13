@@ -21,6 +21,34 @@ interface ChatViewProps {
 const EMPTY_MESSAGES: Message[] = [];
 const EMPTY_STRING = "";
 
+// Keeps showBubble true for a random 400–900ms after isStreaming goes false,
+// so the typing indicator doesn't snap away the instant streaming ends.
+function useLingeringStream(isStreaming: boolean): boolean {
+  const [showBubble, setShowBubble] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (isStreaming) {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      setShowBubble(true);
+    } else {
+      const delay = 400 + Math.random() * 500; // 400–900ms
+      timerRef.current = setTimeout(() => {
+        setShowBubble(false);
+        timerRef.current = null;
+      }, delay);
+    }
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [isStreaming]);
+
+  return showBubble;
+}
+
 export function ChatView({ thread, onMobileMenuOpen }: ChatViewProps) {
   const [configOpen, setConfigOpen] = useState(false);
 
@@ -36,6 +64,7 @@ export function ChatView({ thread, onMobileMenuOpen }: ChatViewProps) {
     (s) => s.streamingContent[thread.id] ?? EMPTY_STRING,
   );
   const isStreaming = useMessageStore((s) => s.isStreaming[thread.id] ?? false);
+  const showStreamingBubble = useLingeringStream(isStreaming);
   const isSending = useMessageStore((s) => s.isSending[thread.id] ?? false);
   const isLoadingMessages = useMessageStore((s) => s.isLoadingMessages);
   const messageError = useMessageStore((s) => s.error);
@@ -102,7 +131,7 @@ export function ChatView({ thread, onMobileMenuOpen }: ChatViewProps) {
       <div ref={containerRef} className={`${styles.messages} scrollbar-thin`}>
         {isLoadingMessages ? (
           <div className={styles.loading}>Loading messages…</div>
-        ) : visibleMessages.length === 0 && !isStreaming ? (
+        ) : visibleMessages.length === 0 && !showStreamingBubble ? (
           /* Empty thread */
           <div className={styles.emptyThread}>
             <div className={styles.emptyEmoji}>{personaEmoji}</div>
@@ -133,7 +162,7 @@ export function ChatView({ thread, onMobileMenuOpen }: ChatViewProps) {
             ))}
 
             {/* Streaming bubble */}
-            {isStreaming && (
+            {showStreamingBubble && (
               <StreamingBubble
                 personaEmoji={personaEmoji}
                 personaName={personaName}
@@ -144,7 +173,7 @@ export function ChatView({ thread, onMobileMenuOpen }: ChatViewProps) {
         )}
 
         {/* Error banner */}
-        {messageError && !isStreaming && (
+        {messageError && !showStreamingBubble && (
           <div className={styles.errorBanner}>⚠ {messageError}</div>
         )}
       </div>
