@@ -110,7 +110,8 @@ export function Step4Persona({
   };
 
   const isNextDisabled =
-    isCustom && (!customName.trim() || !customPrompt.trim());
+    (isCustom && (!customName.trim() || !customPrompt.trim())) ||
+    (hasModels && !selectedModel);
 
   const handleNext = () => {
     onNext(getPersonaConfig());
@@ -314,9 +315,11 @@ export function Step4Persona({
         <FieldHint>
           {showModelLoading
             ? "Fetching available models…"
-            : hasModels
-              ? "The model this persona uses by default. Can be changed per thread."
-              : "You can configure a model later in Settings → Providers."}
+            : hasModels && !selectedModel
+              ? "⚠ A model is required to continue. Select one above."
+              : hasModels
+                ? "The model this persona uses by default. Can be changed per thread."
+                : "You can configure a model later in Settings → Providers."}
         </FieldHint>
       </div>
 
