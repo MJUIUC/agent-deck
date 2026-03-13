@@ -377,7 +377,7 @@ Wire `GeneralSettings` into `SettingsModal.tsx` in place of the stub.
 
 ---
 
-### Story 3.5 — Thread Config Pane
+### Story 3.5 — Thread Config Pane ⚠️ In Progress
 
 **Branch:** `feature/phase3-thread-config`
 
@@ -428,6 +428,15 @@ Replace or significantly expand the existing `ConfigPane.tsx` to match `mockups/
 - Close button or click-outside to dismiss
 - Smooth CSS transition
 
+#### As-built notes
+
+- **Memory section omitted by design.** The mockup includes a "Recent Memory" section but memory is not in scope for Phase 3. The section has been intentionally skipped. It should be added in a future phase when memory infrastructure exists. Note this in the Phase 4 or Phase 5 planning docs.
+- **Model selector redesigned.** Instead of a native `<select>` dropdown (as shown in the mockup), the implemented selector uses a two-row custom UI: a row of styled provider pill buttons on top, and a scrollable list of model rows for the selected provider below. This matches the app's design theme and avoids native OS styling.
+- **Migration 003 recreated.** The file `server/src/db/migrations/003_thread_show_tool_activity.sql` was found truncated on the branch. It was deleted and recreated with the correct `ALTER TABLE` statement. Since the project is in development mode with no production data, this is safe.
+- **`onOpenSettings` prop added to `ConfigPane`.** The persona card is clickable and accepts an optional `onOpenSettings` callback. `ChatView` does not currently pass this prop — it can be wired up when the settings modal is accessible from the chat view.
+- **Overlay added.** The pane now renders a dim overlay behind it (matching the mockup) that also closes the pane on click. The overlay and pane are rendered as a React fragment so they sit correctly in the `ChatView` absolute-positioned container.
+- **`cargo sqlx prepare` must be run** after the server compiles successfully with the new `show_tool_activity` column. Run from `server/` and commit the updated `.sqlx/` directory before merging.
+
 #### Acceptance Criteria
 
 - [ ] Pane opens and closes with smooth animation
@@ -441,7 +450,7 @@ Replace or significantly expand the existing `ConfigPane.tsx` to match `mockups/
 - [ ] Tool activity toggle persists per-thread (reads and writes `show_tool_activity`)
 - [ ] `cargo sqlx prepare` run and `.sqlx/` committed
 - [ ] Addendum textarea saves on blur
-- [ ] Matches `mockups/thread-config.html` layout and style
+- [ ] Matches `mockups/thread-config.html` layout and style (Memory section intentionally omitted)
 - [ ] `npm run build` passes
 
 ---

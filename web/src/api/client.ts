@@ -113,6 +113,7 @@ export const threadsApi = {
       active_model?: string;
       active_provider?: string;
       system_prompt_addendum?: string;
+      show_tool_activity?: boolean;
     },
   ): Promise<{ data: Thread }> {
     return apiFetch(`/api/threads/${id}`, {
@@ -123,6 +124,45 @@ export const threadsApi = {
 
   archive(id: string): Promise<{ data: { id: string; status: string } }> {
     return apiFetch(`/api/threads/${id}/archive`, { method: "POST" });
+  },
+
+  listMcpServers(
+    threadId: string,
+  ): Promise<{
+    data: Array<{
+      id: string;
+      thread_id: string;
+      mcp_server_id: string;
+      enabled: boolean;
+    }>;
+  }> {
+    return apiFetch(`/api/threads/${threadId}/mcp-servers`);
+  },
+
+  attachMcpServer(
+    threadId: string,
+    mcpServerId: string,
+  ): Promise<{
+    data: {
+      id: string;
+      thread_id: string;
+      mcp_server_id: string;
+      enabled: boolean;
+    };
+  }> {
+    return apiFetch(`/api/threads/${threadId}/mcp-servers`, {
+      method: "POST",
+      body: JSON.stringify({ mcp_server_id: mcpServerId }),
+    });
+  },
+
+  detachMcpServer(
+    threadId: string,
+    mcpServerId: string,
+  ): Promise<{ data: { deleted: boolean } }> {
+    return apiFetch(`/api/threads/${threadId}/mcp-servers/${mcpServerId}`, {
+      method: "DELETE",
+    });
   },
 };
 

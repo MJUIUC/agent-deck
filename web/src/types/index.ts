@@ -22,6 +22,7 @@ export interface Thread {
   active_provider: string | null;
   system_prompt_addendum: string | null;
   status: string;
+  show_tool_activity: boolean;
   created_at: string;
   updated_at: string;
   // Joined client-side for display convenience
