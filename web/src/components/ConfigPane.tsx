@@ -185,18 +185,23 @@ function ProviderModelSelector({
   thread: Thread;
   onUpdate: (provider: string, model: string) => void;
 }) {
-  // Effective model/provider: thread's own selection, falling back to persona defaults
-  const effectiveProvider =
-    thread.active_provider ?? thread.persona?.default_provider ?? null;
-  const effectiveModel =
-    thread.active_model ?? thread.persona?.default_model ?? null;
-
+  // thread.active_provider / active_model are display strings (set by this selector).
+  // persona.default_provider / default_model are record UUIDs — resolve them to
+  // display strings after we've loaded the provider+model data.
   const [data, setData] = useState<ProviderWithModels[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(
     null,
   );
   const [listOpen, setListOpen] = useState(false);
+
+  // Resolved effective provider name and model_id string (never raw UUIDs)
+  const [effectiveProvider, setEffectiveProvider] = useState<string | null>(
+    thread.active_provider ?? null,
+  );
+  const [effectiveModel, setEffectiveModel] = useState<string | null>(
+    thread.active_model ?? null,
+  );
 
   // Load all providers and their models on mount
   useEffect(() => {
@@ -218,9 +223,39 @@ function ProviderModelSelector({
         );
         if (!cancelled) {
           setData(results);
-          // Pre-select the thread's current provider
+
+          // Resolve the effective provider name + model_id.
+          // Prefer the thread's own active values (already display strings).
+          // Fall back to persona defaults, which are record UUIDs — look them up.
+          let resolvedProviderName: string | null =
+            thread.active_provider ?? null;
+          let resolvedModelId: string | null = thread.active_model ?? null;
+
+          if (!resolvedProviderName && thread.persona?.default_provider) {
+            const found = results.find(
+              (r) => r.provider.id === thread.persona!.default_provider,
+            );
+            resolvedProviderName = found?.provider.name ?? null;
+          }
+
+          if (!resolvedModelId && thread.persona?.default_model) {
+            for (const { models } of results) {
+              const found = models.find(
+                (m) => m.id === thread.persona!.default_model,
+              );
+              if (found) {
+                resolvedModelId = found.model_id;
+                break;
+              }
+            }
+          }
+
+          setEffectiveProvider(resolvedProviderName);
+          setEffectiveModel(resolvedModelId);
+
+          // Pre-select the resolved provider's pill
           const current = results.find(
-            (r) => r.provider.name === effectiveProvider,
+            (r) => r.provider.name === resolvedProviderName,
           );
           setSelectedProviderId(
             current?.provider.id ?? results[0]?.provider.id ?? null,
@@ -255,7 +290,7 @@ function ProviderModelSelector({
     );
   }
 
-  // Label shown on the collapsed toggle — current provider · model, or a prompt
+  // Label shown on the collapsed toggle — resolved provider · model display name
   const activeModel = selectedEntry?.models.find(
     (m) =>
       m.model_id === effectiveModel &&
@@ -324,6 +359,8 @@ function ProviderModelSelector({
                         isActive ? styles.modelItemActive : "",
                       ].join(" ")}
                       onClick={() => {
+                        setEffectiveProvider(selectedEntry.provider.name);
+                        setEffectiveModel(m.model_id);
                         onUpdate(selectedEntry.provider.name, m.model_id);
                         setListOpen(false);
                       }}
@@ -671,19 +708,6 @@ export function ConfigPane({
           <div className={styles.section}>
             <div className={styles.sectionHeader}>
               <span className={styles.sectionTitle}>Model</span>
-              {(thread.active_provider ??
-                thread.persona?.default_provider ??
-                thread.active_model ??
-                thread.persona?.default_model) && (
-                <span className={styles.sectionSubtitle}>
-                  {[
-                    thread.active_provider ?? thread.persona?.default_provider,
-                    thread.active_model ?? thread.persona?.default_model,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </span>
-              )}
             </div>
             <ProviderModelSelector
               thread={thread}
