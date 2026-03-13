@@ -14,7 +14,10 @@
 | 3.1 — Setup Wizard | ✅ Complete | `feature/phase3-setup-wizard` | Merged to main |
 | 3.1a — Wizard Skip Flow & Empty State | ✅ Complete | `feature/phase3-setup-wizard` | Merged to main |
 | 3.2 — Provider Settings Polish | ✅ Complete (no-op) | `feature/phase3-setup-wizard` | Existing UI exceeds mockup — no changes needed |
-| 3.4 — Settings: MCP, Mobile, General | 🔲 Not started | `feature/phase3-settings-mcp-mobile-general` | Next up |
+| 3.4a — Settings Nav Update | 🔲 Not started | `feature/phase3-settings-mcp-mobile-general` | Next up |
+| 3.4b — Settings: MCP Servers Tab | 🔲 Not started | `feature/phase3-settings-mcp-mobile-general` | — |
+| 3.4c — Settings: Mobile Tab | 🔲 Not started | `feature/phase3-settings-mcp-mobile-general` | — |
+| 3.4d — Settings: General Tab | 🔲 Not started | `feature/phase3-settings-mcp-mobile-general` | — |
 | 3.5 — Thread Config Pane | 🔲 Not started | — | — |
 | 3.6 — Slash Command UI | 🔲 Not started | — | — |
 | 3.7 — Archived Threads | 🔲 Not started | — | — |
@@ -277,11 +280,37 @@ If after comparison everything already matches, this story is a no-op — docume
 
 This adds three new settings tabs. MCP server management is the largest piece. See PLAN.md §8.4, §6.6, §7.5.
 
+Stories 3.4a–3.4d all live on the same branch and must be completed in order before the branch is merged.
+
+---
+
+### Story 3.4a — Settings Navigation Update
+
 #### What to Build
 
-**MCP Servers tab (`/settings/mcp-servers`):**
+Update `SettingsNav.tsx` and `shared.tsx` to add the three new tabs:
 
-A full management surface matching `mockups/settings-other.html` (MCP section):
+- Extend `SettingsTab` type in `shared.tsx` to include `"mcp-servers" | "mobile" | "general"`
+- Add `NavItem` entries to `SettingsSidebar` in `SettingsNav.tsx`: MCP Servers (🖥️), Mobile (📱), General (⚙️) — placed after the existing Personas entry
+- Add stub content rendering in `SettingsModal.tsx` for each new tab (placeholder `<div>` is fine — the real content comes in 3.4b–3.4d)
+
+#### Acceptance Criteria
+
+- [ ] `SettingsTab` type includes `"mcp-servers"`, `"mobile"`, `"general"`
+- [ ] All three new tabs appear in the settings sidebar nav
+- [ ] Clicking each tab renders without crashing (stub content acceptable)
+- [ ] Existing Providers and Personas tabs are unaffected
+- [ ] `npm run build` passes
+
+---
+
+### Story 3.4b — Settings: MCP Servers Tab
+
+#### What to Build
+
+A full management surface for MCP servers, replacing the stub from 3.4a:
+
+Create `web/src/components/settings/McpServerSettings.tsx`:
 
 - List of configured MCP servers, each showing: name, type badge (`local` / `remote`), status badge (`connected` / `inactive` / `error`), description, source URL as clickable link
 - Expandable tool inspector per server — clicking expands to show tool names and descriptions (fetched from `GET /api/mcp-servers/:id/tools`)
@@ -295,22 +324,7 @@ A full management surface matching `mockups/settings-other.html` (MCP section):
 - Edit and delete actions per server (delete with confirmation)
 - All CRUD calls go to the existing `/api/mcp-servers` endpoints
 
-**Mobile tab (`/settings/mobile`):**
-
-- QR code display for mobile pairing
-- Fetch pairing data from `GET /api/pairing/qr` and render as a QR code
-- Use a client-side QR library (e.g., `qrcode.react` or generate as SVG)
-- Instructional text: "Scan this code with the Agent-Deck mobile app to pair."
-
-**General tab (`/settings/general`):**
-
-- Auth token display: masked by default, with a reveal/hide toggle
-- Token rotation button with a confirmation dialog warning: "Rotating the token will disconnect all remote browsers and mobile devices. You'll need to re-enter the token on other devices and re-pair the mobile app."
-- Token rotation calls `PUT /api/config/auth_token` (or similar endpoint — check existing routes)
-
-**Settings navigation update:**
-
-Add the new tabs to `SettingsNav.tsx`: MCP Servers, Mobile, General (alongside existing Providers and Personas tabs).
+Wire `McpServerSettings` into `SettingsModal.tsx` in place of the stub.
 
 #### Acceptance Criteria
 
@@ -318,10 +332,47 @@ Add the new tabs to `SettingsNav.tsx`: MCP Servers, Mobile, General (alongside e
 - [ ] Add server form shows correct fields for local vs remote type
 - [ ] MCP server CRUD works: create, edit, delete (with confirmation)
 - [ ] Tool inspector shows tools for connected servers (or empty state for disconnected)
+- [ ] `npm run build` passes
+
+---
+
+### Story 3.4c — Settings: Mobile Tab
+
+#### What to Build
+
+Create `web/src/components/settings/MobileSettings.tsx`:
+
+- QR code display for mobile pairing
+- Fetch pairing data from `GET /api/pairing/qr` and render as a QR code
+- Use a client-side QR library (e.g., `qrcode.react` or generate as SVG)
+- Instructional text: "Scan this code with the Agent-Deck mobile app to pair."
+
+Wire `MobileSettings` into `SettingsModal.tsx` in place of the stub.
+
+#### Acceptance Criteria
+
 - [ ] Mobile tab shows QR code with correct pairing data
+- [ ] Instructional text is present
+- [ ] `npm run build` passes
+
+---
+
+### Story 3.4d — Settings: General Tab
+
+#### What to Build
+
+Create `web/src/components/settings/GeneralSettings.tsx`:
+
+- Auth token display: masked by default, with a reveal/hide toggle
+- Token rotation button with a confirmation dialog warning: "Rotating the token will disconnect all remote browsers and mobile devices. You'll need to re-enter the token on other devices and re-pair the mobile app."
+- Token rotation calls `POST /api/auth/token/rotate`
+
+Wire `GeneralSettings` into `SettingsModal.tsx` in place of the stub.
+
+#### Acceptance Criteria
+
 - [ ] General tab shows masked token with reveal toggle
 - [ ] Token rotation works with confirmation warning
-- [ ] New tabs appear in settings navigation
 - [ ] `npm run build` passes, `cargo build` passes
 
 ---
