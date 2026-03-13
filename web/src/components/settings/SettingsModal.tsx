@@ -5,6 +5,31 @@ import { SettingsSidebar } from "./SettingsNav";
 import { ProviderSettings } from "./ProviderSettings";
 import { PersonaSettings } from "./PersonaSettings";
 
+// Stubs for 3.4b–3.4d — replaced with real components in subsequent stories
+function McpServersStub() {
+  return (
+    <div style={{ color: "var(--text-secondary)", fontSize: 13 }}>
+      MCP Servers — coming in Story 3.4b
+    </div>
+  );
+}
+
+function MobileStub() {
+  return (
+    <div style={{ color: "var(--text-secondary)", fontSize: 13 }}>
+      Mobile Pairing — coming in Story 3.4c
+    </div>
+  );
+}
+
+function GeneralStub() {
+  return (
+    <div style={{ color: "var(--text-secondary)", fontSize: 13 }}>
+      General — coming in Story 3.4d
+    </div>
+  );
+}
+
 export interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -123,6 +148,9 @@ export function SettingsModal({
               {tab === "personas" && (
                 <PersonaSettings onDataChanged={handleDataChanged} />
               )}
+              {tab === "mcp-servers" && <McpServersStub />}
+              {tab === "mobile" && <MobileStub />}
+              {tab === "general" && <GeneralStub />}
             </div>
           </div>
 

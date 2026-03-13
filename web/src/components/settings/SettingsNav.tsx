@@ -29,7 +29,8 @@ export function NavItem({
         margin: "0 8px 2px",
         borderRadius: 7,
         fontSize: 13,
-        color: active || hovered ? "var(--text-primary)" : "var(--text-secondary)",
+        color:
+          active || hovered ? "var(--text-primary)" : "var(--text-secondary)",
         cursor: "pointer",
         background: active
           ? "var(--accent-muted)"
@@ -157,6 +158,24 @@ export function SettingsSidebar({
         label="Personas"
         active={tab === "personas"}
         onClick={() => onTabChange("personas")}
+      />
+      <NavItem
+        icon="🔧"
+        label="MCP Servers"
+        active={tab === "mcp-servers"}
+        onClick={() => onTabChange("mcp-servers")}
+      />
+      <NavItem
+        icon="📱"
+        label="Mobile Pairing"
+        active={tab === "mobile"}
+        onClick={() => onTabChange("mobile")}
+      />
+      <NavItem
+        icon="⚙️"
+        label="General"
+        active={tab === "general"}
+        onClick={() => onTabChange("general")}
       />
     </aside>
   );
