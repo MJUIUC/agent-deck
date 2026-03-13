@@ -161,6 +161,10 @@ pub async fn build_router(pool: SqlitePool, config: Config) -> anyhow::Result<Ro
                 .delete(threads::delete),
         )
         .route(
+            "/api/threads/:id/generate-title",
+            axum::routing::post(threads::generate_title),
+        )
+        .route(
             "/api/threads/:id/archive",
             axum::routing::post(threads::archive),
         )

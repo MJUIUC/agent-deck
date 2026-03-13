@@ -642,7 +642,7 @@ fn build_assistant_tool_call_message(
 // ─── Provider factory ──────────────────────────────────────────────────────────
 
 /// Instantiate a concrete `LlmProvider` from a database provider row.
-fn build_provider(
+pub(crate) fn build_provider(
     state: &AppState,
     row: &crate::models::provider::Provider,
 ) -> Result<Box<dyn LlmProvider>> {
