@@ -2,11 +2,32 @@ import { create } from "zustand";
 import { threadsApi, personasApi } from "@/api/client";
 import type { Thread, AgentPersona } from "@/types";
 
+// ── Draft thread factory ───────────────────────────────────────────────────────
+// A synthetic thread object used while the user is composing their first message
+// before the real thread has been persisted. Never stored in `threads`.
+export function makeDraftThread(persona: AgentPersona): Thread {
+  return {
+    id: "pending",
+    user_id: "",
+    persona_id: persona.id,
+    title: "New Chat",
+    active_model: persona.default_model ?? null,
+    active_provider: persona.default_provider ?? null,
+    system_prompt_addendum: null,
+    status: "active",
+    show_tool_activity: false,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    persona,
+  };
+}
+
 interface ThreadStore {
   // State
   threads: Thread[];
   personas: AgentPersona[];
   activeThreadId: string | null;
+  pendingPersona: AgentPersona | null;
   isLoading: boolean;
   isCreating: boolean;
   error: string | null;
@@ -18,6 +39,8 @@ interface ThreadStore {
   loadThreads: () => Promise<void>;
   loadPersonas: () => Promise<void>;
   setActiveThread: (threadId: string | null) => void;
+  setPendingPersona: (persona: AgentPersona | null) => void;
+  promotePendingThread: (thread: Thread) => void;
   createThread: (personaId: string) => Promise<Thread>;
   archiveThread: (threadId: string) => Promise<void>;
   updateThreadPreview: (
@@ -34,6 +57,7 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
   threads: [],
   personas: [],
   activeThreadId: null,
+  pendingPersona: null,
   isLoading: false,
   isCreating: false,
   error: null,
@@ -88,6 +112,19 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
 
   setActiveThread: (threadId) => {
     set({ activeThreadId: threadId });
+  },
+
+  // Store a pending persona without creating anything in the DB.
+  // Clears activeThreadId so App renders the draft ChatView instead.
+  setPendingPersona: (persona) => {
+    set({ pendingPersona: persona, activeThreadId: null });
+  },
+
+  // Called after createThread succeeds during the first-send flow.
+  // Sets the new thread as active and clears the pending state.
+  // Does NOT push to threads — createThread already did that.
+  promotePendingThread: (thread) => {
+    set({ activeThreadId: thread.id, pendingPersona: null, isCreating: false });
   },
 
   createThread: async (personaId) => {
