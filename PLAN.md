@@ -1464,6 +1464,7 @@ chore/update-axum-to-0-8
   1. The feature is complete per its acceptance criteria
   2. All tests pass
   3. No regressions in related areas
+- **Branches are never deleted** — not after merging, not ever. Every feature branch must remain accessible for reference, bisection, and history. Do not pass `--delete` or `-d` / `-D` to `git branch`, and do not use `git push origin --delete`.
 
 ### 9.3 Testing Philosophy
 
