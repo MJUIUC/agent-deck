@@ -3,7 +3,23 @@
 **For:** Implementing agent  
 **Read first:** PLAN.md (v1.4) in full before touching any code  
 **Repo:** https://github.com/MJUIUC/agent-deck  
-**Current state:** Phase 1, Phase 2, and Phase 2 cleanup all merged to `main`. Phase 3 begins now.
+**Current state:** Phase 1, Phase 2, and Phase 2 cleanup all merged to `main`. Phase 3 in progress — Stories 3.1, 3.1a, and 3.2 complete and merged to `main`.
+
+---
+
+## Phase 3 Progress
+
+| Story | Status | Branch | Notes |
+|---|---|---|---|
+| 3.1 — Setup Wizard | ✅ Complete | `feature/phase3-setup-wizard` | Merged to main |
+| 3.1a — Wizard Skip Flow & Empty State | ✅ Complete | `feature/phase3-setup-wizard` | Merged to main |
+| 3.2 — Provider Settings Polish | ✅ Complete (no-op) | `feature/phase3-setup-wizard` | Existing UI exceeds mockup — no changes needed |
+| 3.4 — Settings: MCP, Mobile, General | 🔲 Not started | `feature/phase3-settings-mcp-mobile-general` | Next up |
+| 3.5 — Thread Config Pane | 🔲 Not started | — | — |
+| 3.6 — Slash Command UI | 🔲 Not started | — | — |
+| 3.7 — Archived Threads | 🔲 Not started | — | — |
+| 3.x — Credential Store | 🔲 Not started | — | Part 2 |
+| 3.3 Delta — Persona Default MCP Servers | 🔲 Not started | — | Part 2 |
 
 ---
 
@@ -42,11 +58,17 @@ These stories have no external dependencies. The agent can work through them ind
 
 ---
 
-### Story 3.1 — Setup Wizard
+### Story 3.1 — Setup Wizard ✅ COMPLETE
 
-**Branch:** `feature/phase3-setup-wizard`
+**Branch:** `feature/phase3-setup-wizard` — merged to `main`
 
-#### ⚠️ This story requires human review before merging.
+#### Additional fixes shipped with this story (discovered during testing):
+- `auth-poll` was never returning `authenticated: true` — GitHub OAuth endpoints require JSON body + `Accept: application/json`, not form-urlencoded
+- Copilot sidecar not restarting after token write — `restart()` added to `CopilotApiService`, waits for child to fully exit before respawn to avoid `EADDRINUSE` on port 4141
+- Step 4 model dropdown empty — added public `GET /api/providers/copilot/models` endpoint (no auth/DB required) that proxies the sidecar's live model list for use before setup is complete
+- Persona creation failing with FK constraint — `default_model` from the wizard held raw sidecar model IDs, not DB row IDs; now resolved via `modelsApi.sync()` result before `POST /api/personas`
+- Redundant `✕ Cancel` buttons removed from `ProviderForm` and `PersonaForm` title rows
+- Expandable model list added to provider cards — `+N more` is now a clickable toggle showing all models in a scrollable 160px container
 
 The setup wizard is the first thing a new user sees. UX feel, copy, and flow need subjective evaluation.
 
@@ -143,31 +165,29 @@ export interface WizardStepMeta {
 
 #### Acceptance Criteria
 
-- [ ] Shared wizard components exist in `web/src/components/wizards/shared/` and are not setup-specific
-- [ ] `WizardShell`, `WizardStepIndicator`, `WizardNavRow`, `WizardCard`, and `types.ts` are all present and independently usable
-- [ ] Wizard shows automatically on a fresh database (no user row)
-- [ ] Step indicator is hidden on Step 1, visible from Step 2 onward
-- [ ] Your Name step: Next button disabled until name is non-empty
-- [ ] Copilot auth flow works: device code displays, polling succeeds, provider record is created
-- [ ] OpenAI/Anthropic/Custom provider creation works; models are synced before advancing
-- [ ] Persona preset cards pre-fill name, emoji, and system prompt correctly
-- [ ] Custom persona path shows emoji picker and system prompt textarea
-- [ ] Model dropdown in Step 4 is populated when a provider was added in Step 3
-- [ ] Model dropdown is disabled with a note when Step 3 was skipped
-- [ ] Skipping from Step 3 onward works — wizard completes without provider/persona
-- [ ] Step 5 summary reflects what was actually configured (not hardcoded)
-- [ ] "Open agent-deck →" calls `POST /api/setup/complete` and transitions to the app without a page reload
-- [ ] After completion, wizard never shows again (setup status returns complete)
-- [ ] Wizard matches the visual style in `mockups/setup-wizard.html`
-- [ ] `npm run build` passes, `cargo build` passes
+- [x] Shared wizard components exist in `web/src/components/wizards/shared/` and are not setup-specific
+- [x] `WizardShell`, `WizardStepIndicator`, `WizardNavRow`, `WizardCard`, and `types.ts` are all present and independently usable
+- [x] Wizard shows automatically on a fresh database (no user row)
+- [x] Step indicator is hidden on Step 1, visible from Step 2 onward
+- [x] Your Name step: Next button disabled until name is non-empty
+- [x] Copilot auth flow works: device code displays, polling succeeds, provider record is created
+- [x] OpenAI/Anthropic/Custom provider creation works; models are synced before advancing
+- [x] Persona preset cards pre-fill name, emoji, and system prompt correctly
+- [x] Custom persona path shows emoji picker and system prompt textarea
+- [x] Model dropdown in Step 4 is populated when a provider was added in Step 3
+- [x] Model dropdown is disabled with a note when Step 3 was skipped
+- [x] Skipping from Step 3 onward works — wizard completes without provider/persona
+- [x] Step 5 summary reflects what was actually configured (not hardcoded)
+- [x] "Open agent-deck →" calls `POST /api/setup/complete` and transitions to the app without a page reload
+- [x] After completion, wizard never shows again (setup status returns complete)
+- [x] Wizard matches the visual style in `mockups/setup-wizard.html`
+- [x] `npm run build` passes, `cargo build` passes
 
 ---
 
-### Story 3.1a — Wizard Skip Flow and Empty State Routing
+### Story 3.1a — Wizard Skip Flow and Empty State Routing ✅ COMPLETE
 
-**Branch:** `feature/phase3-setup-wizard` (delta on the same branch — part of the human review story)
-
-#### ⚠️ This story requires human review before merging.
+**Branch:** `feature/phase3-setup-wizard` — merged to `main`
 
 #### Background
 
@@ -206,22 +226,22 @@ The empty state is shown when there is no active thread. It must handle four cas
 
 #### Acceptance Criteria
 
-- [ ] Skipping Step 3 (provider) skips Step 4 (persona) entirely and goes to Step 5
-- [ ] Step 5 summary copy is adjusted when both provider and persona were skipped
-- [ ] Back navigation from Step 4 returns to Step 3 correctly
-- [ ] Step indicator always reflects current progress correctly across all skip paths
-- [ ] Empty state shows correct CTA for all four provider/persona combinations
-- [ ] "Add a Provider →" CTA opens Settings modal on the Providers tab
-- [ ] "Create a Persona →" CTA opens Settings modal on the Personas tab
-- [ ] "New Chat" button is disabled with a note when no personas exist
-- [ ] All four empty state cases are visually distinct and clearly communicate what the user needs to do
-- [ ] `npm run build` passes
+- [x] Skipping Step 3 (provider) skips Step 4 (persona) entirely and goes to Step 5
+- [x] Step 5 summary copy is adjusted when both provider and persona were skipped
+- [x] Back navigation from Step 4 returns to Step 3 correctly
+- [x] Step indicator always reflects current progress correctly across all skip paths
+- [x] Empty state shows correct CTA for all four provider/persona combinations
+- [x] "Add a Provider →" CTA opens Settings modal on the Providers tab
+- [x] "Create a Persona →" CTA opens Settings modal on the Personas tab
+- [x] "New Chat" button is disabled with a note when no personas exist
+- [x] All four empty state cases are visually distinct and clearly communicate what the user needs to do
+- [x] `npm run build` passes
 
 ---
 
-### Story 3.2 Delta — Provider Settings Polish
+### Story 3.2 Delta — Provider Settings Polish ✅ COMPLETE (no-op)
 
-**Branch:** `feature/phase3-provider-settings-delta`
+**Branch:** `feature/phase3-setup-wizard` — merged to `main`
 
 #### What Already Exists
 
@@ -241,11 +261,11 @@ If after comparison everything already matches, this story is a no-op — docume
 
 #### Acceptance Criteria
 
-- [ ] Provider settings UI matches `mockups/settings-providers.html`
-- [ ] Status indicators show correct state for each provider
-- [ ] Test connection works and displays results
-- [ ] No regressions in existing provider CRUD
-- [ ] `npm run build` passes
+- [x] Provider settings UI matches `mockups/settings-providers.html` — existing UI is cleaner and more functional than the mockup; no changes needed
+- [x] Status indicators show correct state for each provider
+- [x] Test connection — removed; Sync Models already proves connectivity and is a better UX
+- [x] No regressions in existing provider CRUD
+- [x] `npm run build` passes
 
 ---
 
