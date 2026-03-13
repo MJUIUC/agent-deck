@@ -762,8 +762,10 @@ OAuth flow providers: `google`, `github`. Additional providers are registered in
 | `POST` | `/api/threads` | Create a thread |
 | `GET` | `/api/threads/:id` | Get a thread with config |
 | `PATCH` | `/api/threads/:id` | Update thread (title, model, addendum) |
+| `DELETE` | `/api/threads/:id` | Hard-delete a thread (only if zero messages — used to discard pending threads) |
 | `POST` | `/api/threads/:id/archive` | Archive a thread |
 | `POST` | `/api/threads/:id/unarchive` | Restore a thread |
+| `POST` | `/api/threads/:id/generate-title` | Ask the LLM to generate a title from the first exchange; falls back to truncation |
 | `GET` | `/api/threads/:id/mcp-servers` | List MCP servers for thread |
 | `POST` | `/api/threads/:id/mcp-servers` | Attach MCP server to thread |
 | `DELETE` | `/api/threads/:id/mcp-servers/:mcpId` | Detach MCP server from thread |
@@ -775,7 +777,7 @@ OAuth flow providers: `google`, `github`. Additional providers are registered in
 }
 ```
 
-Title is not provided at creation — it is auto-generated from the first message.
+Title is not provided at creation — it defaults to "New Chat". The thread is not created at all until the user sends their first message (pending thread pattern — see §7.2). After the first agent response completes, the client calls `POST /api/threads/:id/generate-title` which uses the LLM to produce a short title from the first user+agent exchange (max 8 words, truncated to 60 chars). Falls back to the `generate_title_from_message()` truncation if the LLM call fails.
 
 ### 6.8 Messages
 
@@ -1050,7 +1052,9 @@ Deleting a persona is only allowed if no active threads use it. Archived threads
 
 A thread is a persistent conversation session between the user and one agent persona.
 
-**Creation:** The user selects a persona and optionally names the thread. If no name is given, the title is auto-generated from the first message by taking the first 60 characters and truncating at a word boundary. Titles are always editable.
+**Creation:** The user selects a persona. No thread record is written to the database at this point — the client enters a "pending thread" draft state. The thread is created (via `POST /api/threads`) atomically with the first message send. If the user navigates away before sending, no record is created.
+
+**Title generation:** The default title "New Chat" is replaced after the first full exchange. Once the first agent response finishes streaming, the client calls `POST /api/threads/:id/generate-title`. The server fetches the first user message and first assistant message, asks the active LLM to produce a concise title (max 8 words), strips quotes, truncates to 60 chars at a word boundary, and saves it. The sidebar updates immediately via `upsertThread`. Falls back to simple truncation of the first user message if the LLM call fails. Titles are always editable (inline edit — planned, not yet built).
 
 **Configuration pane:** Each thread has a slide-in config panel accessible from the chat UI. From here the user can:
 - See which persona the thread uses (display only, not editable)
