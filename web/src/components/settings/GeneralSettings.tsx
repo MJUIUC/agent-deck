@@ -103,12 +103,7 @@ function WarningBox({
         </ul>
       </div>
       <div style={{ display: "flex", gap: 8 }}>
-        <Btn
-          variant="danger"
-          sm
-          onClick={onConfirm}
-          disabled={rotating}
-        >
+        <Btn variant="danger" sm onClick={onConfirm} disabled={rotating}>
           {rotating ? "Rotating…" : "Rotate Token"}
         </Btn>
         <Btn variant="ghost" sm onClick={onCancel} disabled={rotating}>
@@ -287,7 +282,9 @@ export function GeneralSettings() {
   const displayValue = token
     ? revealed
       ? token
-      : token.slice(0, 4) + "••••••••••••••••••••••••••••••••••••••••••••••••••••••••" + token.slice(-4)
+      : token.slice(0, 4) +
+        "••••••••••••••••••••••••••••••••••••••••••••••••••••••••" +
+        token.slice(-4)
     : "••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••";
 
   return (
@@ -343,15 +340,17 @@ export function GeneralSettings() {
                 minWidth: 0,
               }}
             />
-            <Btn
-              variant="ghost"
-              sm
-              onClick={() => setRevealed((r) => !r)}
-              title={revealed ? "Hide token" : "Reveal token"}
-              style={{ flexShrink: 0 }}
-            >
-              {revealed ? "🙈" : "👁"}
-            </Btn>
+            {token && (
+              <Btn
+                variant="ghost"
+                sm
+                onClick={() => setRevealed((r) => !r)}
+                title={revealed ? "Hide token" : "Reveal token"}
+                style={{ flexShrink: 0 }}
+              >
+                {revealed ? "🙈" : "👁"}
+              </Btn>
+            )}
             {token && (
               <Btn
                 variant="ghost"
