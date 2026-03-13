@@ -19,7 +19,12 @@ interface ThreadStore {
   loadPersonas: () => Promise<void>;
   setActiveThread: (threadId: string | null) => void;
   createThread: (personaId: string) => Promise<Thread>;
-  updateThreadPreview: (threadId: string, preview: string, updatedAt: string) => void;
+  archiveThread: (threadId: string) => Promise<void>;
+  updateThreadPreview: (
+    threadId: string,
+    preview: string,
+    updatedAt: string,
+  ) => void;
   upsertThread: (thread: Thread) => void;
   clearError: () => void;
 }
@@ -112,18 +117,32 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
     }
   },
 
+  archiveThread: async (threadId) => {
+    await threadsApi.archive(threadId);
+    set((state) => {
+      const remaining = state.threads.filter((t) => t.id !== threadId);
+      // Pick the next active thread: the most recently updated one after removal,
+      // or null if none remain.
+      const nextActive =
+        state.activeThreadId === threadId
+          ? (remaining[0]?.id ?? null)
+          : state.activeThreadId;
+      return { threads: remaining, activeThreadId: nextActive };
+    });
+  },
+
   updateThreadPreview: (threadId, preview, updatedAt) => {
     set((state) => {
       const threads = state.threads.map((t) =>
         t.id === threadId
           ? { ...t, last_message_preview: preview, updated_at: updatedAt }
-          : t
+          : t,
       );
 
       // Re-sort: most recently updated first
       threads.sort(
         (a, b) =>
-          new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+          new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
       );
 
       return { threads };
@@ -148,7 +167,7 @@ export const useThreadStore = create<ThreadStore>((set, get) => ({
       // Re-sort
       threads.sort(
         (a, b) =>
-          new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+          new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
       );
 
       return { threads };

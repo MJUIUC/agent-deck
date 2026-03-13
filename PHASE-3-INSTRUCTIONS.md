@@ -20,7 +20,7 @@
 | 3.4d — Settings: General Tab | ✅ Complete | `feature/phase3-settings-mcp-mobile-general` | — |
 | 3.5 — Thread Config Pane | ✅ Complete | `feature/phase3-thread-config` | ⚠️ Needs merge to main. Memory section deferred. Model selector saves UUIDs. |
 | 3.6 — Slash Command UI | ✅ Complete (server only) | `feature/phase3-slash-commands` | UI removed — slash commands belong in CLI/mobile. Server endpoint intact, not exposed in web UI. Vitest added. See As-built notes in story. |
-| 3.7 — Archived Threads | 🔲 Not started | — | — |
+| 3.7 — Archived Threads | ✅ Complete | `feature/phase3-archived-threads` | Scoped down per human review. Archive from config pane only (red button + confirm). Archived view in Settings → Archived Threads (read-only). Unarchive UI, restore, and export deferred. See as-built notes. |
 | 3.8 — Pending Thread + Smart Title Generation | 🔲 Not started | — | Next up after 3.7. See story spec below. |
 | 3.x — Credential Store | 🔲 Not started | — | Part 2 |
 | 3.3 Delta — Persona Default MCP Servers | 🔲 Not started | — | Part 2 |
@@ -617,7 +617,7 @@ Unit tests for command parsing and each handler. Tests must pass `args` as a `Ve
 
 ---
 
-### Story 3.7 — Archived Threads
+### Story 3.7 — Archived Threads ✅ COMPLETE
 
 **Branch:** `feature/phase3-archived-threads`
 
@@ -635,15 +635,26 @@ Unit tests for command parsing and each handler. Tests must pass `args` as a `Ve
 - Add an "Archive" action to the thread context menu or thread config pane
 - Empty state: "No archived threads."
 
+#### As-built notes
+
+Scope was significantly reduced after human review. The following decisions were made:
+
+- **Archive action:** Added to `ConfigPane` only — a red "📦 Archive Thread" button at the bottom of the Danger Zone section. Clicking it shows an inline confirmation dialog that warns there is no restore path today and that restore/export is planned for the future.
+- **After archiving:** The thread is removed from the active sidebar list. If it was the active thread, focus automatically moves to the most recently updated remaining thread (or clears if none remain). This is handled entirely in `useThreadStore.archiveThread()`.
+- **Archived view:** Added as a new tab in `SettingsModal` — **Settings → Archived Threads** (`ArchivedThreadsSettings.tsx`). The view is read-only: title, persona name, last message preview, and archived date are shown. No actions are available.
+- **Sidebar "Archived" button:** Left as a visual placeholder (already existed). Not wired up — deferred until restore/export UX is designed.
+- **Unarchive UI:** `threadsApi.unarchive(id)` is added to `client.ts` (acceptance criteria requirement) but no UI exposes it yet. Deferred.
+- **Future work (do not forget):** Restore from archive, markdown export of archived threads. These are explicitly deferred. When planning, see `PLAN.md §7.2` and the note in `ArchivedThreadsSettings.tsx`.
+
 #### Acceptance Criteria
 
-- [ ] Archiving a thread removes it from the main sidebar list
-- [ ] Archived threads appear in the archived view
-- [ ] Unarchiving moves a thread back to the active list
-- [ ] Empty state shown when no archived threads
-- [ ] Thread list default only shows active threads
-- [ ] `threadsApi` in `client.ts` has `unarchive(id)` calling `POST /api/threads/:id/unarchive` (mirrors the existing `archive()` method)
-- [ ] `npm run build` passes
+- [x] Archiving a thread removes it from the main sidebar list
+- [x] Archived threads appear in the archived view (Settings → Archived Threads)
+- [ ] Unarchiving moves a thread back to the active list — **deferred, no UI yet**
+- [x] Empty state shown when no archived threads
+- [x] Thread list default only shows active threads
+- [x] `threadsApi` in `client.ts` has `unarchive(id)` calling `POST /api/threads/:id/unarchive` (mirrors the existing `archive()` method)
+- [x] `npm run build` passes
 
 ---
 

@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import type { Thread, AgentPersona } from "@/types";
 import { ThreadItem } from "./ThreadItem";
 import { PersonaPickerModal } from "./PersonaPickerModal";
-import { Plus, Settings, Archive } from "lucide-react";
+import { Plus, Settings } from "lucide-react";
 import styles from "./Sidebar.module.css";
 
 interface SidebarProps {
@@ -223,10 +223,6 @@ export function Sidebar({
           <button className={styles.footerBtn} onClick={onOpenSettings}>
             <Settings size={13} />
             Settings
-          </button>
-          <button className={styles.footerBtn}>
-            <Archive size={13} />
-            Archived
           </button>
         </div>
       </aside>

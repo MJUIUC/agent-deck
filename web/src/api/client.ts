@@ -126,6 +126,10 @@ export const threadsApi = {
     return apiFetch(`/api/threads/${id}/archive`, { method: "POST" });
   },
 
+  unarchive(id: string): Promise<{ data: { id: string; status: string } }> {
+    return apiFetch(`/api/threads/${id}/unarchive`, { method: "POST" });
+  },
+
   listMcpServers(threadId: string): Promise<{
     data: Array<{
       id: string;
