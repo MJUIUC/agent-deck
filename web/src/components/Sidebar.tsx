@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import type { Thread, AgentPersona } from "@/types";
 import { ThreadItem } from "./ThreadItem";
 import { PersonaPickerModal } from "./PersonaPickerModal";
@@ -51,6 +51,10 @@ export function Sidebar({
 }: SidebarProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [showNoPersonasNote, setShowNoPersonasNote] = useState(false);
+  const noPersonasNoteTimer = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   // Listen for the "agent-deck:new-chat" custom event from EmptyState
   useEffect(() => {
@@ -83,7 +87,20 @@ export function Sidebar({
     }));
   }, [filteredThreads]);
 
-  const handleNewChat = useCallback(() => setIsModalOpen(true), []);
+  const handleNewChat = useCallback(() => {
+    if (personas.length === 0) {
+      // Show inline note briefly instead of opening the picker
+      setShowNoPersonasNote(true);
+      if (noPersonasNoteTimer.current)
+        clearTimeout(noPersonasNoteTimer.current);
+      noPersonasNoteTimer.current = setTimeout(
+        () => setShowNoPersonasNote(false),
+        3000,
+      );
+      return;
+    }
+    setIsModalOpen(true);
+  }, [personas.length]);
 
   const handleModalConfirm = useCallback(
     (personaId: string) => {
@@ -126,13 +143,30 @@ export function Sidebar({
 
           {/* New Chat button */}
           <button
-            className={styles.newChatBtn}
+            className={[
+              styles.newChatBtn,
+              personas.length === 0 ? styles.newChatBtnDisabled : "",
+            ]
+              .filter(Boolean)
+              .join(" ")}
             onClick={handleNewChat}
             disabled={isCreating}
+            aria-disabled={personas.length === 0}
+            title={
+              personas.length === 0
+                ? "Add a persona in Settings first."
+                : undefined
+            }
           >
             <Plus size={14} strokeWidth={2.5} />
             {isCreating ? "Creating…" : "New Chat"}
           </button>
+          {/* Inline note shown when clicked with no personas */}
+          {showNoPersonasNote && (
+            <div className={styles.noPersonasNote}>
+              Add a persona in Settings first.
+            </div>
+          )}
         </div>
 
         {/* ── Search ── */}

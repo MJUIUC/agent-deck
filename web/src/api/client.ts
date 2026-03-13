@@ -283,4 +283,15 @@ export const setupApi = {
   status(): Promise<{ data: { complete: boolean } }> {
     return apiFetch("/api/setup/status");
   },
+
+  complete(
+    displayName: string,
+  ): Promise<{
+    data: { complete: boolean; user: { id: string; display_name: string } };
+  }> {
+    return apiFetch("/api/setup/complete", {
+      method: "POST",
+      body: JSON.stringify({ display_name: displayName }),
+    });
+  },
 };

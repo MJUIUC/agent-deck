@@ -1,11 +1,12 @@
 import { useEffect, useState, useCallback } from "react";
 import { useThreadStore } from "@/stores/useThreadStore";
 import { useSseStore } from "@/stores/useSseStore";
-import { providersApi } from "@/api/client";
+import { providersApi, setupApi } from "@/api/client";
 import { Sidebar } from "@/components/Sidebar";
 import { ChatView } from "@/components/ChatView";
 import { EmptyState } from "@/components/EmptyState";
 import { SettingsModal } from "@/components/SettingsModal";
+import { SetupWizard } from "@/components/wizards/setup-wizard/SetupWizard";
 import styles from "@/App.module.css";
 
 // ── Mobile sidebar state ──────────────────────────────────────────────────────
@@ -14,6 +15,8 @@ import styles from "@/App.module.css";
 // the overlay backdrop can react to it.
 
 export function App() {
+  // null = not yet checked, false = incomplete, true = complete
+  const [setupComplete, setSetupComplete] = useState<boolean | null>(null);
   const [hasProviders, setHasProviders] = useState(true); // optimistic default
   const [isCheckingProviders, setIsCheckingProviders] = useState(true);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -42,6 +45,30 @@ export function App() {
   // ── Bootstrap ─────────────────────────────────────────────────────────────
 
   useEffect(() => {
+    // Check setup status FIRST — before anything else
+    (async () => {
+      try {
+        const res = await setupApi.status();
+        setSetupComplete(res.data.complete);
+
+        // Only bootstrap the full app if setup is already complete
+        if (res.data.complete) {
+          bootApp();
+        }
+      } catch {
+        // If status check fails, assume complete and proceed normally
+        setSetupComplete(true);
+        bootApp();
+      }
+    })();
+
+    return () => {
+      disconnectGlobal();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const bootApp = useCallback(() => {
     // Load threads + personas together
     loadThreads();
 
@@ -59,12 +86,21 @@ export function App() {
 
     // Connect global SSE stream (stays alive for the app lifetime)
     connectGlobal();
+  }, [loadThreads, connectGlobal]);
 
-    return () => {
-      disconnectGlobal();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Called by SetupWizard when the user completes setup
+  const handleSetupComplete = useCallback(async () => {
+    try {
+      const res = await setupApi.status();
+      setSetupComplete(res.data.complete);
+      if (res.data.complete) {
+        bootApp();
+      }
+    } catch {
+      setSetupComplete(true);
+      bootApp();
+    }
+  }, [bootApp]);
 
   // ── Thread creation ───────────────────────────────────────────────────────
 
@@ -123,6 +159,16 @@ export function App() {
   }, [loadThreads]);
 
   // ── Render ────────────────────────────────────────────────────────────────
+
+  // Setup status not yet known — show nothing to avoid flash
+  if (setupComplete === null) {
+    return <div className={styles.loadingScreen}>Loading…</div>;
+  }
+
+  // Setup is incomplete — render the wizard as the full page
+  if (setupComplete === false) {
+    return <SetupWizard onComplete={handleSetupComplete} />;
+  }
 
   const hasPersonas = personas.length > 0;
 

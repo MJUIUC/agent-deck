@@ -27,7 +27,11 @@ export interface ProviderFormProps {
  * Add / edit form for a single provider.
  * Handles its own local state (fields, saving, test result).
  */
-export function ProviderForm({ editing, onSaved, onCancel }: ProviderFormProps) {
+export function ProviderForm({
+  editing,
+  onSaved,
+  onCancel,
+}: ProviderFormProps) {
   // Normalise legacy kind values saved before the two-kind model
   const normaliseKind = (k: string): "api_key" | "copilot" | "" => {
     if (k === "copilot") return "copilot";
@@ -134,13 +138,10 @@ export function ProviderForm({ editing, onSaved, onCancel }: ProviderFormProps) 
           color: "var(--text-primary)",
           display: "flex",
           alignItems: "center",
-          justifyContent: "space-between",
+          justifyContent: "flex-start",
         }}
       >
         <span>{editing ? "Edit Provider" : "Add Provider"}</span>
-        <Btn sm variant="ghost" onClick={onCancel}>
-          ✕ Cancel
-        </Btn>
       </div>
 
       <form onSubmit={handleSave}>

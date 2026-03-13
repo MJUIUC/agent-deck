@@ -26,6 +26,7 @@ function ProviderCard({
 }: ProviderCardProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [hovered, setHovered] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const enabledCount = models.filter((m) => m.enabled).length;
   const icon = KIND_ICONS[provider.kind] ?? "🔌";
 
@@ -109,47 +110,64 @@ function ProviderCard({
 
       {/* Model chips */}
       {models.length > 0 && (
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            gap: "4px 6px",
-            marginBottom: 10,
-          }}
-        >
-          {models.slice(0, 6).map((m) => (
-            <span
-              key={m.id}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                background: m.enabled
-                  ? "rgba(74,82,53,0.35)"
-                  : "var(--bg-elevated)",
-                border: `1px solid ${m.enabled ? "var(--accent-muted)" : "var(--border-subtle)"}`,
-                borderRadius: 5,
-                padding: "2px 8px",
-                fontSize: 11,
-                color: m.enabled
-                  ? "var(--text-secondary)"
-                  : "var(--text-tertiary)",
-                fontFamily: '"SF Mono","Fira Code",monospace',
-                opacity: m.enabled ? 1 : 0.6,
-              }}
-            >
-              {m.display_name}
-            </span>
-          ))}
+        <div style={{ marginBottom: 10 }}>
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: "4px 6px",
+              ...(expanded
+                ? {
+                    maxHeight: 160,
+                    overflowY: "auto",
+                    padding: "6px 8px",
+                    background: "var(--bg-tertiary)",
+                    border: "1px solid var(--border-subtle)",
+                    borderRadius: 7,
+                  }
+                : {}),
+            }}
+          >
+            {(expanded ? models : models.slice(0, 6)).map((m) => (
+              <span
+                key={m.id}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  background: m.enabled
+                    ? "rgba(74,82,53,0.35)"
+                    : "var(--bg-elevated)",
+                  border: `1px solid ${m.enabled ? "var(--accent-muted)" : "var(--border-subtle)"}`,
+                  borderRadius: 5,
+                  padding: "2px 8px",
+                  fontSize: 11,
+                  color: m.enabled
+                    ? "var(--text-secondary)"
+                    : "var(--text-tertiary)",
+                  fontFamily: '"SF Mono","Fira Code",monospace',
+                  opacity: m.enabled ? 1 : 0.6,
+                }}
+              >
+                {m.display_name}
+              </span>
+            ))}
+          </div>
           {models.length > 6 && (
-            <span
+            <button
+              onClick={() => setExpanded((v) => !v)}
               style={{
+                marginTop: 6,
+                background: "none",
+                border: "none",
+                padding: 0,
                 fontSize: 11,
-                color: "var(--text-tertiary)",
-                padding: "2px 4px",
+                color: "var(--accent-secondary)",
+                cursor: "pointer",
+                fontFamily: "inherit",
               }}
             >
-              +{models.length - 6} more
-            </span>
+              {expanded ? "▲ Show less" : `▼ +${models.length - 6} more`}
+            </button>
           )}
         </div>
       )}

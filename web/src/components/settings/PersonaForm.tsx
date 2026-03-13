@@ -120,13 +120,10 @@ export function PersonaForm({
           color: "var(--text-primary)",
           display: "flex",
           alignItems: "center",
-          justifyContent: "space-between",
+          justifyContent: "flex-start",
         }}
       >
         <span>{editing ? "Edit Persona" : "New Persona"}</span>
-        <Btn sm variant="ghost" onClick={onCancel}>
-          ✕ Cancel
-        </Btn>
       </div>
 
       <form onSubmit={handleSave}>
