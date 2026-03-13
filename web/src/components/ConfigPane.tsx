@@ -185,6 +185,12 @@ function ProviderModelSelector({
   thread: Thread;
   onUpdate: (provider: string, model: string) => void;
 }) {
+  // Effective model/provider: thread's own selection, falling back to persona defaults
+  const effectiveProvider =
+    thread.active_provider ?? thread.persona?.default_provider ?? null;
+  const effectiveModel =
+    thread.active_model ?? thread.persona?.default_model ?? null;
+
   const [data, setData] = useState<ProviderWithModels[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(
@@ -214,7 +220,7 @@ function ProviderModelSelector({
           setData(results);
           // Pre-select the thread's current provider
           const current = results.find(
-            (r) => r.provider.name === thread.active_provider,
+            (r) => r.provider.name === effectiveProvider,
           );
           setSelectedProviderId(
             current?.provider.id ?? results[0]?.provider.id ?? null,
@@ -252,12 +258,12 @@ function ProviderModelSelector({
   // Label shown on the collapsed toggle — current provider · model, or a prompt
   const activeModel = selectedEntry?.models.find(
     (m) =>
-      m.model_id === thread.active_model &&
-      selectedEntry.provider.name === thread.active_provider,
+      m.model_id === effectiveModel &&
+      selectedEntry.provider.name === effectiveProvider,
   );
   const collapsedLabel =
-    thread.active_provider && thread.active_model
-      ? `${thread.active_provider} · ${activeModel?.display_name ?? thread.active_model}`
+    effectiveProvider && effectiveModel
+      ? `${effectiveProvider} · ${activeModel?.display_name ?? effectiveModel}`
       : "Select a model…";
 
   return (
@@ -308,8 +314,8 @@ function ProviderModelSelector({
               ) : (
                 selectedEntry.models.map((m) => {
                   const isActive =
-                    m.model_id === thread.active_model &&
-                    selectedEntry.provider.name === thread.active_provider;
+                    m.model_id === effectiveModel &&
+                    selectedEntry.provider.name === effectiveProvider;
                   return (
                     <button
                       key={m.id}
@@ -665,9 +671,15 @@ export function ConfigPane({
           <div className={styles.section}>
             <div className={styles.sectionHeader}>
               <span className={styles.sectionTitle}>Model</span>
-              {(thread.active_provider || thread.active_model) && (
+              {(thread.active_provider ??
+                thread.persona?.default_provider ??
+                thread.active_model ??
+                thread.persona?.default_model) && (
                 <span className={styles.sectionSubtitle}>
-                  {[thread.active_provider, thread.active_model]
+                  {[
+                    thread.active_provider ?? thread.persona?.default_provider,
+                    thread.active_model ?? thread.persona?.default_model,
+                  ]
                     .filter(Boolean)
                     .join(" · ")}
                 </span>
