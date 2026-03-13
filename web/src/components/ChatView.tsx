@@ -9,12 +9,9 @@ import type { Thread, Message } from "@/types";
 import { useMessageStore } from "@/stores/useMessageStore";
 import { useSseStore } from "@/stores/useSseStore";
 import { useThreadStore } from "@/stores/useThreadStore";
-import { useToast } from "@/components/toast/ToastProvider";
 import { useAutoScroll } from "@/hooks/useAutoScroll";
 import { groupByDate } from "@/hooks/useTimeFormat";
 import { MessageBubble, StreamingBubble } from "./MessageBubble";
-import { EphemeralBubble } from "./EphemeralBubble";
-import type { EphemeralMessage } from "./EphemeralBubble";
 import { MessageInput } from "./MessageInput";
 import { ChatHeader } from "./ChatHeader";
 import { ConfigPane } from "./ConfigPane";
@@ -29,23 +26,14 @@ interface ChatViewProps {
 // never thinks the value changed when the thread key is simply absent.
 const EMPTY_MESSAGES: Message[] = [];
 const EMPTY_STRING = "";
-const EMPTY_EPHEMERALS: EphemeralMessage[] = [];
 
 export function ChatView({ thread, onMobileMenuOpen }: ChatViewProps) {
   const [configOpen, setConfigOpen] = useState(false);
-
-  // Ephemeral messages — keyed by threadId, cleared on thread switch or refresh.
-  // These are command echoes and results that are never persisted to the DB.
-  const [ephemeralsByThread, setEphemeralsByThread] = useState<
-    Record<string, EphemeralMessage[]>
-  >({});
 
   // Keep the thread id in a ref so selector closures don't go stale when the
   // prop changes between renders but before the effect re-runs.
   const threadIdRef = useRef(thread.id);
   threadIdRef.current = thread.id;
-
-  const { toast } = useToast();
 
   const messages = useMessageStore(
     (s) => s.messagesByThread[thread.id] ?? EMPTY_MESSAGES,
@@ -59,25 +47,11 @@ export function ChatView({ thread, onMobileMenuOpen }: ChatViewProps) {
   const messageError = useMessageStore((s) => s.error);
   const loadMessages = useMessageStore((s) => s.loadMessages);
   const sendMessage = useMessageStore((s) => s.sendMessage);
-  const sendCommand = useMessageStore((s) => s.sendCommand);
 
   const connectThread = useSseStore((s) => s.connectThread);
   const disconnectThread = useSseStore((s) => s.disconnectThread);
 
   const upsertThread = useThreadStore((s) => s.upsertThread);
-
-  // Derive ephemeral messages for the active thread.
-  const ephemeralMessages = ephemeralsByThread[thread.id] ?? EMPTY_EPHEMERALS;
-
-  const appendEphemeral = useCallback(
-    (msg: EphemeralMessage) => {
-      setEphemeralsByThread((prev) => ({
-        ...prev,
-        [thread.id]: [...(prev[thread.id] ?? []), msg],
-      }));
-    },
-    [thread.id],
-  );
 
   useEffect(() => {
     loadMessages(thread.id);
@@ -115,76 +89,12 @@ export function ChatView({ thread, onMobileMenuOpen }: ChatViewProps) {
     [thread.id, sendMessage],
   );
 
-  const handleCommand = useCallback(
-    async (input: string) => {
-      const now = new Date().toISOString();
-
-      // 1. Optimistically echo the raw command the user typed.
-      const echoId = `echo-${Date.now()}`;
-      appendEphemeral({ kind: "echo", id: echoId, input, timestamp: now });
-
-      // 2. Send to server.
-      const result = await sendCommand(thread.id, input);
-
-      const resultNow = new Date().toISOString();
-
-      if (!result) {
-        // sendCommand returns null on network/server error — the error is
-        // already in the message store; surface it as an ephemeral error too.
-        appendEphemeral({
-          kind: "error",
-          id: `err-${Date.now()}`,
-          message: "Command failed. Check your connection and try again.",
-          timestamp: resultNow,
-        });
-        toast("Command failed", "error");
-        return;
-      }
-
-      // 3. Append the result as an ephemeral bubble.
-      appendEphemeral({
-        kind: "result",
-        id: `result-${Date.now()}`,
-        response: result,
-        timestamp: resultNow,
-      });
-
-      // 4. React to specific response types.
-      if (result.type === "model_switched") {
-        const newModelId = result.payload?.model_id as string | undefined;
-        const displayName = result.payload?.display_name as string | undefined;
-        if (newModelId) {
-          // Update the thread in the store so config pane + header reflect the change.
-          upsertThread({ ...thread, active_model: newModelId });
-        }
-        toast(
-          `Switched to ${displayName ?? newModelId ?? "new model"}`,
-          "success",
-        );
-      } else if (result.type === "open_add_routine_modal") {
-        toast("Routine editor coming in Phase 4", "neutral");
-      }
-    },
-    [thread, sendCommand, appendEphemeral, upsertThread, toast],
-  );
-
   const handleThreadUpdated = useCallback(
     (updated: Thread) => {
       upsertThread({ ...updated, persona: thread.persona });
     },
     [upsertThread, thread.persona],
   );
-
-  // Clear ephemeral messages for the previous thread when switching.
-  // We track the previous thread id in a ref to detect changes.
-  const prevThreadIdRef = useRef(thread.id);
-  useEffect(() => {
-    if (prevThreadIdRef.current !== thread.id) {
-      prevThreadIdRef.current = thread.id;
-      // Don't delete the old thread's ephemerals — just stop rendering them.
-      // They'll be garbage-collected naturally when the component remounts.
-    }
-  }, [thread.id]);
 
   const modelName = thread.active_model ?? undefined;
 
@@ -209,8 +119,7 @@ export function ChatView({ thread, onMobileMenuOpen }: ChatViewProps) {
               Start a conversation with {personaName}
             </div>
             <div className={styles.emptyHint}>
-              Send a message below to begin. Use <code>/help</code> to see
-              available slash commands.
+              Send a message below to begin.
             </div>
           </div>
         ) : (
@@ -229,11 +138,6 @@ export function ChatView({ thread, onMobileMenuOpen }: ChatViewProps) {
                   />
                 ))}
               </div>
-            ))}
-
-            {/* Ephemeral messages — command echoes and results, not persisted */}
-            {ephemeralMessages.map((msg) => (
-              <EphemeralBubble key={msg.id} msg={msg} />
             ))}
 
             {/* Streaming bubble */}
@@ -263,7 +167,6 @@ export function ChatView({ thread, onMobileMenuOpen }: ChatViewProps) {
         modelName={modelName}
         isSending={isSending || isStreaming}
         onSend={handleSend}
-        onCommand={handleCommand}
       />
 
       {/* ── Config pane (slides in from right) ── */}
