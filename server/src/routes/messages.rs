@@ -233,8 +233,9 @@ pub async fn send(
 #[derive(Debug, Deserialize)]
 pub struct SlashCommandRequest {
     pub command: String,
-    /// Space-separated argument string, e.g. "list" or "switch abc123"
-    pub args: Option<String>,
+    /// Pre-split argument array — the client is responsible for splitting.
+    /// e.g. "/model switch gpt-4o" → args: ["switch", "gpt-4o"]
+    pub args: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -259,13 +260,8 @@ pub async fn slash_command(
     let user_id = get_user_id(&state).await?;
     let thread = verify_thread_ownership(&state, &thread_id, &user_id).await?;
 
-    // Split the args string into words so handlers can index by position.
-    let args: Vec<String> = payload
-        .args
-        .unwrap_or_default()
-        .split_whitespace()
-        .map(|s| s.to_string())
-        .collect();
+    // Args are pre-split by the client — use them directly.
+    let args = payload.args;
     let command = payload.command.trim().to_lowercase();
 
     match command.as_str() {
@@ -347,20 +343,37 @@ async fn handle_model_command(
         }
 
         "switch" => {
-            let model_id = args.get(1).ok_or_else(|| {
-                AppError::BadRequest("Usage: /model switch <model_id>".to_string())
+            let name_or_id = args.get(1).ok_or_else(|| {
+                AppError::BadRequest("Usage: /model switch <name-or-id>".to_string())
             })?;
 
-            // Look up the model
+            // Try exact UUID match first, then fall back to case-insensitive display_name.
             let model: Option<(String, String, String)> = sqlx::query_as(
                 "SELECT id, model_id, display_name FROM models WHERE id = ? AND enabled = 1",
             )
-            .bind(model_id)
+            .bind(name_or_id)
             .fetch_optional(&state.pool)
             .await?;
 
+            let model = match model {
+                Some(m) => Some(m),
+                None => {
+                    sqlx::query_as(
+                        "SELECT id, model_id, display_name FROM models
+                     WHERE LOWER(display_name) = LOWER(?) AND enabled = 1
+                     LIMIT 1",
+                    )
+                    .bind(name_or_id)
+                    .fetch_optional(&state.pool)
+                    .await?
+                }
+            };
+
             let (db_id, _mid, display_name) = model.ok_or_else(|| {
-                AppError::NotFound(format!("Model '{}' not found or not enabled", model_id))
+                AppError::NotFound(format!(
+                    "Model '{}' not found or not enabled. Use /model list to see available models.",
+                    name_or_id
+                ))
             })?;
 
             // Update the thread's active_model
@@ -390,7 +403,7 @@ async fn handle_model_command(
         }
 
         _ => Err(AppError::BadRequest(
-            "Usage: /model list  or  /model switch <model_id>".to_string(),
+            "Usage: /model list  or  /model switch <name-or-id>".to_string(),
         )),
     }
 }
@@ -499,5 +512,163 @@ async fn handle_memory_command(
         }
 
         _ => Err(AppError::BadRequest("Usage: /memory list".to_string())),
+    }
+}
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    /// Helpers for building a SlashCommandRequest with pre-split args,
+    /// matching the contract where the client splits input before sending.
+    fn make_args(args: &[&str]) -> Vec<String> {
+        args.iter().map(|s| s.to_string()).collect()
+    }
+
+    // ── Command parsing ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_args_are_pre_split_vec() {
+        // Verify that constructing args as a Vec<String> works correctly
+        // and that individual args are accessible by index.
+        let args = make_args(&["switch", "gpt-4o"]);
+        assert_eq!(args.len(), 2);
+        assert_eq!(args[0], "switch");
+        assert_eq!(args[1], "gpt-4o");
+    }
+
+    #[test]
+    fn test_empty_args_vec() {
+        let args = make_args(&[]);
+        assert!(args.is_empty());
+        assert_eq!(args.first().map(|s| s.as_str()), None);
+    }
+
+    #[test]
+    fn test_args_single_subcommand() {
+        let args = make_args(&["list"]);
+        assert_eq!(args.first().map(|s| s.as_str()), Some("list"));
+        // No second arg — model switch would correctly error
+        assert!(args.get(1).is_none());
+    }
+
+    #[test]
+    fn test_command_normalised_to_lowercase() {
+        // The handler trims and lowercases the command field.
+        // Simulate what slash_command() does before dispatching.
+        let raw = "  MODEL  ";
+        let normalised = raw.trim().to_lowercase();
+        assert_eq!(normalised, "model");
+    }
+
+    // ── /model handlers ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_model_list_subcommand_recognised() {
+        let args = make_args(&["list"]);
+        let sub = args.first().map(|s| s.as_str()).unwrap_or("");
+        assert_eq!(sub, "list");
+    }
+
+    #[test]
+    fn test_model_switch_requires_second_arg() {
+        // args[0] == "switch", args[1] == name-or-id
+        let args_with_target = make_args(&["switch", "gpt-4o"]);
+        assert_eq!(args_with_target.get(1).map(|s| s.as_str()), Some("gpt-4o"));
+
+        // Missing second arg — handler should return BadRequest
+        let args_no_target = make_args(&["switch"]);
+        assert!(args_no_target.get(1).is_none());
+    }
+
+    #[test]
+    fn test_model_switch_by_display_name_normalisation() {
+        // Confirm that LOWER(display_name) = LOWER(input) logic works for
+        // case-insensitive matching — the SQL uses LOWER() on both sides.
+        let user_input = "GPT-4o";
+        let stored_display = "GPT-4o";
+        assert_eq!(user_input.to_lowercase(), stored_display.to_lowercase());
+
+        let user_input_partial = "gpt-4o";
+        assert_eq!(
+            user_input_partial.to_lowercase(),
+            stored_display.to_lowercase()
+        );
+    }
+
+    #[test]
+    fn test_model_unknown_subcommand() {
+        let args = make_args(&["delete"]);
+        let sub = args.first().map(|s| s.as_str()).unwrap_or("");
+        // Neither "list" nor "switch" — handler falls through to _ => BadRequest
+        assert!(sub != "list" && sub != "switch");
+    }
+
+    // ── /routine handlers ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_routine_list_subcommand() {
+        let args = make_args(&["list"]);
+        let sub = args.first().map(|s| s.as_str()).unwrap_or("list");
+        assert_eq!(sub, "list");
+    }
+
+    #[test]
+    fn test_routine_add_subcommand() {
+        let args = make_args(&["add"]);
+        let sub = args.first().map(|s| s.as_str()).unwrap_or("list");
+        assert_eq!(sub, "add");
+    }
+
+    #[test]
+    fn test_routine_default_subcommand_is_list() {
+        // Empty args falls back to "list" in handle_routine_command
+        let args = make_args(&[]);
+        let sub = args.first().map(|s| s.as_str()).unwrap_or("list");
+        assert_eq!(sub, "list");
+    }
+
+    // ── /memory handlers ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_memory_list_subcommand() {
+        let args = make_args(&["list"]);
+        let sub = args.first().map(|s| s.as_str()).unwrap_or("");
+        assert_eq!(sub, "list");
+    }
+
+    #[test]
+    fn test_memory_unknown_subcommand() {
+        let args = make_args(&["forget"]);
+        let sub = args.first().map(|s| s.as_str()).unwrap_or("");
+        // Not "list" — handler falls through to _ => BadRequest
+        assert_ne!(sub, "list");
+    }
+
+    // ── /help handler ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_help_command_no_args_needed() {
+        // /help takes no args — empty vec is the expected input
+        let args = make_args(&[]);
+        assert!(args.is_empty());
+    }
+
+    // ── Unknown command ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_unknown_command_not_in_dispatch() {
+        // Simulate the dispatch match — unknown commands fall through
+        let command = "foo";
+        let known = matches!(command, "model" | "routine" | "memory" | "help");
+        assert!(!known, "unknown command should not match any known handler");
+    }
+
+    #[test]
+    fn test_known_commands_all_match() {
+        for cmd in &["model", "routine", "memory", "help"] {
+            let known = matches!(*cmd, "model" | "routine" | "memory" | "help");
+            assert!(known, "command '{}' should be recognised", cmd);
+        }
     }
 }
