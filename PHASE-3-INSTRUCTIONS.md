@@ -21,7 +21,7 @@
 | 3.5 — Thread Config Pane | ✅ Complete | `feature/phase3-thread-config` | ⚠️ Needs merge to main. Memory section deferred. Model selector saves UUIDs. |
 | 3.6 — Slash Command UI | ✅ Complete (server only) | `feature/phase3-slash-commands` | UI removed — slash commands belong in CLI/mobile. Server endpoint intact, not exposed in web UI. Vitest added. See As-built notes in story. |
 | 3.7 — Archived Threads | ✅ Complete | `feature/phase3-archived-threads` | Scoped down per human review. Archive from config pane only (red button + confirm). Archived view in Settings → Archived Threads (read-only). Unarchive UI, restore, and export deferred. See as-built notes. |
-| 3.8 — Pending Thread + Smart Title Generation | 🔲 Not started (rewrite) | `feature/phase3-pending-thread` (dropped) | First attempt built on stale base (pre-3.5). Branch dropped and deleted. Rewrite from scratch on updated main. See implementation notes in story spec. |
+| 3.8 — Pending Thread + Smart Title Generation | ✅ Complete | `feature/phase3-pending-thread` | Pending-thread pattern, LLM title gen, delete guard. See as-built notes in story spec. |
 | 3.x — Credential Store | 🔲 Not started | — | Part 2 |
 | 3.3 Delta — Persona Default MCP Servers | 🔲 Not started | — | Part 2 |
 
@@ -661,6 +661,20 @@ Scope was significantly reduced after human review. The following decisions were
 ### Story 3.8 — Pending Thread and Smart Title Generation
 
 **Branch:** `feature/phase3-pending-thread` (create fresh from current `main`)
+
+#### As-built notes
+
+- `build_provider` in `agent.rs` made `pub(crate)` so `threads.rs` can call it for the title endpoint.
+- `verify_thread_ownership` in `threads.rs` updated to return the full `Thread` struct (was returning `String`). All three MCP call sites updated to ignore the return value with `let _thread = ...`.
+- Old title-gen block removed from `messages::send()` entirely.
+- `DELETE /api/threads/:id` now verifies ownership first (404 on unknown), then returns `400` if any messages exist.
+- `try_llm_title` resolves provider/model UUID chain: `thread.active_provider` → `persona.default_provider`; `thread.active_model` (UUID) → `models.model_id` string → `persona.default_model`. Falls back to `generate_title_from_message()` at every failure point.
+- `makeDraftThread()` exported from `useThreadStore.ts` — constructs a synthetic `Thread` with `id: "pending"` from an `AgentPersona`.
+- `promotePendingThread` sets `activeThreadId` + clears `pendingPersona`; does NOT push to `threads` — `createThread` already did that.
+- Title-gen in `ChatView` uses a `prevIsStreaming` ref to detect the `true → false` falling edge of `isStreaming`, gated by `titleGenPendingRef`. Fires once per promoted draft.
+- `ChatHeader.onToggleConfig` made optional (`() => void` → `() => void | undefined`); button disabled with tooltip when `undefined` (draft mode).
+- `modelName` prop and hints-row span removed from `MessageInput` entirely (Bug B fix from first attempt).
+- Navigating away from a draft (clicking a sidebar thread) calls `setPendingPersona(null)` — no DB record, no cleanup needed.
 
 #### Implementation Notes (from first attempt — read before starting)
 
