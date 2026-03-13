@@ -30,7 +30,9 @@
 
 Work **one story at a time**, on its own feature branch. Each story has a branch name, scope, and acceptance criteria. Do not combine stories. Do not start a new story until the previous one is merged to `main`.
 
-Commit message format: `feat(phase3): <short description>`
+Commit message format: `feat(phase3): <short description>` for features, `fix(phase3): <short description>` for fixes within a phase branch.
+
+**Commit granularity** — commit after each logical task within a story, not just once at the end. A "logical task" is a self-contained unit of work that leaves the codebase in a coherent state (e.g. "server contract change", "toast component", "slash dropdown UI", "ChatView ephemeral messages"). Never batch unrelated changes into a single commit. This keeps the history readable and makes bisection easy.
 
 **Stories must be worked in the order listed within each Part.** Parts are sequential — finish all stories in Part 1 before starting Part 2.
 
@@ -474,16 +476,43 @@ The autocomplete UX and command result display need subjective evaluation.
 
 See PLAN.md §6.8.1 and §7.3. Slash commands are typed in the chat input, intercepted client-side, and routed to `POST /api/threads/:id/command` instead of the message endpoint. Results are ephemeral — displayed in chat but never persisted.
 
+#### Design Decisions (agreed before implementation)
+
+1. **`args` type**: `SlashCommandRequest.args` changes from `Option<String>` to `Vec<String>`. The client splits the input; the server receives a pre-split array and passes it directly to handlers. No `split_whitespace` on the server side.
+
+2. **TypeScript payload types**: Keep `SlashCommandPayload` loose (index signature `[key: string]: unknown`) rather than defining per-command discriminated unions. The server rejects unknown commands cleanly, so strict client-side typing isn't needed yet. Leave a `TODO` comment as a reminder to tighten types when the command surface stabilises.
+
+3. **`/model switch` UX**: The `switch` handler accepts either the UUID primary key **or** a case-insensitive display name match (e.g. `/model switch gpt-4o`). The `/model list` result renders display names prominently so users know what to type. After a successful `model_switched` response, the client calls `useThreadStore.upsertThread` with the updated `active_model` so the config pane and chat header reflect the change immediately.
+
+4. **Toast component**: A new `Toast` / `ToastProvider` component is introduced in this story. Rules:
+   - Appears at the top of the page, centre-aligned.
+   - Three variants: `success` (green), `error` (red), `neutral` (default muted).
+   - Auto-dismisses after **3 seconds** (hardcoded for now — TODO: make configurable via env/config).
+   - Toasts stack vertically and dismiss in the order they were triggered (FIFO).
+   - Used for app-level feedback: `/routine add` "coming soon", model switch confirmation, future provider token refresh errors, etc.
+   - Command errors (unknown command, bad args) are shown as ephemeral messages in the chat, **not** toasts — errors are contextual to the conversation.
+
+5. **Ephemeral messages**: Command results are displayed inline in the chat as ephemeral messages — visually distinct from real messages (subtle background, "⚡ Slash Command" tag, italic metadata). They are stored in `ChatView` local state as `Record<threadId, EphemeralMessage[]>` and are cleared on page refresh or when the component unmounts. They are interleaved with real messages by timestamp.
+
+6. **Dropdown commands**: The autocomplete panel shows only the four spec-defined commands. Mockup-only commands (`/remember`, `/recall`, `/clear`, `/retry`, `/prompt`) are **not** included — they belong to later phases and are not implemented here.
+
+   | Command | Icon | Arg hint | Description | Badge |
+   |---|---|---|---|---|
+   | `/model` | 🔄 | `list \| switch <name>` | List or switch the active model for this thread | Model |
+   | `/routine` | ⚡ | `list \| add` | List routines or open the add-routine editor | System |
+   | `/memory` | 🗂 | `list` | Show recent memories for this thread's persona | Memory |
+   | `/help` | ❓ | *(none)* | Show all available commands | System |
+
 #### What to Build — Server
 
-Implement `POST /api/threads/:id/command` in `server/src/routes/`:
+The route `POST /api/threads/:id/command` already exists in `server/src/routes/messages.rs`. The delta work is:
 
 **Request body:**
 ```json
 { "command": "model", "args": ["switch", "gpt-4o"] }
 ```
 
-**Server contract change:** The existing `SlashCommandRequest` in `server/src/routes/messages.rs` currently accepts `args: Option<String>` and splits it internally. Update this to `args: Vec<String>` — the client is responsible for splitting. Remove the internal `split_whitespace` logic in `slash_command()` and pass `payload.args` directly to handlers.
+**Server contract change:** Update `SlashCommandRequest.args` from `Option<String>` to `Vec<String>`. Remove the internal `split_whitespace` logic in `slash_command()` and pass `payload.args` directly to handlers.
 
 **Response:**
 ```json
@@ -495,48 +524,84 @@ Implement `POST /api/threads/:id/command` in `server/src/routes/`:
 | Command | Args | Action |
 |---|---|---|
 | `model` | `list` | Return available models for the thread's active provider |
-| `model` | `switch <model_id>` | Update `active_model` on the thread, return confirmation |
+| `model` | `switch <name-or-id>` | Match by UUID first, then case-insensitive `display_name`; update `active_model` on the thread |
 | `routine` | `list` | Return routines attached to this thread |
-| `routine` | `add` | Return `{ "type": "open_modal", "modal": "add_routine" }` signal |
-| `memory` | `list` | Return last 20 memories for the thread's persona (use `memory_service::list_memories`) |
+| `routine` | `add` | Return `{ "type": "open_add_routine_modal" }` signal |
+| `memory` | `list` | Return last 20 memories for the thread's persona |
 | `help` | *(none)* | Return all commands with descriptions |
 
-Unknown commands return: `{ "data": { "type": "error", "message": "Unknown command '/foo'. Type /help to see available commands." } }`
+Unknown commands return a `400 Bad Request` (existing `AppError::BadRequest` path) — **not** a 200 with `type: "error"`. The client catches the error and displays it as an ephemeral message.
 
-Unit tests for command parsing and each handler. Tests should pass `args` as a `Vec<String>` directly, not as a space-separated string.
+Unit tests for command parsing and each handler. Tests must pass `args` as a `Vec<String>` directly.
 
 #### What to Build — Client
 
-**Autocomplete panel:**
-- When the user types `/` as the first character in the message input, show a floating panel above the input matching `mockups/slash-commands.html`
-- Panel lists available commands with descriptions
-- Arrow keys navigate, Enter selects (fills the command into the input), Escape dismisses
-- Typing after `/` filters the list
-- Panel disappears when the input no longer starts with `/`
+**New: `ToastProvider` + `useToast` hook**
+- `web/src/components/toast/ToastProvider.tsx` — context provider, renders the toast stack at the top of the page
+- `web/src/hooks/useToast.ts` — `toast(message, variant?)` function; variant is `"success" | "error" | "neutral"` (default `"neutral"`)
+- Mount `<ToastProvider>` in `App.tsx` (or the root layout)
 
-**Command execution:**
-- On send, if input starts with `/`, route to `sendCommand()` in the message store instead of `sendMessage()`
-- Parse the input into `command` and `args: string[]` client-side before sending — e.g. `/model switch gpt-4o` → `{ command: "model", args: ["switch", "gpt-4o"] }`. Update `messagesApi.sendCommand()` in `client.ts` to accept `args: string[]` instead of a single string.
-- Display the result as an **ephemeral message** in the chat — visually distinct from real messages (e.g., subtle background, italic text, no avatar, small "command result" label)
-- Ephemeral messages are stored in component state only — they disappear on thread switch or refresh
-- For `model switch`: also update the thread config pane's model dropdown if it's open
-- For `routine add`: trigger the routine modal (stub — show a "coming soon" toast until Phase 4)
-- For `memory list`: display the memories in a readable format
+**Autocomplete panel: `SlashDropdown` component**
+- New file: `web/src/components/SlashDropdown.tsx` + `SlashDropdown.module.css`
+- Rendered inside `MessageInput` when input starts with `/`
+- Positioned absolutely above the input row (matches mockup)
+- Shows the four commands listed in the Design Decisions table above
+- Typing after `/` filters the list by command name prefix
+- Arrow keys navigate highlighted item; Enter fills the command into the input; Escape dismisses; Tab also fills (matches mockup JS behaviour)
+- Clicking an item fills the command
+
+**Updated: `MessageInput.tsx`**
+- Integrate `SlashDropdown` — show/hide based on input value
+- Thread arrow-key and Escape events through to the dropdown when it is visible (suppress default scroll behaviour on arrow keys)
+- On Enter when dropdown is visible and an item is highlighted: fill command, do **not** submit
+
+**Updated: `messagesApi.sendCommand()` in `client.ts`**
+- Change signature: `args: string[]` (was `args?: string`)
+- Body: `JSON.stringify({ command, args })`
+
+**Updated: `useMessageStore.sendCommand()`**
+- Parse input into `command` (string) and `args` (`string[]`) — e.g. `/model switch gpt-4o` → `{ command: "model", args: ["switch", "gpt-4o"] }`
+- On success: return the response data to the caller
+- On error: return `null` (caller renders the error as an ephemeral message)
+
+**Updated: `ChatView.tsx`**
+- Add `ephemeralMessages: Record<string, EphemeralMessage[]>` local state
+- After `sendCommand` resolves: prepend a "command echo" ephemeral entry (the raw `/...` input the user typed) and an ephemeral result entry (the server response)
+- Interleave ephemeral entries with real messages by timestamp when rendering
+- For `type === "model_switched"`: call `upsertThread` with updated `active_model` to keep config pane and header in sync; also fire a `success` toast
+- For `type === "open_add_routine_modal"`: fire a `neutral` toast "Routine editor coming in Phase 4"
+- For error responses (caught exception): add ephemeral error entry; fire an `error` toast
+
+**New: `EphemeralBubble` component** (in `MessageBubble.tsx` or its own file)
+- Visually distinct: subtle muted background, "⚡ Slash Command" tag, italic "ephemeral — not saved" metadata
+- Renders command result content: plain text for most responses; formatted list for `memory_list`, `model_list`, `routine_list`
+
+**Updated: `SlashCommandPayload` type in `types/index.ts`**
+- Add index signature: `[key: string]: unknown`
+- Leave a `TODO` comment to tighten to discriminated union once command surface stabilises
 
 #### Acceptance Criteria
 
 - [ ] `SlashCommandRequest.args` is `Vec<String>` on the server; internal `split_whitespace` removed
+- [ ] `model switch` handler accepts UUID or case-insensitive display name
 - [ ] `messagesApi.sendCommand()` in `client.ts` accepts `args: string[]`
 - [ ] Server endpoint handles all six commands correctly
+- [ ] Unknown commands return `400 Bad Request`
 - [ ] Unit tests for command parsing, each handler, and unknown command error; args passed as `Vec<String>`
-- [ ] Autocomplete panel appears on `/` in the message input
-- [ ] Arrow key navigation and Enter selection work
-- [ ] Filtering works (typing `/mod` shows only `model` commands)
-- [ ] Command results display as ephemeral messages with distinct styling
-- [ ] `/model switch` actually changes the active model
+- [ ] `ToastProvider` mounted at app root; `useToast` hook works from any component
+- [ ] Toast variants: success (green), error (red), neutral (muted); auto-dismiss at 3 s; stacks FIFO
+- [ ] Autocomplete panel appears on `/` in the message input; disappears when input no longer starts with `/`
+- [ ] Arrow key navigation and Enter selection work; Escape dismisses
+- [ ] Filtering works (typing `/mod` shows only `model`)
+- [ ] Dropdown shows exactly the four spec commands with correct icons, arg hints, descriptions, and badges
+- [ ] Command results display as ephemeral messages with distinct styling (tag + italic metadata)
+- [ ] Ephemeral messages cleared on thread switch or page refresh
+- [ ] `/model switch` updates `active_model` in thread store; config pane and header reflect the change; success toast fires
+- [ ] `/model list` renders display names in a readable format
 - [ ] `/memory list` shows formatted memories
 - [ ] `/help` shows all commands
-- [ ] Unknown commands show helpful error
+- [ ] `/routine add` fires a neutral "coming soon" toast
+- [ ] Unknown commands show ephemeral error in chat
 - [ ] Normal messages (not starting with `/`) are unaffected
 - [ ] `npm run build` passes, `cargo build` passes, all tests pass
 

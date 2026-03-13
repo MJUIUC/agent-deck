@@ -40,6 +40,21 @@ If something in the spec is unclear or contradicts the existing code, ask about 
 
 ---
 
+## Step 2b — Diagnosing bugs (applies any time a bug surfaces, mid-story or not)
+
+When a bug or unexpected behaviour is reported:
+
+1. **Diagnose first.** Read logs, inspect running processes, grep the relevant code, and form a clear theory of the root cause before touching anything.
+2. **Write a short plan.** State:
+   - What you believe the root cause is and why
+   - What change(s) you intend to make to fix it
+   - Any risk or side-effect of the fix
+3. **Stop and wait for the human to confirm** before writing any fix code.
+
+This rule applies even when the fix seems obvious. Do not write a single line of fix code until the plan is confirmed.
+
+---
+
 ## Step 3 — Work the story
 
 Once confirmed:
@@ -78,3 +93,4 @@ Monitor your token usage throughout the session.
 8. **Never simplify code to fix diagnostics.** Complete, correct code is more valuable than minimal code.
 9. **Do not guess file paths.** Use `find_path` or `list_directory` first.
 10. **Ask, don't assume.** If the spec and the existing code conflict, raise it before implementing.
+11. **Plan before you fix.** When a bug is reported, diagnose and write a plan first. Do not write fix code until the human confirms the plan. See Step 2b.
