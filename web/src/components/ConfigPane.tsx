@@ -183,11 +183,12 @@ function ProviderModelSelector({
   onUpdate,
 }: {
   thread: Thread;
-  onUpdate: (provider: string, model: string) => void;
+  // Callers receive provider UUID and model record UUID — server-ready values.
+  onUpdate: (providerRecordId: string, modelRecordId: string) => void;
 }) {
-  // thread.active_provider / active_model are display strings (set by this selector).
-  // persona.default_provider / default_model are record UUIDs — resolve them to
-  // display strings after we've loaded the provider+model data.
+  // All IDs stored on the thread (active_provider, active_model) and on the
+  // persona (default_provider, default_model) are record UUIDs.
+  // We resolve them to display strings only for rendering.
   const [data, setData] = useState<ProviderWithModels[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(
@@ -195,11 +196,18 @@ function ProviderModelSelector({
   );
   const [listOpen, setListOpen] = useState(false);
 
-  // Resolved effective provider name and model_id string (never raw UUIDs)
-  const [effectiveProvider, setEffectiveProvider] = useState<string | null>(
+  // Resolved display strings for the UI label — never written to the server.
+  const [effectiveProviderName, setEffectiveProviderName] = useState<
+    string | null
+  >(null);
+  const [effectiveModelLabel, setEffectiveModelLabel] = useState<string | null>(
+    null,
+  );
+  // The currently active record IDs (UUIDs) — used for isActive comparisons.
+  const [activeProviderId, setActiveProviderId] = useState<string | null>(
     thread.active_provider ?? null,
   );
-  const [effectiveModel, setEffectiveModel] = useState<string | null>(
+  const [activeModelId, setActiveModelId] = useState<string | null>(
     thread.active_model ?? null,
   );
 
@@ -224,41 +232,37 @@ function ProviderModelSelector({
         if (!cancelled) {
           setData(results);
 
-          // Resolve the effective provider name + model_id.
-          // Prefer the thread's own active values (already display strings).
-          // Fall back to persona defaults, which are record UUIDs — look them up.
-          let resolvedProviderName: string | null =
-            thread.active_provider ?? null;
-          let resolvedModelId: string | null = thread.active_model ?? null;
+          // Resolve the active provider/model UUIDs to display strings.
+          // Source priority: thread's own active_* fields, then persona defaults.
+          const resolvedProviderId =
+            thread.active_provider ?? thread.persona?.default_provider ?? null;
+          const resolvedModelId =
+            thread.active_model ?? thread.persona?.default_model ?? null;
 
-          if (!resolvedProviderName && thread.persona?.default_provider) {
-            const found = results.find(
-              (r) => r.provider.id === thread.persona!.default_provider,
-            );
-            resolvedProviderName = found?.provider.name ?? null;
-          }
+          // Find the provider entry by UUID
+          const providerEntry =
+            results.find((r) => r.provider.id === resolvedProviderId) ?? null;
 
-          if (!resolvedModelId && thread.persona?.default_model) {
-            for (const { models } of results) {
-              const found = models.find(
-                (m) => m.id === thread.persona!.default_model,
-              );
-              if (found) {
-                resolvedModelId = found.model_id;
-                break;
-              }
+          // Find the model entry by UUID across all providers
+          let modelEntry: Model | null = null;
+          for (const { models } of results) {
+            const found = models.find((m) => m.id === resolvedModelId);
+            if (found) {
+              modelEntry = found;
+              break;
             }
           }
 
-          setEffectiveProvider(resolvedProviderName);
-          setEffectiveModel(resolvedModelId);
+          setActiveProviderId(resolvedProviderId);
+          setActiveModelId(resolvedModelId);
+          setEffectiveProviderName(providerEntry?.provider.name ?? null);
+          setEffectiveModelLabel(
+            modelEntry?.display_name || modelEntry?.model_id || null,
+          );
 
           // Pre-select the resolved provider's pill
-          const current = results.find(
-            (r) => r.provider.name === resolvedProviderName,
-          );
           setSelectedProviderId(
-            current?.provider.id ?? results[0]?.provider.id ?? null,
+            providerEntry?.provider.id ?? results[0]?.provider.id ?? null,
           );
           setListOpen(false);
         }
@@ -290,15 +294,10 @@ function ProviderModelSelector({
     );
   }
 
-  // Label shown on the collapsed toggle — resolved provider · model display name
-  const activeModel = selectedEntry?.models.find(
-    (m) =>
-      m.model_id === effectiveModel &&
-      selectedEntry.provider.name === effectiveProvider,
-  );
+  // Label shown on the collapsed toggle — resolved display strings
   const collapsedLabel =
-    effectiveProvider && effectiveModel
-      ? `${effectiveProvider} · ${activeModel?.display_name ?? effectiveModel}`
+    effectiveProviderName && effectiveModelLabel
+      ? `${effectiveProviderName} · ${effectiveModelLabel}`
       : "Select a model…";
 
   return (
@@ -349,8 +348,8 @@ function ProviderModelSelector({
               ) : (
                 selectedEntry.models.map((m) => {
                   const isActive =
-                    m.model_id === effectiveModel &&
-                    selectedEntry.provider.name === effectiveProvider;
+                    m.id === activeModelId &&
+                    selectedEntry.provider.id === activeProviderId;
                   return (
                     <button
                       key={m.id}
@@ -359,9 +358,13 @@ function ProviderModelSelector({
                         isActive ? styles.modelItemActive : "",
                       ].join(" ")}
                       onClick={() => {
-                        setEffectiveProvider(selectedEntry.provider.name);
-                        setEffectiveModel(m.model_id);
-                        onUpdate(selectedEntry.provider.name, m.model_id);
+                        // Update local display state immediately
+                        setActiveProviderId(selectedEntry.provider.id);
+                        setActiveModelId(m.id);
+                        setEffectiveProviderName(selectedEntry.provider.name);
+                        setEffectiveModelLabel(m.display_name || m.model_id);
+                        // Persist UUIDs to server — store + ChatHeader update reactively
+                        onUpdate(selectedEntry.provider.id, m.id);
                         setListOpen(false);
                       }}
                     >
@@ -583,15 +586,17 @@ export function ConfigPane({
   };
 
   const handleModelUpdate = useCallback(
-    async (providerName: string, modelId: string) => {
+    async (providerRecordId: string, modelRecordId: string) => {
       try {
         const res = await threadsApi.update(thread.id, {
-          active_provider: providerName,
-          active_model: modelId,
+          active_provider: providerRecordId,
+          active_model: modelRecordId,
         });
+        // Server returns the updated thread with UUID fields — upserts the store,
+        // which reactively updates ChatHeader and any other thread consumers.
         onThreadUpdated(res.data);
       } catch {
-        // silently degrade — UI will revert on next thread load
+        // silently degrade — UI local state already updated optimistically
       }
     },
     [thread.id, onThreadUpdated],

@@ -71,7 +71,7 @@ async fn run_inner(state: &AppState, thread_id: &str, user_message: &str) -> Res
     // ── 1. Fetch the thread and its persona ────────────────────────────────────
     let thread: crate::models::thread::Thread = sqlx::query_as(
         "SELECT id, user_id, persona_id, title, active_model, active_provider,
-                system_prompt_addendum, status, created_at, updated_at
+                system_prompt_addendum, status, show_tool_activity, created_at, updated_at
          FROM threads WHERE id = ?",
     )
     .bind(thread_id)
