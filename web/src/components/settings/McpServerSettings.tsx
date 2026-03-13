@@ -24,11 +24,8 @@ function TypeBadge({ type }: { type: "local" | "remote" }) {
         letterSpacing: "0.04em",
         textTransform: "uppercase",
         background:
-          type === "local"
-            ? "rgba(124,140,90,0.15)"
-            : "rgba(90,120,180,0.15)",
-        color:
-          type === "local" ? "var(--accent-primary)" : "var(--info)",
+          type === "local" ? "rgba(124,140,90,0.15)" : "rgba(90,120,180,0.15)",
+        color: type === "local" ? "var(--accent-primary)" : "var(--info)",
         flexShrink: 0,
       }}
     >
@@ -188,16 +185,12 @@ function ToolInspector({
           }}
         >
           {loading && (
-            <span
-              style={{ fontSize: 12, color: "var(--text-tertiary)" }}
-            >
+            <span style={{ fontSize: 12, color: "var(--text-tertiary)" }}>
               Loading tools…
             </span>
           )}
           {!loading && tools.length === 0 && (
-            <span
-              style={{ fontSize: 12, color: "var(--text-tertiary)" }}
-            >
+            <span style={{ fontSize: 12, color: "var(--text-tertiary)" }}>
               {serverStatus === "connected"
                 ? "No tools reported."
                 : "Server not connected — tools unavailable."}
@@ -540,10 +533,7 @@ function McpForm({
       setError("Name is required.");
       return;
     }
-    if (
-      form.server_type === "local" &&
-      !form.local.executable.trim()
-    ) {
+    if (form.server_type === "local" && !form.local.executable.trim()) {
       setError("Executable is required for local servers.");
       return;
     }
@@ -607,9 +597,6 @@ function McpForm({
         >
           {editingId ? "Edit MCP Server" : "Add MCP Server"}
         </span>
-        <Btn variant="ghost" sm onClick={onCancel}>
-          ✕ Cancel
-        </Btn>
       </div>
 
       {/* Shared fields */}
@@ -743,9 +730,7 @@ function McpForm({
             Local Configuration
           </div>
 
-          <div
-            style={{ display: "flex", flexDirection: "column", gap: 12 }}
-          >
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
               <FieldLabel>Executable</FieldLabel>
               <FieldInput
@@ -762,7 +747,11 @@ function McpForm({
                 value={form.local.args}
                 onChange={(e) => setLocal("args", e.target.value)}
                 placeholder={"/Users/marcus/Documents\n/Users/marcus/Projects"}
-                style={{ minHeight: 64, fontFamily: '"SF Mono","Fira Code",monospace', fontSize: 12 }}
+                style={{
+                  minHeight: 64,
+                  fontFamily: '"SF Mono","Fira Code",monospace',
+                  fontSize: 12,
+                }}
               />
             </div>
 
@@ -801,9 +790,7 @@ function McpForm({
             Remote Configuration
           </div>
 
-          <div
-            style={{ display: "flex", flexDirection: "column", gap: 12 }}
-          >
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
               <FieldLabel>URL</FieldLabel>
               <FieldInput
@@ -848,9 +835,9 @@ function McpForm({
                 mono
               />
               <FieldHint>
-                Key of the stored credential to inject as the auth token.
-                Will become a credential picker once the credential store is
-                built (Story 3.x).
+                Key of the stored credential to inject as the auth token. Will
+                become a credential picker once the credential store is built
+                (Story 3.x).
               </FieldHint>
             </div>
           </div>
@@ -1043,8 +1030,7 @@ export function McpServerSettings() {
   const [formInitial, setFormInitial] = useState<FormState>(EMPTY_FORM);
 
   // Delete confirmation
-  const [deleteTarget, setDeleteTarget] =
-    useState<McpServer | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<McpServer | null>(null);
   const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
@@ -1091,8 +1077,7 @@ export function McpServerSettings() {
 
   const handleFormCancel = () => setFormMode(null);
 
-  const handleDeleteClick = (server: McpServer) =>
-    setDeleteTarget(server);
+  const handleDeleteClick = (server: McpServer) => setDeleteTarget(server);
 
   const handleDeleteConfirm = async () => {
     if (!deleteTarget) return;
@@ -1137,11 +1122,6 @@ export function McpServerSettings() {
             available to attach to threads.
           </div>
         </div>
-        {formMode === null && (
-          <Btn variant="primary" sm onClick={handleAddClick}>
-            + Add Server
-          </Btn>
-        )}
       </div>
 
       {/* Add / Edit form */}
