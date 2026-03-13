@@ -4,6 +4,9 @@ import type { SettingsTab } from "./shared";
 import { SettingsSidebar } from "./SettingsNav";
 import { ProviderSettings } from "./ProviderSettings";
 import { PersonaSettings } from "./PersonaSettings";
+import { McpServerSettings } from "./McpServerSettings";
+import { MobileSettings } from "./MobileSettings";
+import { GeneralSettings } from "./GeneralSettings";
 
 export interface SettingsModalProps {
   isOpen: boolean;
@@ -123,6 +126,9 @@ export function SettingsModal({
               {tab === "personas" && (
                 <PersonaSettings onDataChanged={handleDataChanged} />
               )}
+              {tab === "mcp-servers" && <McpServerSettings />}
+              {tab === "mobile" && <MobileSettings />}
+              {tab === "general" && <GeneralSettings />}
             </div>
           </div>
 

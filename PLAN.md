@@ -2088,19 +2088,22 @@ Acceptance criteria:
 
 ### Phase 5 — React Native Mobile App
 
-**Goal:** The existing mobile app scaffold is updated to work with the agent-deck server API. Full chat experience on Android.
+**Goal:** A new React Native app is scaffolded from scratch and built to work with the agent-deck server API. Full chat experience on Android.
+
+> ⚠️ **Note:** The original `mobile/BotRelayApp/` scaffold was permanently deleted (`rm -rf`) before it was committed remotely. There is no recoverable version. Story 5.1 must initialize a fresh React Native project rather than cleaning up the old one. The dependency list and rename instructions below still apply — treat them as the target state for the new scaffold.
 
 ---
 
-**Story 5.1 — App cleanup and rename**  
+**Story 5.1 — App scaffold and setup**  
 Branch: `feature/phase5-mobile-cleanup`
 
-Rename the app from `BotRelayApp` to `AgentDeck` in `app.json` and `package.json`. Remove unused dependencies (`socket.io-client`, `tweetnacl`, `tweetnacl-util`, `react-native-video`). Add `@react-native-firebase/app` and `@react-native-firebase/messaging`. Apply the shared color theme from section 4.1 to the React Native StyleSheet setup.
+Initialize a new React Native project named `AgentDeck` at `mobile/AgentDeck/`. Install required dependencies: `react-native-gifted-chat`, `@react-navigation/native`, `@react-navigation/native-stack`, `react-native-mmkv`, `react-native-safe-area-context`, `axios`, `@notifee/react-native`, `@react-native-firebase/app`, `@react-native-firebase/messaging`. Do **not** install `socket.io-client`, `tweetnacl`, `tweetnacl-util`, or `react-native-video`. Apply the shared color theme from section 4.1 to `src/theme/colors.ts`.
 
 Acceptance criteria:
-- App builds and runs on Android
-- No references to old dependencies
-- Color tokens are in place
+- Fresh React Native project builds and runs on Android
+- App is named `AgentDeck` in `app.json` and `package.json`
+- All required dependencies installed, disallowed dependencies absent
+- Color tokens are in place at `src/theme/colors.ts`
 
 ---
 

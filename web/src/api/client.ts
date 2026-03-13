@@ -6,6 +6,8 @@ import type {
   Message,
   Provider,
   Model,
+  McpServer,
+  McpTool,
   SlashCommandResponse,
 } from "@/types";
 
@@ -277,6 +279,88 @@ export const copilotApi = {
   },
 };
 
+// ── MCP Servers ───────────────────────────────────────────────────────────────
+
+export type McpServerConfig =
+  | { executable: string; args: string[]; env: Record<string, string> }
+  | { url: string; auth_header: string; credential_key: string };
+
+export const mcpServersApi = {
+  list(): Promise<{ data: McpServer[] }> {
+    return apiFetch("/api/mcp-servers");
+  },
+
+  get(id: string): Promise<{ data: McpServer }> {
+    return apiFetch(`/api/mcp-servers/${id}`);
+  },
+
+  create(payload: {
+    name: string;
+    description?: string;
+    source_url?: string;
+    server_type: "local" | "remote";
+    config: McpServerConfig;
+  }): Promise<{ data: McpServer }> {
+    return apiFetch("/api/mcp-servers", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  update(
+    id: string,
+    payload: {
+      name?: string;
+      description?: string;
+      source_url?: string;
+      config?: McpServerConfig;
+      enabled?: boolean;
+    },
+  ): Promise<{ data: McpServer }> {
+    return apiFetch(`/api/mcp-servers/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  delete(id: string): Promise<{ data: { deleted: boolean } }> {
+    return apiFetch(`/api/mcp-servers/${id}`, { method: "DELETE" });
+  },
+
+  listTools(id: string): Promise<{ data: McpTool[] }> {
+    return apiFetch(`/api/mcp-servers/${id}/tools`);
+  },
+};
+
+// ── Auth ─────────────────────────────────────────────────────────────────────
+
+export const authApi = {
+  rotateToken(): Promise<{
+    data: { token: string; message: string };
+  }> {
+    return apiFetch("/api/auth/token/rotate", { method: "POST" });
+  },
+
+  getConfig(): Promise<{
+    data: { setup_complete: boolean; port: number; version: string };
+  }> {
+    return apiFetch("/api/config");
+  },
+};
+
+// ── Pairing ───────────────────────────────────────────────────────────────────
+
+export const pairingApi = {
+  generate(): Promise<{
+    data: {
+      pairing_payload: { server_url: string; token: string };
+      hint: string;
+    };
+  }> {
+    return apiFetch("/api/pairing/generate", { method: "POST" });
+  },
+};
+
 // ── Setup ─────────────────────────────────────────────────────────────────────
 
 export const setupApi = {
@@ -284,9 +368,7 @@ export const setupApi = {
     return apiFetch("/api/setup/status");
   },
 
-  complete(
-    displayName: string,
-  ): Promise<{
+  complete(displayName: string): Promise<{
     data: { complete: boolean; user: { id: string; display_name: string } };
   }> {
     return apiFetch("/api/setup/complete", {

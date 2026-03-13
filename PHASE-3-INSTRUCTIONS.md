@@ -14,11 +14,11 @@
 | 3.1 — Setup Wizard | ✅ Complete | `feature/phase3-setup-wizard` | Merged to main |
 | 3.1a — Wizard Skip Flow & Empty State | ✅ Complete | `feature/phase3-setup-wizard` | Merged to main |
 | 3.2 — Provider Settings Polish | ✅ Complete (no-op) | `feature/phase3-setup-wizard` | Existing UI exceeds mockup — no changes needed |
-| 3.4a — Settings Nav Update | 🔲 Not started | `feature/phase3-settings-mcp-mobile-general` | Next up |
-| 3.4b — Settings: MCP Servers Tab | 🔲 Not started | `feature/phase3-settings-mcp-mobile-general` | — |
-| 3.4c — Settings: Mobile Tab | 🔲 Not started | `feature/phase3-settings-mcp-mobile-general` | — |
-| 3.4d — Settings: General Tab | 🔲 Not started | `feature/phase3-settings-mcp-mobile-general` | — |
-| 3.5 — Thread Config Pane | 🔲 Not started | — | — |
+| 3.4a — Settings Nav Update | ✅ Complete | `feature/phase3-settings-mcp-mobile-general` | Merged to main |
+| 3.4b — Settings: MCP Servers Tab | ✅ Complete | `feature/phase3-settings-mcp-mobile-general` | — |
+| 3.4c — Settings: Mobile Tab | ✅ Complete | `feature/phase3-settings-mcp-mobile-general` | — |
+| 3.4d — Settings: General Tab | ✅ Complete | `feature/phase3-settings-mcp-mobile-general` | — |
+| 3.5 — Thread Config Pane | 🔲 Not started | — | Next up |
 | 3.6 — Slash Command UI | 🔲 Not started | — | — |
 | 3.7 — Archived Threads | 🔲 Not started | — | — |
 | 3.x — Credential Store | 🔲 Not started | — | Part 2 |
