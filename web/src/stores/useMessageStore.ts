@@ -2,35 +2,6 @@ import { create } from "zustand";
 import { messagesApi } from "@/api/client";
 import type { Message } from "@/types";
 
-/**
- * Merge a list of server-confirmed messages with the current in-memory list.
- * - Optimistic messages (id starts with "optimistic-") are dropped in favour
- *   of the real server copies.
- * - Non-optimistic messages already in `current` are kept as-is (preserves
- *   any streaming state that may have appended them before the list returned).
- * - Server messages not yet in `current` are appended.
- * The result is sorted by `created_at` ascending.
- */
-function mergeMessages(current: Message[], fromServer: Message[]): Message[] {
-  // Build a set of real ids already present
-  const existingIds = new Set(
-    current.filter((m) => !m.id.startsWith("optimistic-")).map((m) => m.id),
-  );
-
-  // Keep non-optimistic current messages, then append any server messages
-  // we haven't seen yet.
-  const kept = current.filter((m) => !m.id.startsWith("optimistic-"));
-  const newFromServer = fromServer.filter((m) => !existingIds.has(m.id));
-  const merged = [...kept, ...newFromServer];
-
-  // Sort by created_at so order is stable
-  merged.sort(
-    (a, b) =>
-      new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
-  );
-  return merged;
-}
-
 interface MessageStore {
   // State
   messagesByThread: Record<string, Message[]>;
@@ -117,14 +88,26 @@ export const useMessageStore = create<MessageStore>((set) => ({
     }));
 
     try {
-      // Fire the message — the real user message and assistant response
-      // arrive via SSE (token / message_complete events).
-      await messagesApi.send(threadId, content);
+      // Fire the message. The response body contains the persisted user
+      // message — use it to swap out the optimistic copy immediately so
+      // finalizeStream never sees an optimistic-* id and strips it.
+      const res = await messagesApi.send(threadId, content);
+      const realUserMsg = res.data;
 
-      // The real user message and assistant response arrive via SSE
-      // (token / message_complete). finalizeStream handles replacing the
-      // optimistic message with the real one. No eager list reload needed —
-      // it was causing a flicker by re-rendering mid-stream.
+      set((state) => {
+        const current = state.messagesByThread[threadId] ?? [];
+        // Replace the optimistic placeholder with the real server message,
+        // preserving its position in the list.
+        const replaced = current.map((m) =>
+          m.id === optimisticUserMsg.id ? realUserMsg : m,
+        );
+        return {
+          messagesByThread: {
+            ...state.messagesByThread,
+            [threadId]: replaced,
+          },
+        };
+      });
     } catch (err) {
       // On error, remove the optimistic message and surface the error
       set((state) => ({

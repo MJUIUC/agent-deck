@@ -4,6 +4,10 @@ import { useEffect, useRef, useCallback } from "react";
  * useAutoScroll — keeps a scrollable container pinned to the bottom
  * as new content arrives, unless the user has manually scrolled up.
  *
+ * Thread-switch / initial-load scrolling is handled by ChatView directly
+ * via a sentinel div + scrollIntoView. This hook only concerns itself with
+ * keeping the view pinned during streaming.
+ *
  * Returns a ref to attach to the scrollable container.
  */
 export function useAutoScroll(deps: unknown[]) {
@@ -36,7 +40,7 @@ export function useAutoScroll(deps: unknown[]) {
     return () => el.removeEventListener("scroll", handleScroll);
   }, []);
 
-  // Scroll to bottom when deps change (new messages / tokens)
+  // Scroll to bottom when deps change, but only while pinned
   useEffect(() => {
     if (isPinnedRef.current) {
       scrollToBottom(false);
@@ -44,18 +48,5 @@ export function useAutoScroll(deps: unknown[]) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
 
-  // Jump to bottom immediately when the thread changes (first element of deps)
-  const prevThreadIdRef = useRef<unknown>(null);
-  useEffect(() => {
-    const threadId = deps[0];
-    if (threadId !== prevThreadIdRef.current) {
-      prevThreadIdRef.current = threadId;
-      isPinnedRef.current = true;
-      // Small delay to let the DOM render the messages first
-      requestAnimationFrame(() => scrollToBottom(false));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deps[0]]);
-
-  return { containerRef, scrollToBottom, isUserScrollingRef };
+  return { containerRef, scrollToBottom, isPinnedRef, isUserScrollingRef };
 }

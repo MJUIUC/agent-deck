@@ -1,4 +1,10 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useState,
+  useCallback,
+  useRef,
+} from "react";
 import type { Thread, Message } from "@/types";
 import { useMessageStore } from "@/stores/useMessageStore";
 import { useSseStore } from "@/stores/useSseStore";
@@ -57,11 +63,20 @@ export function ChatView({ thread, onMobileMenuOpen }: ChatViewProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [thread.id]);
 
-  const { containerRef } = useAutoScroll([
-    thread.id,
-    messages.length,
-    streamingContent,
-  ]);
+  const { containerRef } = useAutoScroll([messages.length, streamingContent]);
+
+  // Sentinel ref — a zero-size div pinned to the bottom of the message list.
+  // Using a ref callback means React calls it synchronously when the element
+  // is added to the DOM, at which point scrollIntoView is guaranteed to work.
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Scroll to the sentinel on every render. ChatView never unmounts when
+  // switching threads — it just receives a new thread prop — so there is no
+  // reliable dep list that captures every case. Running on every render is
+  // cheap and guarantees the view always opens at the bottom.
+  useLayoutEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "instant" });
+  });
 
   const visibleMessages = messages.filter((m) => m.visibility !== "hidden");
   const grouped = groupByDate(visibleMessages);
@@ -140,6 +155,9 @@ export function ChatView({ thread, onMobileMenuOpen }: ChatViewProps) {
                 content={streamingContent}
               />
             )}
+
+            {/* Scroll sentinel — always rendered at the bottom of the list */}
+            <div ref={bottomRef} style={{ height: 0, overflow: "hidden" }} />
           </>
         )}
 
