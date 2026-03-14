@@ -223,6 +223,7 @@ function CredentialForm({
               onChange={(e) =>
                 setCredentialType(e.target.value as CredentialType)
               }
+              disabled={isEditing}
             >
               {(
                 Object.entries(CREDENTIAL_TYPE_CONFIG) as [
@@ -235,6 +236,11 @@ function CredentialForm({
                 </option>
               ))}
             </FieldSelect>
+            {isEditing && (
+              <FieldHint>
+                Credential type cannot be changed after creation.
+              </FieldHint>
+            )}
           </div>
 
           {/* Service URL — shown for all types */}
