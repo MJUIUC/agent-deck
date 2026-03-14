@@ -59,11 +59,16 @@ export function ChatView({
   const streamingContent = phase.status === "streaming" ? phase.content : "";
   const messageError = phase.status === "error" ? phase.message : null;
 
-  // Show the loading/empty state when there are no messages and we are idle.
-  // This replaces the old isLoadingMessages flag and is the key fix: streaming
-  // and "loading" are now mutually exclusive by construction — they are
+  const visibleMessages = messages.filter((m) => m.visibility !== "hidden");
+
+  // Show the loading/empty state when there are no visible messages and we are
+  // idle. Using visibleMessages (not messages) means threads whose only
+  // messages are hidden (system prompts, tool activity, etc.) don't get stuck
+  // showing the empty-thread prompt and blocking the StreamingBubble.
+  // streaming and "loading" are mutually exclusive by construction — they are
   // different values of the same field.
-  const isLoadingMessages = messages.length === 0 && phase.status === "idle";
+  const isLoadingMessages =
+    visibleMessages.length === 0 && phase.status === "idle";
 
   const connectThread = useSseStore((s) => s.connectThread);
   const disconnectThread = useSseStore((s) => s.disconnectThread);
@@ -97,7 +102,6 @@ export function ChatView({
     bottomRef.current?.scrollIntoView({ behavior: "instant" });
   });
 
-  const visibleMessages = messages.filter((m) => m.visibility !== "hidden");
   const grouped = groupByDate(visibleMessages);
 
   const persona = thread.persona;
@@ -165,8 +169,9 @@ export function ChatView({
               </div>
             ))}
 
-            {/* Streaming bubble */}
-            {isStreaming && (
+            {/* Streaming bubble — shown as soon as the message is sent so the
+                animation appears immediately, not only after the first token */}
+            {(isSending || isStreaming) && (
               <StreamingBubble
                 personaEmoji={personaEmoji}
                 personaName={personaName}

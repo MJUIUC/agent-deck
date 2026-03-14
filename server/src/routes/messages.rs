@@ -10,8 +10,7 @@ use serde_json::json;
 use crate::{
     error::{AppError, AppResult},
     models::message::{CreateMessage, Message, MessageResponse},
-    routes::AppState,
-    services::agent,
+    routes::{AgentJob, AppState},
 };
 
 /// Helper: get the single user id from the DB.
@@ -183,26 +182,16 @@ pub async fn send(
         .execute(&state.pool)
         .await?;
 
-    let run_state = state.clone();
-    let run_thread_id = thread_id.clone();
-    let run_content = payload.content.clone();
-    tokio::spawn(async move {
-        // Yield once so the Tokio runtime can schedule the HTTP response flush
-        // before this task does any work. This is a best-effort yield — it gives
-        // the runtime a scheduling opportunity without adding a fixed delay or
-        // requiring a round-trip signal. The wait_for_subscriber below provides
-        // the stronger guarantee that the SSE connection is open before streaming.
-        tokio::task::yield_now().await;
-
-        // Wait up to 3 seconds for the client SSE connection to be established.
-        // If no subscriber appears in time we proceed anyway — the message_complete
-        // event and DB persistence still happen, so the user sees the response on
-        // the next load or manual refresh.
-        run_state
-            .wait_for_subscriber(&run_thread_id, std::time::Duration::from_secs(3))
-            .await;
-        agent::run(run_state, run_thread_id, run_content).await;
-    });
+    // Enqueue the agent job and return immediately. The background worker
+    // in mod.rs drains this channel independently of the HTTP response
+    // lifecycle, so the 201 is never held up by agent execution.
+    let _ = state
+        .agent_tx
+        .send(AgentJob {
+            thread_id: thread_id.clone(),
+            content: payload.content.clone(),
+        })
+        .await;
 
     let response = MessageResponse::from(message);
 

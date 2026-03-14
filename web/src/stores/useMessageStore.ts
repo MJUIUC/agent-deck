@@ -1,4 +1,6 @@
-import { create } from "zustand";
+import { create, type StateCreator } from "zustand";
+import { cancelTokenBuffer } from "./tokenBuffer";
+import zukeeper from "zukeeper";
 import { messagesApi } from "@/api/client";
 import type {
   Message,
@@ -49,7 +51,7 @@ interface MessageStore {
 
 // ── Store ─────────────────────────────────────────────────────────────────────
 
-export const useMessageStore = create<MessageStore>((set, get) => ({
+const storeCreator: StateCreator<MessageStore> = (set, get) => ({
   threads: {},
 
   // ── loadMessages ────────────────────────────────────────────────────────────
@@ -111,7 +113,12 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       const res = await messagesApi.send(threadId, content);
       const realUserMsg = res.data;
 
-      // Replace optimistic placeholder with real server message
+      // Replace optimistic placeholder with real server message.
+      // Do NOT touch phase here — let SSE drive phase transitions:
+      //   sending → streaming  (first appendToken)
+      //   streaming → idle     (finalizeStream on message_complete)
+      // Forcing phase to idle here would kill the streaming bubble in the
+      // window between POST resolve and the first token arriving over SSE.
       set((state) => {
         const thread = getThread(state.threads, threadId);
         const messages = thread.messages.map((m) =>
@@ -164,7 +171,6 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
 
   appendToken: (threadId, token) => {
     if (!token) return;
-
     set((state) => {
       const thread = getThread(state.threads, threadId);
       const currentContent =
@@ -183,6 +189,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   // and is idempotent (safe to call twice).
 
   finalizeStream: (threadId, message) => {
+    cancelTokenBuffer(threadId);
     set((state) => {
       const thread = getThread(state.threads, threadId);
       const existing = thread.messages.filter(
@@ -270,4 +277,6 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       };
     });
   },
-}));
+});
+
+export const useMessageStore = create<MessageStore>(zukeeper(storeCreator));

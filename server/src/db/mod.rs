@@ -41,10 +41,17 @@ pub async fn init(database_url: &str) -> Result<SqlitePool> {
         !exists
     };
 
-    let connect_options = SqliteConnectOptions::from_str(db_path)?.create_if_missing(true);
+    let connect_options = SqliteConnectOptions::from_str(db_path)?
+        .create_if_missing(true)
+        // Serialize all SQLite access through a single connection. This app is
+        // single-user and local — there is no benefit to multiple connections,
+        // and multiple writers racing on WAL was causing the HTTP handler's
+        // INSERT to block until the agent's writes finished, making the POST
+        // response appear to hang until the agent completed.
+        .serialized(true);
 
     let pool = SqlitePoolOptions::new()
-        .max_connections(5)
+        .max_connections(1)
         .connect_with(connect_options)
         .await?;
 
