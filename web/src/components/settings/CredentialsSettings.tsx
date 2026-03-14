@@ -616,7 +616,7 @@ function CredentialRow({ credential, onEdit, onDelete }: CredentialRowProps) {
       onMouseLeave={() => setHovered(false)}
       style={{
         display: "grid",
-        gridTemplateColumns: "1fr 130px 90px 80px",
+        gridTemplateColumns: "1fr 160px 80px 90px",
         alignItems: "center",
         gap: 12,
         padding: "12px 14px",
@@ -659,12 +659,9 @@ function CredentialRow({ credential, onEdit, onDelete }: CredentialRowProps) {
         <span
           style={{
             display: "inline-block",
-            background: "var(--bg-elevated)",
-            border: "1px solid var(--border-subtle)",
-            borderRadius: 5,
-            padding: "2px 8px",
             fontSize: 11,
             color: "var(--text-secondary)",
+            whiteSpace: "nowrap",
           }}
         >
           {CREDENTIAL_TYPE_CONFIG[credential.credential_type as CredentialType]
@@ -702,18 +699,56 @@ function CredentialRow({ credential, onEdit, onDelete }: CredentialRowProps) {
             position: "absolute",
             right: 14,
             display: "flex",
-            gap: 6,
-            background: "var(--bg-tertiary)",
-            paddingLeft: 8,
+            alignItems: "center",
+            gap: 4,
           }}
         >
-          <Btn sm variant="ghost" onClick={onEdit} style={{ opacity: 0.7 }}>
+          <button
+            type="button"
+            onClick={onEdit}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 5,
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              color: "var(--text-tertiary)",
+              fontSize: 12,
+              padding: "4px 8px",
+              borderRadius: 6,
+              fontFamily: "inherit",
+            }}
+            onMouseEnter={(e) =>
+              (e.currentTarget.style.color = "var(--text-primary)")
+            }
+            onMouseLeave={(e) =>
+              (e.currentTarget.style.color = "var(--text-tertiary)")
+            }
+          >
             <Pencil size={11} />
             Edit
-          </Btn>
-          <Btn sm variant="danger" onClick={onDelete} style={{ opacity: 0.7 }}>
-            <Trash2 size={11} />
-          </Btn>
+          </button>
+          <button
+            type="button"
+            onClick={onDelete}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              color: "var(--text-tertiary)",
+              padding: "4px 6px",
+              borderRadius: 6,
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = "var(--error)")}
+            onMouseLeave={(e) =>
+              (e.currentTarget.style.color = "var(--text-tertiary)")
+            }
+          >
+            <Trash2 size={13} />
+          </button>
         </div>
       )}
     </div>
@@ -746,7 +781,7 @@ function CredentialTable({
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "1fr 130px 90px 80px",
+          gridTemplateColumns: "1fr 160px 80px 90px",
           gap: 12,
           padding: "8px 14px",
           borderBottom: "1px solid var(--border-subtle)",
