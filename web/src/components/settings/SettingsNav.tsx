@@ -154,6 +154,12 @@ export function SettingsSidebar({
         onClick={() => onTabChange("providers")}
       />
       <NavItem
+        icon="🔑"
+        label="Credentials"
+        active={tab === "credentials"}
+        onClick={() => onTabChange("credentials")}
+      />
+      <NavItem
         icon="🎭"
         label="Personas"
         active={tab === "personas"}
