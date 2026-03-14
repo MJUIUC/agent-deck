@@ -252,6 +252,42 @@ function CredentialForm({ editing, onSaved, onCancel }: CredentialFormProps) {
             </div>
           )}
 
+          {/* Optional metadata */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <FieldLabel>Service URL (optional)</FieldLabel>
+            <FieldInput
+              mono
+              placeholder="https://github.com"
+              value={serviceUrl}
+              onChange={(e) => setServiceUrl(e.target.value)}
+            />
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <FieldLabel>Username (optional)</FieldLabel>
+            <FieldInput
+              placeholder="johndoe"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+            />
+          </div>
+
+          <div
+            style={{
+              gridColumn: "1 / -1",
+              display: "flex",
+              flexDirection: "column",
+              gap: 6,
+            }}
+          >
+            <FieldLabel>Email (optional)</FieldLabel>
+            <FieldInput
+              placeholder="john@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+          </div>
+
           {/* Machine-readable key — only on create */}
           {!isEditing && (
             <div
@@ -281,7 +317,7 @@ function CredentialForm({ editing, onSaved, onCancel }: CredentialFormProps) {
             </div>
           )}
 
-          {/* Primary secret */}
+          {/* Primary API key */}
           <div
             style={{
               gridColumn: "1 / -1",
@@ -324,11 +360,11 @@ function CredentialForm({ editing, onSaved, onCancel }: CredentialFormProps) {
               </button>
             </div>
             <FieldHint>
-              {`Your ${CREDENTIAL_TYPE_LABELS[credentialType]} will be encrypted with AES-256-GCM the moment it's saved.`}
+              Encrypted with AES-256-GCM the moment it's saved.
             </FieldHint>
           </div>
 
-          {/* Password (key_secret_pair only) */}
+          {/* API Secret — key_secret_pair only */}
           {isKeySecretPair && (
             <div
               style={{
@@ -375,42 +411,6 @@ function CredentialForm({ editing, onSaved, onCancel }: CredentialFormProps) {
               </div>
             </div>
           )}
-
-          {/* Optional metadata — collapsed into a 2-col row */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <FieldLabel>Service URL (optional)</FieldLabel>
-            <FieldInput
-              mono
-              placeholder="https://github.com"
-              value={serviceUrl}
-              onChange={(e) => setServiceUrl(e.target.value)}
-            />
-          </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <FieldLabel>Username (optional)</FieldLabel>
-            <FieldInput
-              placeholder="johndoe"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-            />
-          </div>
-
-          <div
-            style={{
-              gridColumn: "1 / -1",
-              display: "flex",
-              flexDirection: "column",
-              gap: 6,
-            }}
-          >
-            <FieldLabel>Email (optional)</FieldLabel>
-            <FieldInput
-              placeholder="john@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-          </div>
         </div>
 
         {error && (
