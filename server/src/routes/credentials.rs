@@ -130,7 +130,7 @@ mod tests {
         let token = auth_service::get_or_create_auth_token(&pool)
             .await
             .expect("token");
-        let app = build_router(pool, config).await.expect("router");
+        let (app, _mcp) = build_router(pool, config).await.expect("router");
         (app, token)
     }
 

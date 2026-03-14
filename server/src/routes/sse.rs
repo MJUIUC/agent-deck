@@ -223,6 +223,7 @@ pub async fn global_stream(State(state): State<AppState>) -> AppResult<impl Into
                     GlobalEvent::ThreadUpdated { .. } => "thread_updated",
                     GlobalEvent::RoutineFired { .. } => "routine_fired",
                     GlobalEvent::TitleUpdated { .. } => "title_updated",
+                    GlobalEvent::McpStatusChanged { .. } => "mcp_status_changed",
                 };
                 let data =
                     serde_json::to_string(&global_event).unwrap_or_else(|_| "{}".to_string());
@@ -292,6 +293,12 @@ mod tests {
         let (global_tx, _) = broadcast::channel(64);
         let (agent_tx, _agent_rx) = tokio::sync::mpsc::channel(64);
         let pool = sqlx::SqlitePool::connect_lazy("sqlite::memory:").unwrap();
+        let (mcp_tx, _) = tokio::sync::broadcast::channel(1);
+        let mcp = crate::services::mcp::McpConnectionManager::new(
+            pool.clone(),
+            "test-master-key".to_string(),
+            mcp_tx,
+        );
         AppState {
             pool,
             config: crate::config::Config {
@@ -306,6 +313,7 @@ mod tests {
             thread_senders: Arc::new(Mutex::new(HashMap::new())),
             agent_tx,
             copilot: None,
+            mcp,
         }
     }
 

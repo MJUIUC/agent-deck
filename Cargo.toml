@@ -32,3 +32,4 @@ axum-extra = { version = "0.9", features = ["cookie"] }
 futures = "0.3"
 tokio-stream = { version = "0.1", features = ["sync"] }
 async-trait = "0.1"
+dashmap = "6"

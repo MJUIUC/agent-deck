@@ -83,6 +83,15 @@ pub enum GlobalEvent {
     /// reply. Emitted by `agent::run_inner` so the client sidebar updates
     /// without a page reload or a second HTTP call.
     TitleUpdated { thread_id: String, title: String },
+    /// An MCP server's connection status changed.  Emitted by the
+    /// `McpConnectionManager` whenever a server transitions between
+    /// inactive / connecting / connected / error states so the UI can update
+    /// status badges in real time without polling.
+    McpStatusChanged {
+        mcp_server_id: String,
+        status: String,
+        reason: Option<String>,
+    },
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────

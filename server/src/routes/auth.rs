@@ -161,7 +161,7 @@ mod tests {
             fcm_service_account_json: None,
         };
 
-        let app = crate::routes::build_router(pool, config)
+        let (app, _mcp) = crate::routes::build_router(pool, config)
             .await
             .expect("router");
 
@@ -211,7 +211,7 @@ mod tests {
             fcm_service_account_json: None,
         };
 
-        let app = crate::routes::build_router(pool, config)
+        let (app, _mcp) = crate::routes::build_router(pool, config)
             .await
             .expect("router");
 
@@ -245,7 +245,7 @@ mod tests {
             fcm_service_account_json: None,
         };
 
-        let app = crate::routes::build_router(pool, config)
+        let (app, _mcp) = crate::routes::build_router(pool, config)
             .await
             .expect("router");
 

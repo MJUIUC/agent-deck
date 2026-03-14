@@ -18,6 +18,8 @@ use crate::config::Config;
 use crate::error::AppError;
 use crate::services::auth as auth_service;
 use crate::services::copilot::{CopilotApiService, GlobalEvent};
+use crate::services::credentials as credentials_service;
+use crate::services::mcp::McpConnectionManager;
 
 pub mod auth;
 pub mod config;
@@ -67,6 +69,9 @@ pub struct AppState {
     /// Handle to the copilot-api side-car service.  `None` when the service
     /// could not be started (e.g. `bun` not on PATH).
     pub copilot: Option<CopilotApiService>,
+    /// MCP connection pool.  Manages all local and remote MCP server connections,
+    /// tool caching, and status broadcasting.
+    pub mcp: McpConnectionManager,
 }
 
 /// Build the main application router.
@@ -92,7 +97,10 @@ fn start_agent_worker(mut rx: mpsc::Receiver<AgentJob>, state: AppState) {
     });
 }
 
-pub async fn build_router(pool: SqlitePool, config: Config) -> anyhow::Result<Router> {
+pub async fn build_router(
+    pool: SqlitePool,
+    config: Config,
+) -> anyhow::Result<(Router, McpConnectionManager)> {
     // Initialize auth token and machine secret (generates on first run)
     let auth_token = auth_service::get_or_create_auth_token(&pool).await?;
     let machine_secret = auth_service::get_or_create_machine_secret(&pool).await?;
@@ -116,6 +124,12 @@ pub async fn build_router(pool: SqlitePool, config: Config) -> anyhow::Result<Ro
     let copilot = CopilotApiService::new(global_tx.clone());
     let copilot_handle = copilot.clone();
 
+    // ── MCP connection manager ────────────────────────────────────────────────
+    // The master key is needed to decrypt credential secrets injected into MCP
+    // server env vars and auth headers.
+    let master_key = credentials_service::get_or_create_master_key(&pool).await?;
+    let mcp = McpConnectionManager::new(pool.clone(), master_key, global_tx.clone());
+
     // Agent work queue — capacity of 64 is generous; in practice there will
     // rarely be more than a handful of concurrent agent runs.
     let (agent_tx, agent_rx) = mpsc::channel::<AgentJob>(64);
@@ -129,6 +143,7 @@ pub async fn build_router(pool: SqlitePool, config: Config) -> anyhow::Result<Ro
         thread_senders: Arc::new(Mutex::new(HashMap::new())),
         agent_tx,
         copilot: Some(copilot_handle),
+        mcp: mcp.clone(),
     };
 
     // Start the agent worker before the router starts accepting requests.
@@ -138,6 +153,10 @@ pub async fn build_router(pool: SqlitePool, config: Config) -> anyhow::Result<Ro
     // This is non-blocking — the server starts immediately regardless of whether
     // copilot-api becomes available.
     copilot.start();
+
+    // Connect all enabled MCP servers.  Each connection runs in its own task
+    // with backoff restart, so this returns immediately.
+    mcp.start().await;
 
     // Public API routes (no auth required)
     let public_api = Router::new()
@@ -335,7 +354,7 @@ pub async fn build_router(pool: SqlitePool, config: Config) -> anyhow::Result<Ro
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
-    Ok(app)
+    Ok((app, mcp))
 }
 
 /// Auth middleware: validates Bearer token or session cookie.
@@ -518,7 +537,7 @@ mod tests {
             .expect("token");
         // build_router starts copilot supervision — that's fine in tests,
         // it will fail to spawn bun (not installed in CI) and back off quietly.
-        let app = build_router(pool, config).await.expect("router");
+        let (app, _mcp) = build_router(pool, config).await.expect("router");
         (app, token)
     }
 
