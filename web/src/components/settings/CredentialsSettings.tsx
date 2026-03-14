@@ -616,7 +616,7 @@ function CredentialRow({ credential, onEdit, onDelete }: CredentialRowProps) {
       onMouseLeave={() => setHovered(false)}
       style={{
         display: "grid",
-        gridTemplateColumns: "1fr 100px 130px 90px 80px",
+        gridTemplateColumns: "1fr 130px 90px 80px",
         alignItems: "center",
         gap: 12,
         padding: "12px 14px",
@@ -893,12 +893,6 @@ export function CredentialsSettings() {
             servers and providers reference credentials by name.
           </div>
         </div>
-        {!showForm && credentials.length > 0 && (
-          <Btn variant="primary" onClick={openAdd}>
-            <Plus size={13} />
-            Add Credential
-          </Btn>
-        )}
       </div>
 
       {/* Add / edit form */}
