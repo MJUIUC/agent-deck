@@ -122,6 +122,9 @@ mod tests {
 
         let config = Config {
             port: 7474,
+            data_dir: std::path::PathBuf::from("/tmp/test-deck"),
+            mcp_dir: std::path::PathBuf::from("/tmp/test-deck/mcp"),
+            personas_dir: std::path::PathBuf::from("/tmp/test-deck/personas"),
             database_url: "sqlite::memory:".to_string(),
             public_dir: "./public".to_string(),
             fcm_service_account_json: None,

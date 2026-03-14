@@ -115,22 +115,32 @@ function ToolInspector({
   const [loading, setLoading] = useState(false);
   const [fetched, setFetched] = useState(false);
 
-  const handleToggle = useCallback(async () => {
-    const next = !open;
-    setOpen(next);
-    if (next && !fetched) {
+  // Fetch tools on mount so the count is visible immediately.
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchTools() {
       setLoading(true);
       try {
         const res = await mcpServersApi.listTools(serverId);
-        setTools(res.data);
+        if (!cancelled) setTools(res.data);
       } catch {
-        setTools([]);
+        if (!cancelled) setTools([]);
       } finally {
-        setLoading(false);
-        setFetched(true);
+        if (!cancelled) {
+          setLoading(false);
+          setFetched(true);
+        }
       }
     }
-  }, [open, fetched, serverId]);
+    fetchTools();
+    return () => {
+      cancelled = true;
+    };
+  }, [serverId]);
+
+  const handleToggle = useCallback(() => {
+    setOpen((prev) => !prev);
+  }, []);
 
   return (
     <div style={{ marginTop: 8 }}>

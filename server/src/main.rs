@@ -9,7 +9,7 @@ mod services;
 
 use anyhow::Result;
 use std::net::SocketAddr;
-use tracing::info;
+use tracing::{info, warn};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -27,7 +27,38 @@ async fn main() -> Result<()> {
     info!("Starting agent-deck server");
 
     // Load config
-    let config = config::Config::from_env()?;
+    let mut config = config::Config::from_env()?;
+
+    // ── Create data directory tree ────────────────────────────────────────────
+    // Ensure all required directories exist before doing anything else.
+    let db_dir = config.data_dir.join(".database");
+    tokio::fs::create_dir_all(&db_dir).await?;
+    tokio::fs::create_dir_all(&config.mcp_dir).await?;
+    tokio::fs::create_dir_all(&config.personas_dir).await?;
+
+    info!("data_dir: {}", config.data_dir.display());
+
+    // ── Dev-path migration hint ───────────────────────────────────────────────
+    // If the old default SQLite file exists at ./data/agent-deck.db and the new
+    // path does not yet exist, warn the user and temporarily override the URL so
+    // existing dev data is not lost without an explicit migration step.
+    {
+        let legacy_path = std::path::Path::new("./data/agent-deck.db");
+        let new_db_path = config.data_dir.join(".database").join("agent-deck.db");
+
+        if legacy_path.exists() && !new_db_path.exists() {
+            warn!(
+                "mcp: legacy database found at {} but new path {} does not exist yet. \
+                 Using legacy path for this run. Copy or move the file to migrate: \
+                 cp {} {}",
+                legacy_path.display(),
+                new_db_path.display(),
+                legacy_path.display(),
+                new_db_path.display(),
+            );
+            config.database_url = format!("sqlite:{}", legacy_path.display());
+        }
+    }
 
     // Initialize database
     let pool = db::init(&config.database_url).await?;

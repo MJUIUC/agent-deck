@@ -11,6 +11,7 @@ use crate::{
     error::{AppError, AppResult},
     models::agent_persona::{AgentPersona, CreateAgentPersona, UpdateAgentPersona},
     routes::AppState,
+    services::personas as personas_service,
 };
 
 /// Helper: get the single user id from the DB.
@@ -103,6 +104,22 @@ pub async fn create(
     .execute(&state.pool)
     .await?;
 
+    // Mirror to filesystem (best-effort).
+    if let Err(e) =
+        personas_service::write_persona_files(&state.config.personas_dir, &persona).await
+    {
+        tracing::warn!(
+            "personas: failed to write persona files for '{}': {}",
+            persona.id,
+            e
+        );
+    }
+    if let Err(e) =
+        personas_service::update_root_index(&state.config.personas_dir, &state.pool).await
+    {
+        tracing::warn!("personas: failed to update root index after create: {}", e);
+    }
+
     Ok((StatusCode::CREATED, Json(json!({ "data": persona }))))
 }
 
@@ -187,6 +204,22 @@ pub async fn update(
         updated_at: now,
     };
 
+    // Mirror to filesystem (best-effort).
+    if let Err(e) =
+        personas_service::write_persona_files(&state.config.personas_dir, &updated).await
+    {
+        tracing::warn!(
+            "personas: failed to write persona files for '{}': {}",
+            updated.id,
+            e
+        );
+    }
+    if let Err(e) =
+        personas_service::update_root_index(&state.config.personas_dir, &state.pool).await
+    {
+        tracing::warn!("personas: failed to update root index after update: {}", e);
+    }
+
     Ok((StatusCode::OK, Json(json!({ "data": updated }))))
 }
 
@@ -205,6 +238,16 @@ pub async fn delete(
 
     if result.rows_affected() == 0 {
         return Err(AppError::NotFound(format!("Persona '{}' not found", id)));
+    }
+
+    // Mirror deletion to filesystem (best-effort).
+    if let Err(e) = personas_service::delete_persona_dir(&state.config.personas_dir, &id).await {
+        tracing::warn!("personas: failed to delete persona dir for '{}': {}", id, e);
+    }
+    if let Err(e) =
+        personas_service::update_root_index(&state.config.personas_dir, &state.pool).await
+    {
+        tracing::warn!("personas: failed to update root index after delete: {}", e);
     }
 
     Ok((StatusCode::OK, Json(json!({ "data": { "deleted": true } }))))
@@ -281,14 +324,15 @@ pub async fn upload_avatar(
         ));
     }
 
-    // Ensure the avatars directory exists
-    let avatar_dir = "data/avatars";
-    tokio::fs::create_dir_all(avatar_dir)
+    // TODO: avatar UI
+    // Ensure the persona subdirectory exists under personas_dir.
+    let avatar_dir = state.config.personas_dir.join(&id);
+    tokio::fs::create_dir_all(&avatar_dir)
         .await
         .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to create avatar dir: {}", e)))?;
 
-    let filename = format!("{}.{}", id, ext);
-    let file_path = format!("{}/{}", avatar_dir, filename);
+    let filename = format!("avatar.{}", ext);
+    let file_path = avatar_dir.join(&filename);
 
     // Write the file
     let mut file = tokio::fs::File::create(&file_path)
@@ -298,6 +342,8 @@ pub async fn upload_avatar(
         .await
         .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to write avatar file: {}", e)))?;
 
+    let file_path_str = file_path.to_string_lossy().to_string();
+
     // Update the persona's avatar_path
     let now = chrono::Utc::now()
         .format("%Y-%m-%dT%H:%M:%S%.3fZ")
@@ -306,7 +352,7 @@ pub async fn upload_avatar(
     sqlx::query(
         "UPDATE agent_personas SET avatar_path = ?, updated_at = ? WHERE id = ? AND user_id = ?",
     )
-    .bind(&file_path)
+    .bind(&file_path_str)
     .bind(&now)
     .bind(&id)
     .bind(&user_id)
@@ -314,15 +360,15 @@ pub async fn upload_avatar(
     .await?;
 
     // Return a URL the frontend can use to display the avatar.
-    // The Rust server serves static files; avatars are accessible under /data/avatars/.
-    let avatar_url = format!("/data/avatars/{}", filename);
+    // The avatar is stored under the personas data directory.
+    let avatar_url = format!("/api/personas/{}/avatar", id);
 
     Ok((
         StatusCode::OK,
         Json(json!({
             "data": {
                 "avatar_url": avatar_url,
-                "avatar_path": file_path
+                "avatar_path": file_path_str
             }
         })),
     ))

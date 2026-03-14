@@ -111,6 +111,11 @@ pub async fn create_mcp(
     .execute(&state.pool)
     .await?;
 
+    // Mirror config to filesystem (best-effort).
+    if let Err(e) = state.mcp.write_config_file(&server).await {
+        tracing::warn!("mcp: failed to write config file: {}", e);
+    }
+
     // Connect the newly created server if it is enabled.
     if server.enabled {
         let mcp = state.mcp.clone();
@@ -203,6 +208,11 @@ pub async fn update_mcp(
         updated_at: now,
     };
 
+    // Mirror updated config to filesystem (best-effort).
+    if let Err(e) = state.mcp.write_config_file(&updated).await {
+        tracing::warn!("mcp: failed to write config file: {}", e);
+    }
+
     // Reconnect if anything that affects the connection changed.
     let config_changed = payload.config.is_some();
     let tag_changed = payload.tag.is_some();
@@ -263,6 +273,17 @@ pub async fn delete_mcp(
 
     if result.rows_affected() == 0 {
         return Err(AppError::NotFound(format!("MCP server '{}' not found", id)));
+    }
+
+    // Remove the config directory from the filesystem (best-effort).
+    {
+        let mcp2 = state.mcp.clone();
+        let id2 = id.clone();
+        tokio::spawn(async move {
+            if let Err(e) = mcp2.delete_config_dir(&id2).await {
+                tracing::warn!("mcp: failed to delete config dir for '{}': {}", id2, e);
+            }
+        });
     }
 
     // Disconnect and remove from the connection pool.

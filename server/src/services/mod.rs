@@ -6,6 +6,7 @@ pub mod credentials;
 pub mod encryption;
 pub mod mcp;
 pub mod memory;
+pub mod personas;
 pub mod provider;
 pub mod scheduler;
 pub mod title;

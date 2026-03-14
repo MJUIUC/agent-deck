@@ -253,7 +253,7 @@ Credentials sits between Providers and Personas in the sidebar. Logical flow: Pr
 
 ---
 
-## Story 4.3a — `~/.agent-deck` Data Directory and MCP Filesystem Sync
+## Story 4.3a — `~/.agent-deck` Data Directory and MCP Filesystem Sync ✅ Complete
 
 **Branch:** `feature/phase4.3a-mcp-data-dir`
 
@@ -357,20 +357,30 @@ Avatar upload (`POST /api/personas/:id/avatar`): write to `~/.agent-deck/persona
 6. Bind and serve
 ```
 
+### What was built
+
+- **`dirs` crate** added to workspace; `config.rs` rewritten with `data_dir`, `mcp_dir`, `personas_dir` fields all derived from `AGENT_DECK_DATA_DIR` env var or `~/.agent-deck`
+- **`main.rs`** creates the full directory tree on startup; dev-path migration hint warns when `./data/agent-deck.db` exists and the new path doesn't
+- **`services/mcp.rs`** — `McpConnectionManager` gains `mcp_dir`; `startup_sync()` scans `mcp/<id>/config.json` files and upserts/disables DB rows; `write_config_file()` and `delete_config_dir()` called from API handlers; `LocalConfig` gains `working_dir` field, defaults to `mcp/<id>/` at spawn time
+- **`services/personas.rs`** — new file with `write_persona_files`, `delete_persona_dir`, `update_root_index` helpers
+- **`routes/tokens.rs`** — `create_mcp`, `update_mcp`, `delete_mcp` all mirror changes to `~/.agent-deck/mcp/`
+- **`routes/personas.rs`** — `create`, `update`, `delete` all mirror changes to `~/.agent-deck/personas/`; avatar upload writes to `personas_dir/<id>/avatar.<ext>`
+- **14 new tests** added; all 166 pass
+
 ### Testing checklist
 
-- [ ] `~/.agent-deck` directory tree created on first run
-- [ ] `AGENT_DECK_DATA_DIR` override respected
-- [ ] Dev-path migration hint logged when old DB exists
-- [ ] `startup_sync` upserts config.json files into DB
-- [ ] `startup_sync` disables DB rows whose directories are gone
-- [ ] `POST /api/mcp-servers` writes `config.json`
-- [ ] `PUT /api/mcp-servers/:id` rewrites `config.json`
-- [ ] `DELETE /api/mcp-servers/:id` removes directory
-- [ ] `LocalConfig` `working_dir` defaults to `~/.agent-deck/mcp/<id>/`
-- [ ] Persona create/update writes `meta.json` + `instructions.md`
-- [ ] Persona delete removes directory
-- [ ] Root personas `meta.json` index stays in sync
+- [x] `~/.agent-deck` directory tree created on first run
+- [x] `AGENT_DECK_DATA_DIR` override respected
+- [x] Dev-path migration hint logged when old DB exists
+- [x] `startup_sync` upserts config.json files into DB
+- [x] `startup_sync` disables DB rows whose directories are gone
+- [x] `POST /api/mcp-servers` writes `config.json`
+- [x] `PUT /api/mcp-servers/:id` rewrites `config.json`
+- [x] `DELETE /api/mcp-servers/:id` removes directory
+- [x] `LocalConfig` `working_dir` defaults to `~/.agent-deck/mcp/<id>/`
+- [x] Persona create/update writes `meta.json` + `instructions.md`
+- [x] Persona delete removes directory
+- [x] Root personas `meta.json` index stays in sync
 
 ---
 

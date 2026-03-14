@@ -128,7 +128,12 @@ pub async fn build_router(
     // The master key is needed to decrypt credential secrets injected into MCP
     // server env vars and auth headers.
     let master_key = credentials_service::get_or_create_master_key(&pool).await?;
-    let mcp = McpConnectionManager::new(pool.clone(), master_key, global_tx.clone());
+    let mcp = McpConnectionManager::new(
+        pool.clone(),
+        master_key,
+        global_tx.clone(),
+        config.mcp_dir.clone(),
+    );
 
     // Agent work queue — capacity of 64 is generous; in practice there will
     // rarely be more than a handful of concurrent agent runs.
@@ -527,6 +532,9 @@ mod tests {
 
         let config = Config {
             port: 7474,
+            data_dir: std::path::PathBuf::from("/tmp/test-deck"),
+            mcp_dir: std::path::PathBuf::from("/tmp/test-deck/mcp"),
+            personas_dir: std::path::PathBuf::from("/tmp/test-deck/personas"),
             database_url: "sqlite::memory:".to_string(),
             public_dir: "./public".to_string(),
             fcm_service_account_json: None,
