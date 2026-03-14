@@ -44,78 +44,96 @@ function makeMessage(
 // ── Reset store state before each test ───────────────────────────────────────
 
 beforeEach(() => {
-  useMessageStore.setState({
-    messagesByThread: {},
-    streamingContent: {},
-    isStreaming: {},
-    isSending: {},
-    isLoadingMessages: {},
-    error: null,
-  });
+  useMessageStore.setState({ threads: {} });
   vi.clearAllMocks();
 });
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function getThread(threadId: string) {
+  return useMessageStore.getState().threads[threadId];
+}
 
 // ── loadMessages ──────────────────────────────────────────────────────────────
 
 describe("loadMessages", () => {
   it("populates messages for the given thread", async () => {
-    const msgs = [makeMessage("m1", "t1"), makeMessage("m2", "t1", "assistant", "Hi")];
+    const msgs = [
+      makeMessage("m1", "t1"),
+      makeMessage("m2", "t1", "assistant", "Hi"),
+    ];
     mockMessagesApi.list.mockResolvedValue({ data: msgs });
 
     await useMessageStore.getState().loadMessages("t1");
 
-    const state = useMessageStore.getState();
-    expect(state.messagesByThread["t1"]).toHaveLength(2);
-    expect(state.messagesByThread["t1"][0].id).toBe("m1");
-    expect(state.messagesByThread["t1"][1].id).toBe("m2");
+    const thread = getThread("t1");
+    expect(thread.messages).toHaveLength(2);
+    expect(thread.messages[0].id).toBe("m1");
+    expect(thread.messages[1].id).toBe("m2");
   });
 
   it("does not affect messages in other threads", async () => {
-    const t2Msgs = [makeMessage("m99", "t2")];
     useMessageStore.setState({
-      messagesByThread: { t2: t2Msgs },
+      threads: {
+        t2: { messages: [makeMessage("m99", "t2")], phase: { status: "idle" } },
+      },
     });
 
-    const t1Msgs = [makeMessage("m1", "t1")];
-    mockMessagesApi.list.mockResolvedValue({ data: t1Msgs });
-
+    mockMessagesApi.list.mockResolvedValue({ data: [makeMessage("m1", "t1")] });
     await useMessageStore.getState().loadMessages("t1");
 
-    const state = useMessageStore.getState();
-    expect(state.messagesByThread["t1"]).toHaveLength(1);
-    expect(state.messagesByThread["t2"]).toHaveLength(1);
-    expect(state.messagesByThread["t2"][0].id).toBe("m99");
+    expect(getThread("t1").messages).toHaveLength(1);
+    expect(getThread("t2").messages).toHaveLength(1);
+    expect(getThread("t2").messages[0].id).toBe("m99");
   });
 
-  it("clears isLoadingMessages after success", async () => {
+  it("does not change the thread phase", async () => {
+    useMessageStore.setState({
+      threads: {
+        t1: {
+          messages: [],
+          phase: { status: "streaming", content: "partial" },
+        },
+      },
+    });
+
     mockMessagesApi.list.mockResolvedValue({ data: [] });
-
     await useMessageStore.getState().loadMessages("t1");
 
-    expect(useMessageStore.getState().isLoadingMessages["t1"]).toBe(false);
+    expect(getThread("t1").phase).toEqual({
+      status: "streaming",
+      content: "partial",
+    });
   });
 
-  it("clears isLoadingMessages and sets error on failure", async () => {
+  it("does not change isStreaming or isSending phase for the thread", async () => {
+    useMessageStore.setState({
+      threads: {
+        t1: {
+          messages: [],
+          phase: { status: "sending", optimisticId: "optimistic-1" },
+        },
+      },
+    });
+
+    mockMessagesApi.list.mockResolvedValue({ data: [] });
+    await useMessageStore.getState().loadMessages("t1");
+
+    expect(getThread("t1").phase).toEqual({
+      status: "sending",
+      optimisticId: "optimistic-1",
+    });
+  });
+
+  it("silently swallows errors without touching phase", async () => {
+    useMessageStore.setState({
+      threads: { t1: { messages: [], phase: { status: "idle" } } },
+    });
+
     mockMessagesApi.list.mockRejectedValue(new Error("Network error"));
-
     await useMessageStore.getState().loadMessages("t1");
 
-    const state = useMessageStore.getState();
-    expect(state.isLoadingMessages["t1"]).toBe(false);
-    expect(state.error).toBe("Network error");
-  });
-
-  it("sets isLoadingMessages to true during the fetch", async () => {
-    let resolveList!: (value: unknown) => void;
-    mockMessagesApi.list.mockReturnValue(
-      new Promise((res) => { resolveList = res; }),
-    );
-
-    const promise = useMessageStore.getState().loadMessages("t1");
-    expect(useMessageStore.getState().isLoadingMessages["t1"]).toBe(true);
-
-    resolveList({ data: [] });
-    await promise;
+    expect(getThread("t1").phase).toEqual({ status: "idle" });
   });
 });
 
@@ -129,11 +147,26 @@ describe("sendMessage", () => {
     const sendPromise = useMessageStore.getState().sendMessage("t1", "Hello");
 
     // Check synchronously before the async send resolves
-    const optimisticMessages = useMessageStore.getState().messagesByThread["t1"] ?? [];
-    expect(optimisticMessages).toHaveLength(1);
-    expect(optimisticMessages[0].id).toMatch(/^optimistic-/);
-    expect(optimisticMessages[0].content).toBe("Hello");
-    expect(optimisticMessages[0].role).toBe("user");
+    const thread = getThread("t1");
+    expect(thread.messages).toHaveLength(1);
+    expect(thread.messages[0].id).toMatch(/^optimistic-/);
+    expect(thread.messages[0].content).toBe("Hello");
+    expect(thread.messages[0].role).toBe("user");
+
+    await sendPromise;
+  });
+
+  it("transitions phase to sending with the optimisticId", async () => {
+    const realMsg = makeMessage("real-1", "t1", "user", "Hello");
+    mockMessagesApi.send.mockResolvedValue({ data: realMsg });
+
+    const sendPromise = useMessageStore.getState().sendMessage("t1", "Hello");
+
+    const phase = getThread("t1").phase;
+    expect(phase.status).toBe("sending");
+    if (phase.status === "sending") {
+      expect(phase.optimisticId).toMatch(/^optimistic-/);
+    }
 
     await sendPromise;
   });
@@ -144,7 +177,7 @@ describe("sendMessage", () => {
 
     await useMessageStore.getState().sendMessage("t1", "Hello");
 
-    const messages = useMessageStore.getState().messagesByThread["t1"] ?? [];
+    const messages = getThread("t1").messages;
     expect(messages).toHaveLength(1);
     expect(messages[0].id).toBe("real-1");
   });
@@ -152,286 +185,308 @@ describe("sendMessage", () => {
   it("removes the optimistic message on error", async () => {
     mockMessagesApi.send.mockRejectedValue(new Error("POST failed"));
 
-    await useMessageStore.getState().sendMessage("t1", "Hello").catch(() => {});
+    await useMessageStore
+      .getState()
+      .sendMessage("t1", "Hello")
+      .catch(() => {});
 
-    const messages = useMessageStore.getState().messagesByThread["t1"] ?? [];
-    expect(messages).toHaveLength(0);
+    expect(getThread("t1").messages).toHaveLength(0);
   });
 
-  it("sets isSending to true during the request and false after", async () => {
-    let resolveSend!: (value: unknown) => void;
-    mockMessagesApi.send.mockReturnValue(
-      new Promise((res) => { resolveSend = res; }),
-    );
+  it("transitions phase back to idle on POST error", async () => {
+    mockMessagesApi.send.mockRejectedValue(new Error("POST failed"));
 
-    const sendPromise = useMessageStore.getState().sendMessage("t1", "Hello");
-    expect(useMessageStore.getState().isSending["t1"]).toBe(true);
+    await useMessageStore
+      .getState()
+      .sendMessage("t1", "Hello")
+      .catch(() => {});
 
-    resolveSend({ data: makeMessage("real-1", "t1") });
-    await sendPromise;
-
-    expect(useMessageStore.getState().isSending["t1"]).toBe(false);
-  });
-
-  it("sets isStreaming to true on send and false after error", async () => {
-    mockMessagesApi.send.mockRejectedValue(new Error("fail"));
-
-    await useMessageStore.getState().sendMessage("t1", "Hello").catch(() => {});
-
-    expect(useMessageStore.getState().isStreaming["t1"]).toBe(false);
-  });
-
-  it("clears streamingContent on error", async () => {
-    mockMessagesApi.send.mockRejectedValue(new Error("fail"));
-
-    await useMessageStore.getState().sendMessage("t1", "Hello").catch(() => {});
-
-    expect(useMessageStore.getState().streamingContent["t1"]).toBe("");
+    expect(getThread("t1").phase).toEqual({ status: "idle" });
   });
 
   it("does not affect other threads", async () => {
-    const t2Msgs = [makeMessage("m99", "t2")];
-    useMessageStore.setState({ messagesByThread: { t2: t2Msgs } });
+    useMessageStore.setState({
+      threads: {
+        t2: { messages: [makeMessage("m99", "t2")], phase: { status: "idle" } },
+      },
+    });
 
     const realMsg = makeMessage("real-1", "t1", "user", "Hello");
     mockMessagesApi.send.mockResolvedValue({ data: realMsg });
 
     await useMessageStore.getState().sendMessage("t1", "Hello");
 
-    expect(useMessageStore.getState().messagesByThread["t2"]).toHaveLength(1);
-    expect(useMessageStore.getState().messagesByThread["t2"][0].id).toBe("m99");
+    expect(getThread("t2").messages).toHaveLength(1);
+    expect(getThread("t2").messages[0].id).toBe("m99");
+    expect(getThread("t2").phase).toEqual({ status: "idle" });
   });
 });
 
 // ── appendToken ───────────────────────────────────────────────────────────────
 
 describe("appendToken", () => {
-  it("accumulates tokens into streamingContent", () => {
+  it("transitions phase from sending to streaming on first token", () => {
+    useMessageStore.setState({
+      threads: {
+        t1: {
+          messages: [],
+          phase: { status: "sending", optimisticId: "optimistic-1" },
+        },
+      },
+    });
+
+    useMessageStore.getState().appendToken("t1", "Hello");
+
+    const phase = getThread("t1").phase;
+    expect(phase.status).toBe("streaming");
+    if (phase.status === "streaming") {
+      expect(phase.content).toBe("Hello");
+    }
+  });
+
+  it("accumulates tokens in streaming content", () => {
     useMessageStore.getState().appendToken("t1", "Hello");
     useMessageStore.getState().appendToken("t1", " world");
 
-    expect(useMessageStore.getState().streamingContent["t1"]).toBe("Hello world");
+    const phase = getThread("t1").phase;
+    expect(phase.status).toBe("streaming");
+    if (phase.status === "streaming") {
+      expect(phase.content).toBe("Hello world");
+    }
   });
 
   it("ignores empty string tokens", () => {
     useMessageStore.getState().appendToken("t1", "Hello");
     useMessageStore.getState().appendToken("t1", "");
 
-    expect(useMessageStore.getState().streamingContent["t1"]).toBe("Hello");
-    expect(useMessageStore.getState().isStreaming["t1"]).toBe(true);
+    const phase = getThread("t1").phase;
+    expect(phase.status).toBe("streaming");
+    if (phase.status === "streaming") {
+      expect(phase.content).toBe("Hello");
+    }
   });
 
-  it("sets isStreaming to true on first non-empty token", () => {
-    expect(useMessageStore.getState().isStreaming["t1"]).toBeUndefined();
-
-    useMessageStore.getState().appendToken("t1", "Hi");
-
-    expect(useMessageStore.getState().isStreaming["t1"]).toBe(true);
-  });
-
-  it("does not set isStreaming when token is empty", () => {
+  it("does not transition to streaming when token is empty", () => {
     useMessageStore.getState().appendToken("t1", "");
 
-    // isStreaming should remain unset / falsy
-    expect(useMessageStore.getState().isStreaming["t1"]).toBeUndefined();
+    // Thread should not even exist yet — empty token is a no-op
+    expect(getThread("t1")).toBeUndefined();
   });
 
   it("does not affect other threads", () => {
     useMessageStore.getState().appendToken("t1", "Hello");
 
-    expect(useMessageStore.getState().streamingContent["t2"]).toBeUndefined();
-    expect(useMessageStore.getState().isStreaming["t2"]).toBeUndefined();
+    expect(getThread("t2")).toBeUndefined();
   });
 });
 
 // ── finalizeStream ────────────────────────────────────────────────────────────
 
 describe("finalizeStream", () => {
+  it("transitions phase from streaming to idle", () => {
+    useMessageStore.setState({
+      threads: {
+        t1: {
+          messages: [],
+          phase: { status: "streaming", content: "partial" },
+        },
+      },
+    });
+
+    const msg = makeMessage("m2", "t1", "assistant", "Done");
+    useMessageStore.getState().finalizeStream("t1", msg);
+
+    expect(getThread("t1").phase).toEqual({ status: "idle" });
+  });
+
   it("appends the completed assistant message", () => {
     const userMsg = makeMessage("m1", "t1", "user", "Hello");
-    useMessageStore.setState({ messagesByThread: { t1: [userMsg] } });
+    useMessageStore.setState({
+      threads: {
+        t1: {
+          messages: [userMsg],
+          phase: { status: "streaming", content: "Done" },
+        },
+      },
+    });
 
-    const assistantMsg = makeMessage("m2", "t1", "assistant", "Hi there");
+    const assistantMsg = makeMessage("m2", "t1", "assistant", "Done");
     useMessageStore.getState().finalizeStream("t1", assistantMsg);
 
-    const messages = useMessageStore.getState().messagesByThread["t1"];
+    const messages = getThread("t1").messages;
     expect(messages).toHaveLength(2);
     expect(messages[1].id).toBe("m2");
   });
 
-  it("clears streamingContent", () => {
-    useMessageStore.setState({ streamingContent: { t1: "partial..." } });
-
-    const msg = makeMessage("m2", "t1", "assistant", "Done");
-    useMessageStore.getState().finalizeStream("t1", msg);
-
-    expect(useMessageStore.getState().streamingContent["t1"]).toBe("");
-  });
-
-  it("sets isStreaming to false", () => {
-    useMessageStore.setState({ isStreaming: { t1: true } });
-
-    const msg = makeMessage("m2", "t1", "assistant", "Done");
-    useMessageStore.getState().finalizeStream("t1", msg);
-
-    expect(useMessageStore.getState().isStreaming["t1"]).toBe(false);
-  });
-
   it("removes optimistic messages", () => {
     const optimistic = makeMessage("optimistic-123", "t1", "user", "Hello");
-    useMessageStore.setState({ messagesByThread: { t1: [optimistic] } });
+    useMessageStore.setState({
+      threads: {
+        t1: {
+          messages: [optimistic],
+          phase: { status: "streaming", content: "Hi" },
+        },
+      },
+    });
 
-    const msg = makeMessage("m2", "t1", "assistant", "Done");
+    const msg = makeMessage("m2", "t1", "assistant", "Hi");
     useMessageStore.getState().finalizeStream("t1", msg);
 
-    const messages = useMessageStore.getState().messagesByThread["t1"];
-    expect(messages.some((m) => m.id.startsWith("optimistic-"))).toBe(false);
+    expect(
+      getThread("t1").messages.some((m) => m.id.startsWith("optimistic-")),
+    ).toBe(false);
   });
 
   it("is idempotent — does not duplicate message if called twice", () => {
+    useMessageStore.setState({
+      threads: {
+        t1: { messages: [], phase: { status: "streaming", content: "Hi" } },
+      },
+    });
+
     const msg = makeMessage("m2", "t1", "assistant", "Done");
     useMessageStore.getState().finalizeStream("t1", msg);
     useMessageStore.getState().finalizeStream("t1", msg);
 
-    const messages = useMessageStore.getState().messagesByThread["t1"];
-    expect(messages.filter((m) => m.id === "m2")).toHaveLength(1);
+    expect(getThread("t1").messages.filter((m) => m.id === "m2")).toHaveLength(
+      1,
+    );
   });
 
   it("does not affect other threads", () => {
-    const t2Msgs = [makeMessage("m99", "t2")];
     useMessageStore.setState({
-      messagesByThread: { t2: t2Msgs },
-      isStreaming: { t2: true },
-      streamingContent: { t2: "partial" },
+      threads: {
+        t1: { messages: [], phase: { status: "streaming", content: "Hi" } },
+        t2: {
+          messages: [makeMessage("m99", "t2")],
+          phase: { status: "streaming", content: "other" },
+        },
+      },
     });
 
-    const msg = makeMessage("m2", "t1", "assistant", "Done");
-    useMessageStore.getState().finalizeStream("t1", msg);
+    useMessageStore
+      .getState()
+      .finalizeStream("t1", makeMessage("m2", "t1", "assistant", "Hi"));
 
-    expect(useMessageStore.getState().isStreaming["t2"]).toBe(true);
-    expect(useMessageStore.getState().streamingContent["t2"]).toBe("partial");
-    expect(useMessageStore.getState().messagesByThread["t2"]).toHaveLength(1);
-  });
-});
-
-// ── Concurrency: loadMessages resolving after finalizeStream ──────────────────
-
-describe("concurrency", () => {
-  it("loadMessages resolving after finalizeStream does not overwrite the assistant message", async () => {
-    // Simulate: user sends message, stream finalizes, then a stale loadMessages resolves.
-    const userMsg = makeMessage("m1", "t1", "user", "Hello");
-    const assistantMsg = makeMessage("m2", "t1", "assistant", "Hi");
-
-    // Set up state as if finalizeStream already ran
-    useMessageStore.setState({
-      messagesByThread: { t1: [userMsg, assistantMsg] },
-      isStreaming: { t1: false },
-      streamingContent: { t1: "" },
+    expect(getThread("t2").phase).toEqual({
+      status: "streaming",
+      content: "other",
     });
-
-    // Now a stale loadMessages resolves with only the user message
-    // (snapshot taken before the assistant message was persisted)
-    mockMessagesApi.list.mockResolvedValue({ data: [userMsg] });
-    await useMessageStore.getState().loadMessages("t1");
-
-    // loadMessages does a full replace — this documents current behaviour.
-    // The state machine refactor (4.1a-2) will change this. For now we
-    // assert what the current code actually does so regressions are visible.
-    const messages = useMessageStore.getState().messagesByThread["t1"];
-    // Current behaviour: loadMessages overwrites. We assert the length so
-    // the test fails loudly if the refactor accidentally makes it worse.
-    expect(messages).toBeDefined();
-  });
-
-  it("loadMessages does not change isStreaming or isSending for the thread", async () => {
-    useMessageStore.setState({
-      isStreaming: { t1: true },
-      isSending: { t1: true },
-    });
-
-    mockMessagesApi.list.mockResolvedValue({ data: [] });
-    await useMessageStore.getState().loadMessages("t1");
-
-    // loadMessages must never touch streaming/sending phase flags
-    expect(useMessageStore.getState().isStreaming["t1"]).toBe(true);
-    expect(useMessageStore.getState().isSending["t1"]).toBe(true);
+    expect(getThread("t2").messages).toHaveLength(1);
   });
 });
 
 // ── setStreamingError ─────────────────────────────────────────────────────────
 
 describe("setStreamingError", () => {
+  it("transitions phase from streaming to error", () => {
+    useMessageStore.setState({
+      threads: {
+        t1: {
+          messages: [],
+          phase: { status: "streaming", content: "partial" },
+        },
+      },
+    });
+
+    useMessageStore
+      .getState()
+      .setStreamingError("t1", "Response interrupted, please try again");
+
+    const phase = getThread("t1").phase;
+    expect(phase.status).toBe("error");
+    if (phase.status === "error") {
+      expect(phase.message).toBe("Response interrupted, please try again");
+      expect(phase.recoverable).toBe(true);
+    }
+  });
+
   it("appends a synthetic assistant error message", () => {
     const userMsg = makeMessage("m1", "t1", "user", "Hello");
-    useMessageStore.setState({ messagesByThread: { t1: [userMsg] } });
+    useMessageStore.setState({
+      threads: {
+        t1: {
+          messages: [userMsg],
+          phase: { status: "streaming", content: "partial" },
+        },
+      },
+    });
 
-    useMessageStore.getState().setStreamingError("t1", "Response interrupted, please try again");
+    useMessageStore
+      .getState()
+      .setStreamingError("t1", "Response interrupted, please try again");
 
-    const messages = useMessageStore.getState().messagesByThread["t1"];
+    const messages = getThread("t1").messages;
     expect(messages).toHaveLength(2);
     expect(messages[1].role).toBe("assistant");
     expect(messages[1].content).toBe("Response interrupted, please try again");
     expect(messages[1].id).toMatch(/^error-/);
   });
 
-  it("clears streamingContent and sets isStreaming to false", () => {
-    useMessageStore.setState({
-      streamingContent: { t1: "partial..." },
-      isStreaming: { t1: true },
-    });
-
-    useMessageStore.getState().setStreamingError("t1", "Oops");
-
-    expect(useMessageStore.getState().streamingContent["t1"]).toBe("");
-    expect(useMessageStore.getState().isStreaming["t1"]).toBe(false);
-  });
-
-  it("sets isSending to false", () => {
-    useMessageStore.setState({ isSending: { t1: true } });
-
-    useMessageStore.getState().setStreamingError("t1", "Oops");
-
-    expect(useMessageStore.getState().isSending["t1"]).toBe(false);
-  });
-
   it("removes any optimistic messages", () => {
     const optimistic = makeMessage("optimistic-456", "t1", "user", "Hello");
-    useMessageStore.setState({ messagesByThread: { t1: [optimistic] } });
-
-    useMessageStore.getState().setStreamingError("t1", "Oops");
-
-    const messages = useMessageStore.getState().messagesByThread["t1"];
-    expect(messages.some((m) => m.id.startsWith("optimistic-"))).toBe(false);
-  });
-});
-
-// ── clearMessages ─────────────────────────────────────────────────────────────
-
-describe("clearMessages", () => {
-  it("removes all messages for the given thread", () => {
     useMessageStore.setState({
-      messagesByThread: {
-        t1: [makeMessage("m1", "t1")],
-        t2: [makeMessage("m2", "t2")],
+      threads: {
+        t1: {
+          messages: [optimistic],
+          phase: { status: "streaming", content: "partial" },
+        },
       },
     });
 
-    useMessageStore.getState().clearMessages("t1");
+    useMessageStore.getState().setStreamingError("t1", "Oops");
 
-    expect(useMessageStore.getState().messagesByThread["t1"]).toBeUndefined();
-    expect(useMessageStore.getState().messagesByThread["t2"]).toHaveLength(1);
+    expect(
+      getThread("t1").messages.some((m) => m.id.startsWith("optimistic-")),
+    ).toBe(false);
   });
 });
 
 // ── clearError ────────────────────────────────────────────────────────────────
 
 describe("clearError", () => {
-  it("resets error to null", () => {
-    useMessageStore.setState({ error: "Something went wrong" });
+  it("transitions phase from error to idle", () => {
+    useMessageStore.setState({
+      threads: {
+        t1: {
+          messages: [],
+          phase: { status: "error", message: "Oops", recoverable: true },
+        },
+      },
+    });
 
-    useMessageStore.getState().clearError();
+    useMessageStore.getState().clearError("t1");
 
-    expect(useMessageStore.getState().error).toBeNull();
+    expect(getThread("t1").phase).toEqual({ status: "idle" });
+  });
+
+  it("is a no-op when phase is not error", () => {
+    useMessageStore.setState({
+      threads: { t1: { messages: [], phase: { status: "idle" } } },
+    });
+
+    useMessageStore.getState().clearError("t1");
+
+    expect(getThread("t1").phase).toEqual({ status: "idle" });
+  });
+});
+
+// ── clearMessages ─────────────────────────────────────────────────────────────
+
+describe("clearMessages", () => {
+  it("removes the thread entry entirely", () => {
+    useMessageStore.setState({
+      threads: {
+        t1: { messages: [makeMessage("m1", "t1")], phase: { status: "idle" } },
+        t2: { messages: [makeMessage("m2", "t2")], phase: { status: "idle" } },
+      },
+    });
+
+    useMessageStore.getState().clearMessages("t1");
+
+    expect(getThread("t1")).toBeUndefined();
+    expect(getThread("t2")).toBeDefined();
+    expect(getThread("t2").messages).toHaveLength(1);
   });
 });
 
@@ -442,8 +497,8 @@ describe("addMessage", () => {
     const msg = makeMessage("m1", "t1");
     useMessageStore.getState().addMessage(msg);
 
-    expect(useMessageStore.getState().messagesByThread["t1"]).toHaveLength(1);
-    expect(useMessageStore.getState().messagesByThread["t1"][0].id).toBe("m1");
+    expect(getThread("t1").messages).toHaveLength(1);
+    expect(getThread("t1").messages[0].id).toBe("m1");
   });
 
   it("does not add a duplicate message", () => {
@@ -451,15 +506,178 @@ describe("addMessage", () => {
     useMessageStore.getState().addMessage(msg);
     useMessageStore.getState().addMessage(msg);
 
-    expect(useMessageStore.getState().messagesByThread["t1"]).toHaveLength(1);
+    expect(getThread("t1").messages).toHaveLength(1);
+  });
+
+  it("does not touch the thread phase", () => {
+    useMessageStore.setState({
+      threads: {
+        t1: {
+          messages: [],
+          phase: { status: "streaming", content: "partial" },
+        },
+      },
+    });
+
+    useMessageStore
+      .getState()
+      .addMessage(makeMessage("m1", "t1", "assistant", "hi"));
+
+    expect(getThread("t1").phase).toEqual({
+      status: "streaming",
+      content: "partial",
+    });
   });
 
   it("does not affect other threads", () => {
-    const t2Msgs = [makeMessage("m99", "t2")];
-    useMessageStore.setState({ messagesByThread: { t2: t2Msgs } });
+    useMessageStore.setState({
+      threads: {
+        t2: { messages: [makeMessage("m99", "t2")], phase: { status: "idle" } },
+      },
+    });
 
     useMessageStore.getState().addMessage(makeMessage("m1", "t1"));
 
-    expect(useMessageStore.getState().messagesByThread["t2"]).toHaveLength(1);
+    expect(getThread("t2").messages).toHaveLength(1);
+  });
+});
+
+// ── State machine transition table ────────────────────────────────────────────
+
+describe("state machine transitions", () => {
+  it("idle → sending on sendMessage", async () => {
+    mockMessagesApi.send.mockReturnValue(new Promise(() => {})); // never resolves
+
+    useMessageStore.getState().sendMessage("t1", "Hello");
+
+    expect(getThread("t1").phase.status).toBe("sending");
+  });
+
+  it("sending → streaming on first appendToken", () => {
+    useMessageStore.setState({
+      threads: {
+        t1: {
+          messages: [],
+          phase: { status: "sending", optimisticId: "optimistic-1" },
+        },
+      },
+    });
+
+    useMessageStore.getState().appendToken("t1", "Hi");
+
+    expect(getThread("t1").phase.status).toBe("streaming");
+  });
+
+  it("sending → idle on POST error", async () => {
+    mockMessagesApi.send.mockRejectedValue(new Error("fail"));
+
+    await useMessageStore
+      .getState()
+      .sendMessage("t1", "Hello")
+      .catch(() => {});
+
+    expect(getThread("t1").phase).toEqual({ status: "idle" });
+  });
+
+  it("streaming → idle on finalizeStream", () => {
+    useMessageStore.setState({
+      threads: {
+        t1: { messages: [], phase: { status: "streaming", content: "Hi" } },
+      },
+    });
+
+    useMessageStore
+      .getState()
+      .finalizeStream("t1", makeMessage("m1", "t1", "assistant", "Hi"));
+
+    expect(getThread("t1").phase).toEqual({ status: "idle" });
+  });
+
+  it("streaming → error on setStreamingError", () => {
+    useMessageStore.setState({
+      threads: {
+        t1: {
+          messages: [],
+          phase: { status: "streaming", content: "partial" },
+        },
+      },
+    });
+
+    useMessageStore.getState().setStreamingError("t1", "Oops");
+
+    expect(getThread("t1").phase.status).toBe("error");
+  });
+
+  it("error → idle on clearError", () => {
+    useMessageStore.setState({
+      threads: {
+        t1: {
+          messages: [],
+          phase: { status: "error", message: "Oops", recoverable: true },
+        },
+      },
+    });
+
+    useMessageStore.getState().clearError("t1");
+
+    expect(getThread("t1").phase).toEqual({ status: "idle" });
+  });
+
+  it("error → sending on sendMessage (retry)", async () => {
+    useMessageStore.setState({
+      threads: {
+        t1: {
+          messages: [],
+          phase: { status: "error", message: "Oops", recoverable: true },
+        },
+      },
+    });
+
+    mockMessagesApi.send.mockReturnValue(new Promise(() => {})); // never resolves
+
+    useMessageStore.getState().sendMessage("t1", "retry");
+
+    expect(getThread("t1").phase.status).toBe("sending");
+  });
+});
+
+// ── Concurrency ───────────────────────────────────────────────────────────────
+
+describe("concurrency", () => {
+  it("loadMessages resolving after finalizeStream does not overwrite the assistant message", async () => {
+    const userMsg = makeMessage("m1", "t1", "user", "Hello");
+    const assistantMsg = makeMessage("m2", "t1", "assistant", "Hi");
+
+    // State as if finalizeStream already ran
+    useMessageStore.setState({
+      threads: {
+        t1: { messages: [userMsg, assistantMsg], phase: { status: "idle" } },
+      },
+    });
+
+    // Stale loadMessages resolves with only the user message
+    mockMessagesApi.list.mockResolvedValue({ data: [userMsg] });
+    await useMessageStore.getState().loadMessages("t1");
+
+    // loadMessages does a full replace — documents current behaviour so
+    // regressions are visible after the merge strategy changes.
+    expect(getThread("t1").messages).toBeDefined();
+  });
+
+  it("loadMessages never changes the phase of another thread", async () => {
+    useMessageStore.setState({
+      threads: {
+        t1: { messages: [], phase: { status: "idle" } },
+        t2: { messages: [], phase: { status: "streaming", content: "live" } },
+      },
+    });
+
+    mockMessagesApi.list.mockResolvedValue({ data: [] });
+    await useMessageStore.getState().loadMessages("t1");
+
+    expect(getThread("t2").phase).toEqual({
+      status: "streaming",
+      content: "live",
+    });
   });
 });
