@@ -272,19 +272,22 @@ function CredentialForm({ editing, onSaved, onCancel }: CredentialFormProps) {
             />
           </div>
 
-          <div
-            style={{
-              gridColumn: "1 / -1",
-              display: "flex",
-              flexDirection: "column",
-              gap: 6,
-            }}
-          >
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <FieldLabel>Email (optional)</FieldLabel>
             <FieldInput
               placeholder="john@example.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+            />
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <FieldLabel>Password (optional)</FieldLabel>
+            <FieldInput
+              type="password"
+              placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
             />
           </div>
 
