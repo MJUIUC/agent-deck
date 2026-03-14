@@ -79,6 +79,18 @@ async function apiFetch<T>(
     throw new Error(message);
   }
 
+  // 204 No Content (and any other empty response) has no body — parsing it
+  // throws, which silently breaks callers. Return null instead.
+  const contentLength = res.headers.get("content-length");
+  const contentType = res.headers.get("content-type") ?? "";
+  if (
+    res.status === 204 ||
+    contentLength === "0" ||
+    !contentType.includes("application/json")
+  ) {
+    return null as T;
+  }
+
   return res.json() as Promise<T>;
 }
 
