@@ -13,7 +13,7 @@ CREATE TABLE credentials (
   key             TEXT NOT NULL UNIQUE,
   display_name    TEXT NOT NULL,
   service         TEXT NOT NULL,
-  credential_type TEXT NOT NULL CHECK (credential_type IN ('api_key', 'pat', 'bearer_token', 'key_secret_pair', 'service_account')),
+  credential_type TEXT NOT NULL CHECK (credential_type IN ('api_key', 'pat', 'bearer_token', 'key_secret_pair')),
   service_url     TEXT,
   username        TEXT,
   email           TEXT,
