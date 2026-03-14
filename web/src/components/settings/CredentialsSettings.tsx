@@ -6,13 +6,33 @@ import {
   type CreateCredentialPayload,
   type CredentialType,
 } from "@/api/client";
-import {
-  Btn,
-  FieldLabel,
-  FieldInput,
-  FieldSelect,
-  FieldHint,
-} from "./shared";
+import { Btn, FieldLabel, FieldInput, FieldSelect, FieldHint } from "./shared";
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Convert an arbitrary string into a valid credential key.
+ * Rules: lowercase, alphanumerics and underscores only, no leading/trailing
+ * underscores, no consecutive underscores.
+ *   "My GitHub PAT"       → "my_github_pat"
+ *   "OpenAI  Production!" → "openai_production"
+ */
+function slugify(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_") // non-alphanumeric runs → single _
+    .replace(/^_+|_+$/g, "") // strip leading/trailing _
+    .replace(/__+/g, "_"); // collapse consecutive _ (belt-and-suspenders)
+}
+
+/** Sanitise a manually-typed key: same charset rules, applied on every keystroke. */
+function sanitizeKey(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, "") // drop anything not allowed
+    .replace(/^_+/, "") // no leading underscores while typing
+    .replace(/__+/g, "_"); // no consecutive underscores
+}
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -43,6 +63,7 @@ interface CredentialFormProps {
 
 function CredentialForm({ editing, onSaved, onCancel }: CredentialFormProps) {
   const [key, setKey] = useState(editing?.key ?? "");
+  const [keyTouched, setKeyTouched] = useState(false);
   const [displayName, setDisplayName] = useState(editing?.display_name ?? "");
   const [service, setService] = useState(editing?.service ?? "");
   const [serviceCustom, setServiceCustom] = useState(
@@ -82,7 +103,10 @@ function CredentialForm({ editing, onSaved, onCancel }: CredentialFormProps) {
 
     if (!displayName.trim()) return setError("Display name is required.");
     if (!effectiveService.trim()) return setError("Service is required.");
-    if (!isEditing && !key.trim()) return setError("Key is required.");
+    if (!isEditing && !key.trim())
+      return setError(
+        "Display name is required to generate a key — please fill it in first.",
+      );
 
     setSaving(true);
     try {
@@ -122,6 +146,15 @@ function CredentialForm({ editing, onSaved, onCancel }: CredentialFormProps) {
 
   const isKeySecretPair = credentialType === "key_secret_pair";
 
+  // Auto-generate the key from the display name when the user leaves the field,
+  // but only if they haven't manually edited the key themselves.
+  const handleDisplayNameBlur = () => {
+    if (!isEditing && !keyTouched && displayName.trim()) {
+      const generated = slugify(displayName.trim());
+      if (generated) setKey(generated);
+    }
+  };
+
   return (
     <div
       style={{
@@ -154,6 +187,7 @@ function CredentialForm({ editing, onSaved, onCancel }: CredentialFormProps) {
               placeholder="e.g. My GitHub PAT"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
+              onBlur={handleDisplayNameBlur}
             />
           </div>
 
@@ -231,16 +265,18 @@ function CredentialForm({ editing, onSaved, onCancel }: CredentialFormProps) {
               <FieldLabel>Key</FieldLabel>
               <FieldInput
                 mono
-                placeholder="e.g. github_my_pat"
+                placeholder="Generated from display name…"
                 value={key}
-                onChange={(e) =>
-                  setKey(e.target.value.toLowerCase().replace(/\s+/g, "_"))
-                }
+                onChange={(e) => {
+                  setKeyTouched(true);
+                  setKey(sanitizeKey(e.target.value));
+                }}
               />
               <FieldHint>
-                Unique machine-readable identifier used to reference this
-                credential from MCP server configs. Cannot be changed after
-                creation.
+                Auto-generated from your display name. Only lowercase letters,
+                numbers, and underscores are allowed. This is used internally to
+                reference this credential from MCP server configs — you won't
+                need to remember it.
               </FieldHint>
             </div>
           )}
@@ -614,8 +650,9 @@ function CredentialRow({ credential, onEdit, onDelete }: CredentialRowProps) {
             color: "var(--text-secondary)",
           }}
         >
-          {CREDENTIAL_TYPE_LABELS[credential.credential_type as CredentialType] ??
-            credential.credential_type}
+          {CREDENTIAL_TYPE_LABELS[
+            credential.credential_type as CredentialType
+          ] ?? credential.credential_type}
         </span>
       </div>
 
@@ -834,8 +871,10 @@ export function CredentialsSettings() {
               marginTop: 2,
             }}
           >
-            Store API keys, tokens, and secrets — encrypted at rest with
-            AES-256-GCM.
+            A secure store for API keys, tokens, and passwords. Secrets are
+            encrypted on the server the moment you save them — they're never
+            returned in plain text, and you won't need to handle them again. MCP
+            servers and providers reference credentials by name.
           </div>
         </div>
         {!showForm && credentials.length > 0 && (
