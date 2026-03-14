@@ -2,7 +2,13 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Credential types supported by the store.
-pub const CREDENTIAL_TYPES: &[&str] = &["api_key", "pat", "bearer_token", "key_secret_pair"];
+pub const CREDENTIAL_TYPES: &[&str] = &[
+    "api_key",
+    "pat",
+    "bearer_token",
+    "key_secret_pair",
+    "service_account",
+];
 
 /// Public-facing credential record returned by the API.
 /// `encrypted_data` is intentionally absent — it must never appear in responses.

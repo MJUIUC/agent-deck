@@ -17,7 +17,8 @@ export type CredentialType =
   | "api_key"
   | "pat"
   | "bearer_token"
-  | "key_secret_pair";
+  | "key_secret_pair"
+  | "service_account";
 
 export interface Credential {
   id: string;

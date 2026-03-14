@@ -1,14 +1,5 @@
 import React, { useState, useEffect, useCallback, type FormEvent } from "react";
-import {
-  Plus,
-  Pencil,
-  Trash2,
-  KeyRound,
-  Eye,
-  EyeOff,
-  ChevronDown,
-  ChevronRight,
-} from "lucide-react";
+import { Plus, Pencil, Trash2, KeyRound, Eye, EyeOff } from "lucide-react";
 import {
   credentialsApi,
   type Credential,
@@ -50,6 +41,7 @@ const CREDENTIAL_TYPE_LABELS: Record<CredentialType, string> = {
   pat: "Personal Access Token",
   bearer_token: "Bearer Token",
   key_secret_pair: "Key / Secret Pair",
+  service_account: "Service Account",
 };
 
 // ─── CredentialForm ───────────────────────────────────────────────────────────
@@ -64,7 +56,6 @@ function CredentialForm({ editing, onSaved, onCancel }: CredentialFormProps) {
   const [key, setKey] = useState(editing?.key ?? "");
   const [keyTouched, setKeyTouched] = useState(false);
   const [displayName, setDisplayName] = useState(editing?.display_name ?? "");
-  const [accountInfoOpen, setAccountInfoOpen] = useState(false);
 
   const [credentialType, setCredentialType] = useState<CredentialType>(
     (editing?.credential_type as CredentialType) ?? "api_key",
@@ -126,6 +117,7 @@ function CredentialForm({ editing, onSaved, onCancel }: CredentialFormProps) {
   };
 
   const isKeySecretPair = credentialType === "key_secret_pair";
+  const isServiceAccount = credentialType === "service_account";
 
   // Auto-generate the key from the display name when the user leaves the field,
   // but only if they haven't manually edited the key themselves.
@@ -194,120 +186,46 @@ function CredentialForm({ editing, onSaved, onCancel }: CredentialFormProps) {
             </FieldSelect>
           </div>
 
-          {/* Service account information accordion */}
-          <div style={{ gridColumn: "1 / -1" }}>
-            <button
-              type="button"
-              onClick={() => setAccountInfoOpen((v) => !v)}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                background: "none",
-                border: "none",
-                padding: "6px 0",
-                cursor: "pointer",
-                color: "var(--text-secondary)",
-                fontFamily: "inherit",
-                fontSize: 12,
-                fontWeight: 600,
-                width: "100%",
-                textAlign: "left",
-              }}
-            >
-              {accountInfoOpen ? (
-                <ChevronDown size={13} />
-              ) : (
-                <ChevronRight size={13} />
-              )}
-              Service Account Information
-              <span
-                style={{
-                  marginLeft: 4,
-                  fontSize: 10,
-                  fontWeight: 400,
-                  color: "var(--text-tertiary)",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.06em",
-                }}
-              >
-                optional
-              </span>
-            </button>
-
-            {accountInfoOpen && (
-              <>
-                <p
-                  style={{
-                    margin: "4px 0 12px",
-                    fontSize: 12,
-                    color: "var(--text-tertiary)",
-                    lineHeight: 1.5,
-                  }}
-                >
-                  Attach context about the account this credential belongs to.
-                  This information is never encrypted — it's surfaced to agents
-                  so they know which account or identity a credential represents
-                  (e.g. "this token belongs to johndoe on github.com"). Useful
-                  when you have multiple credentials for the same service.
-                </p>
-
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr 1fr",
-                    gap: 14,
-                  }}
-                >
-                  <div
-                    style={{ display: "flex", flexDirection: "column", gap: 6 }}
-                  >
-                    <FieldLabel>Service URL</FieldLabel>
-                    <FieldInput
-                      mono
-                      placeholder="https://github.com"
-                      value={serviceUrl}
-                      onChange={(e) => setServiceUrl(e.target.value)}
-                    />
-                  </div>
-
-                  <div
-                    style={{ display: "flex", flexDirection: "column", gap: 6 }}
-                  >
-                    <FieldLabel>Username</FieldLabel>
-                    <FieldInput
-                      placeholder="johndoe"
-                      value={username}
-                      onChange={(e) => setUsername(e.target.value)}
-                    />
-                  </div>
-
-                  <div
-                    style={{ display: "flex", flexDirection: "column", gap: 6 }}
-                  >
-                    <FieldLabel>Email</FieldLabel>
-                    <FieldInput
-                      placeholder="john@example.com"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                    />
-                  </div>
-
-                  <div
-                    style={{ display: "flex", flexDirection: "column", gap: 6 }}
-                  >
-                    <FieldLabel>Password</FieldLabel>
-                    <FieldInput
-                      type="password"
-                      placeholder="••••••••"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                    />
-                  </div>
-                </div>
-              </>
-            )}
+          {/* Service URL — shown for all types */}
+          <div
+            style={{
+              gridColumn: "1 / -1",
+              display: "flex",
+              flexDirection: "column",
+              gap: 6,
+            }}
+          >
+            <FieldLabel>Service URL (optional)</FieldLabel>
+            <FieldInput
+              mono
+              placeholder="https://github.com"
+              value={serviceUrl}
+              onChange={(e) => setServiceUrl(e.target.value)}
+            />
           </div>
+
+          {/* Service account fields — only for service_account type */}
+          {isServiceAccount && (
+            <>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <FieldLabel>Username</FieldLabel>
+                <FieldInput
+                  placeholder="johndoe"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                />
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <FieldLabel>Email</FieldLabel>
+                <FieldInput
+                  placeholder="john@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+              </div>
+            </>
+          )}
 
           {/* Machine-readable key — only on create */}
           {!isEditing && (
@@ -338,52 +256,56 @@ function CredentialForm({ editing, onSaved, onCancel }: CredentialFormProps) {
             </div>
           )}
 
-          {/* Primary API key */}
-          <div
-            style={{
-              gridColumn: "1 / -1",
-              display: "flex",
-              flexDirection: "column",
-              gap: 6,
-            }}
-          >
-            <FieldLabel>API Key</FieldLabel>
-            <div style={{ position: "relative" }}>
-              <FieldInput
-                mono
-                type={showSecret ? "text" : "password"}
-                placeholder={
-                  isEditing ? "Leave blank to keep existing" : "Paste API key…"
-                }
-                value={secret}
-                onChange={(e) => setSecret(e.target.value)}
-                style={{ paddingRight: 38 }}
-              />
-              <button
-                type="button"
-                onClick={() => setShowSecret((v) => !v)}
-                tabIndex={-1}
-                style={{
-                  position: "absolute",
-                  right: 10,
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  background: "none",
-                  border: "none",
-                  cursor: "pointer",
-                  color: "var(--text-tertiary)",
-                  display: "flex",
-                  alignItems: "center",
-                  padding: 0,
-                }}
-              >
-                {showSecret ? <EyeOff size={14} /> : <Eye size={14} />}
-              </button>
+          {/* Primary API key — hidden for service_account (password is the secret) */}
+          {!isServiceAccount && (
+            <div
+              style={{
+                gridColumn: "1 / -1",
+                display: "flex",
+                flexDirection: "column",
+                gap: 6,
+              }}
+            >
+              <FieldLabel>API Key</FieldLabel>
+              <div style={{ position: "relative" }}>
+                <FieldInput
+                  mono
+                  type={showSecret ? "text" : "password"}
+                  placeholder={
+                    isEditing
+                      ? "Leave blank to keep existing"
+                      : "Paste API key…"
+                  }
+                  value={secret}
+                  onChange={(e) => setSecret(e.target.value)}
+                  style={{ paddingRight: 38 }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowSecret((v) => !v)}
+                  tabIndex={-1}
+                  style={{
+                    position: "absolute",
+                    right: 10,
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    color: "var(--text-tertiary)",
+                    display: "flex",
+                    alignItems: "center",
+                    padding: 0,
+                  }}
+                >
+                  {showSecret ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
+              </div>
+              <FieldHint>
+                Encrypted with AES-256-GCM the moment it's saved.
+              </FieldHint>
             </div>
-            <FieldHint>
-              Encrypted with AES-256-GCM the moment it's saved.
-            </FieldHint>
-          </div>
+          )}
 
           {/* API Secret — key_secret_pair only */}
           {isKeySecretPair && (
@@ -430,6 +352,57 @@ function CredentialForm({ editing, onSaved, onCancel }: CredentialFormProps) {
                   {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
                 </button>
               </div>
+            </div>
+          )}
+
+          {/* Password — service_account only, encrypted */}
+          {isServiceAccount && (
+            <div
+              style={{
+                gridColumn: "1 / -1",
+                display: "flex",
+                flexDirection: "column",
+                gap: 6,
+              }}
+            >
+              <FieldLabel>Password</FieldLabel>
+              <div style={{ position: "relative" }}>
+                <FieldInput
+                  mono
+                  type={showPassword ? "text" : "password"}
+                  placeholder={
+                    isEditing
+                      ? "Leave blank to keep existing"
+                      : "Paste password…"
+                  }
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  style={{ paddingRight: 38 }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  tabIndex={-1}
+                  style={{
+                    position: "absolute",
+                    right: 10,
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    color: "var(--text-tertiary)",
+                    display: "flex",
+                    alignItems: "center",
+                    padding: 0,
+                  }}
+                >
+                  {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
+              </div>
+              <FieldHint>
+                Encrypted with AES-256-GCM the moment it's saved.
+              </FieldHint>
             </div>
           )}
         </div>
