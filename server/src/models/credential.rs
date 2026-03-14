@@ -52,9 +52,12 @@ pub struct CreateCredential {
     pub service_url: Option<String>,
     pub username: Option<String>,
     pub email: Option<String>,
-    /// The primary secret value (API key, token, etc.).
-    pub secret: String,
-    /// Optional secondary secret — only used for `key_secret_pair` type.
+    /// The primary secret value (API key, token, etc.). Optional — not all
+    /// credential types require a primary secret (e.g. a key_secret_pair
+    /// where only the password/secret-key matters).
+    pub secret: Option<String>,
+    /// Optional secondary secret — used for `key_secret_pair` type or any
+    /// credential that requires a password alongside a key.
     pub password: Option<String>,
 }
 
@@ -75,9 +78,12 @@ pub struct UpdateCredential {
 }
 
 /// The JSON blob that gets AES-256-GCM encrypted and stored in `encrypted_data`.
+/// Both fields are optional — callers should populate whichever are relevant
+/// for the credential type. At least one should be non-None in practice.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CredentialSecret {
-    pub secret: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub secret: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub password: Option<String>,
 }

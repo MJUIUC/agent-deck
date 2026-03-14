@@ -143,7 +143,9 @@ pub async fn resolve_secret(
         .ok_or_else(|| anyhow!("Credential '{}' not found", credential_key))?;
 
     let secret = decrypt_secret(&row.encrypted_data, master_key)?;
-    Ok(secret.secret)
+    secret
+        .secret
+        .ok_or_else(|| anyhow!("Credential '{}' has no primary secret", credential_key))
 }
 
 /// Create a new credential, encrypting the secret before storage.
@@ -168,7 +170,7 @@ pub async fn create_credential(
     }
 
     let secret_blob = CredentialSecret {
-        secret: req.secret.clone(),
+        secret: req.secret.clone(), // Option<String> — None is valid
         password: req.password.clone(),
     };
     let encrypted_data = encrypt_secret(&secret_blob, master_key)?;
@@ -234,18 +236,24 @@ pub async fn update_credential(
     }
 
     // Determine the new encrypted_data value.
-    let encrypted_data = if let Some(new_secret) = &req.secret {
-        // Re-encrypt with possibly updated password.
+    // Re-encrypt whenever either secret field is explicitly supplied in the request.
+    let encrypted_data = if req.secret.is_some() || req.password.is_some() {
+        // Decrypt the existing blob so we can merge: supplied fields win,
+        // unmentioned fields carry over from the stored value.
+        let old_blob = decrypt_secret(&existing.encrypted_data, master_key)?;
         let secret_blob = CredentialSecret {
-            secret: new_secret.clone(),
-            password: req.password.clone(),
+            secret: if req.secret.is_some() {
+                req.secret.clone() // caller explicitly set (or cleared) the secret
+            } else {
+                old_blob.secret // unchanged — carry forward
+            },
+            password: if req.password.is_some() {
+                req.password.clone() // caller explicitly set (or cleared) the password
+            } else {
+                old_blob.password // unchanged — carry forward
+            },
         };
         encrypt_secret(&secret_blob, master_key)?
-    } else if req.password.is_some() {
-        // Password changed but secret unchanged — decrypt old, re-encrypt.
-        let mut old_blob = decrypt_secret(&existing.encrypted_data, master_key)?;
-        old_blob.password = req.password.clone();
-        encrypt_secret(&old_blob, master_key)?
     } else {
         existing.encrypted_data.clone()
     };
@@ -353,7 +361,7 @@ pub async fn migrate_provider_api_key(
         service_url: None,
         username: None,
         email: None,
-        secret: plaintext_api_key.to_string(),
+        secret: Some(plaintext_api_key.to_string()),
         password: None,
     };
 
@@ -409,8 +417,22 @@ mod tests {
             service_url: None,
             username: None,
             email: None,
-            secret: "sk-supersecret".to_string(),
+            secret: Some("sk-supersecret".to_string()),
             password: None,
+        }
+    }
+
+    fn sample_create_password_only() -> CreateCredential {
+        CreateCredential {
+            key: "db_password_test".to_string(),
+            display_name: "DB Password".to_string(),
+            service: "postgres".to_string(),
+            credential_type: "key_secret_pair".to_string(),
+            service_url: Some("postgres://localhost/mydb".to_string()),
+            username: Some("admin".to_string()),
+            email: None,
+            secret: None,
+            password: Some("s3cr3t-db-pass".to_string()),
         }
     }
 
@@ -441,7 +463,7 @@ mod tests {
     fn test_encrypt_decrypt_roundtrip() {
         let master_key = test_master_key();
         let secret = CredentialSecret {
-            secret: "ghp_abc123".to_string(),
+            secret: Some("ghp_abc123".to_string()),
             password: Some("hunter2".to_string()),
         };
         let encrypted = encrypt_secret(&secret, &master_key).expect("encrypt");
@@ -451,10 +473,23 @@ mod tests {
     }
 
     #[test]
+    fn test_encrypt_decrypt_password_only() {
+        let master_key = test_master_key();
+        let secret = CredentialSecret {
+            secret: None,
+            password: Some("only-a-password".to_string()),
+        };
+        let encrypted = encrypt_secret(&secret, &master_key).expect("encrypt");
+        let decrypted = decrypt_secret(&encrypted, &master_key).expect("decrypt");
+        assert_eq!(decrypted.secret, None);
+        assert_eq!(decrypted.password, Some("only-a-password".to_string()));
+    }
+
+    #[test]
     fn test_different_encryptions_differ() {
         let master_key = test_master_key();
         let secret = CredentialSecret {
-            secret: "same-secret".to_string(),
+            secret: Some("same-secret".to_string()),
             password: None,
         };
         let enc1 = encrypt_secret(&secret, &master_key).expect("enc1");
@@ -537,6 +572,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_resolve_secret_fails_when_no_primary_secret() {
+        let pool = setup_db().await;
+        let mk = test_master_key();
+        create_credential(&pool, &mk, &sample_create_password_only())
+            .await
+            .expect("create");
+        let result = resolve_secret(&pool, &mk, "db_password_test").await;
+        assert!(
+            result.is_err(),
+            "resolve_secret should fail when credential has no primary secret"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_create_password_only_credential() {
+        let pool = setup_db().await;
+        let mk = test_master_key();
+        let created = create_credential(&pool, &mk, &sample_create_password_only())
+            .await
+            .expect("create");
+        assert_eq!(created.key, "db_password_test");
+        // Decrypt and verify only password is set
+        let row = get_credential_with_data_by_key(&pool, "db_password_test")
+            .await
+            .expect("lookup")
+            .expect("should exist");
+        let blob = decrypt_secret(&row.encrypted_data, &mk).expect("decrypt");
+        assert_eq!(blob.secret, None);
+        assert_eq!(blob.password, Some("s3cr3t-db-pass".to_string()));
+    }
+
+    #[tokio::test]
     async fn test_update_display_name() {
         let pool = setup_db().await;
         let mk = test_master_key();
@@ -587,6 +654,40 @@ mod tests {
             .await
             .expect("resolve");
         assert_eq!(resolved, "sk-newsecret");
+    }
+
+    #[tokio::test]
+    async fn test_update_adds_password_preserves_secret() {
+        let pool = setup_db().await;
+        let mk = test_master_key();
+        let created = create_credential(&pool, &mk, &sample_create())
+            .await
+            .expect("create");
+
+        // Add a password without touching the secret
+        let update = UpdateCredential {
+            display_name: None,
+            service: None,
+            credential_type: None,
+            service_url: None,
+            username: None,
+            email: None,
+            secret: None,
+            password: Some("extra-password".to_string()),
+        };
+        update_credential(&pool, &mk, &created.id, &update)
+            .await
+            .expect("update");
+
+        let row = get_credential_with_data_by_key(&pool, "openai_test")
+            .await
+            .expect("lookup")
+            .expect("should exist");
+        let blob = decrypt_secret(&row.encrypted_data, &mk).expect("decrypt");
+        // Original secret must be preserved
+        assert_eq!(blob.secret, Some("sk-supersecret".to_string()));
+        // New password must be stored
+        assert_eq!(blob.password, Some("extra-password".to_string()));
     }
 
     #[tokio::test]
