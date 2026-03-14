@@ -156,12 +156,15 @@ mod tests {
 
         let config = crate::config::Config {
             port: 7474,
+            data_dir: std::path::PathBuf::from("/tmp/test-deck"),
+            mcp_dir: std::path::PathBuf::from("/tmp/test-deck/mcp"),
+            personas_dir: std::path::PathBuf::from("/tmp/test-deck/personas"),
             database_url: "sqlite::memory:".into(),
             public_dir: "./public".into(),
             fcm_service_account_json: None,
         };
 
-        let app = crate::routes::build_router(pool, config)
+        let (app, _mcp) = crate::routes::build_router(pool, config)
             .await
             .expect("router");
 
@@ -206,12 +209,15 @@ mod tests {
 
         let config = crate::config::Config {
             port: 7474,
+            data_dir: std::path::PathBuf::from("/tmp/test-deck"),
+            mcp_dir: std::path::PathBuf::from("/tmp/test-deck/mcp"),
+            personas_dir: std::path::PathBuf::from("/tmp/test-deck/personas"),
             database_url: "sqlite::memory:".into(),
             public_dir: "./public".into(),
             fcm_service_account_json: None,
         };
 
-        let app = crate::routes::build_router(pool, config)
+        let (app, _mcp) = crate::routes::build_router(pool, config)
             .await
             .expect("router");
 
@@ -240,12 +246,15 @@ mod tests {
 
         let config = crate::config::Config {
             port: 7474,
+            data_dir: std::path::PathBuf::from("/tmp/test-deck"),
+            mcp_dir: std::path::PathBuf::from("/tmp/test-deck/mcp"),
+            personas_dir: std::path::PathBuf::from("/tmp/test-deck/personas"),
             database_url: "sqlite::memory:".into(),
             public_dir: "./public".into(),
             fcm_service_account_json: None,
         };
 
-        let app = crate::routes::build_router(pool, config)
+        let (app, _mcp) = crate::routes::build_router(pool, config)
             .await
             .expect("router");
 

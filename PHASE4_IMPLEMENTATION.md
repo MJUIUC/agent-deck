@@ -208,59 +208,179 @@ Credentials sits between Providers and Personas in the sidebar. Logical flow: Pr
 
 ---
 
-## Story 4.3 — MCP Connection Manager
+## Story 4.3 — MCP Connection Manager ✅ Complete
 
-**Branch:** `feature/phase4-mcp-connection-manager`
+**Branch:** `feature/phase4-mcp-connection-manager` → merged into `dev`
 
-### What to build
+### What was built
 
-**1. Connection pool**
+**`server/src/services/mcp.rs`** _(new)_ — `McpConnectionManager`: cloneable `Arc`-backed handle, `DashMap<String, Arc<McpConnection>>` keyed by server ID.
 
-```rust
-// services/mcp.rs
-pub struct McpConnectionManager {
-    connections: DashMap<String, McpConnection>,  // keyed by mcp_server_id
-    credential_store: Arc<CredentialStore>,
-}
-```
+- **Local (stdio) transport** — spawns executable via `tokio::process::Command` with `kill_on_drop(true)`, newline-delimited JSON-RPC over stdin/stdout, stderr captured to `warn!` logs
+- **Remote (HTTP/SSE) transport** — POST-based JSON-RPC, resolves `credential_key` from credential store, formats auth header
+- **MCP handshake** — `initialize` → `notifications/initialized` → `tools/list` on connect; tools cached in memory per connection
+- **`{credential:key}` placeholder resolution** — env var values like `{credential:github_pat}` decrypted and substituted at spawn time
+- **Supervision loop** — exponential backoff 1s → 2s → 4s → … → 30s max, resets after 5 min of stability
+- **`connect_server` / `disconnect_server` / `shutdown_all`** — full lifecycle management; child processes killed on graceful shutdown
+- **`validate_tag()`** — public fn: alphanumeric/hyphen/underscore, max 64 chars
 
-**2. Local server transport (stdio)**
+**`server/src/db/migrations/006_mcp_tag.sql`** _(new)_ — adds `tag TEXT NOT NULL DEFAULT ''` to `mcp_servers`, back-fills from `name`
 
-- Spawn the configured executable as a child process using `tokio::process::Command`
-- Communicate over stdin/stdout using the MCP JSON-RPC protocol
-- Monitor the process: if it exits unexpectedly, restart with exponential backoff (1s, 2s, 4s, max 30s, reset after 5 minutes of stability)
-- Capture stderr for error logging
+**`server/src/models/mcp_server.rs`** — added `tag` field to `McpServer`, `CreateMcpServer`, `UpdateMcpServer`; `McpServer::new` derives tag from name when omitted
 
-Key MCP protocol messages to implement:
-- `initialize` → send on connect
-- `initialized` → notification after init handshake
-- `tools/list` → discover available tools (used in Story 4.4)
-- `tools/call` → execute a tool (used in Story 4.4)
+**`server/src/services/copilot.rs`** — added `McpStatusChanged { mcp_server_id, status, reason }` variant to `GlobalEvent`
 
-**3. Remote server transport (HTTP/SSE)**
+**`server/src/routes/tokens.rs`** — all MCP CRUD queries include `tag`; create/update/delete call `connect_server`/`disconnect_server` on the live manager; `list_mcp_tools` returns live cached tool list
 
-- Connect to the URL from the server config
-- Resolve `credential_key` from the credential store: look up the key, decrypt, attach as the configured auth header (e.g. `Authorization: Bearer <decrypted_value>`)
-- Use SSE for server-to-client messages, HTTP POST for client-to-server
+**`server/src/routes/mod.rs`** — `AppState` gains `pub mcp: McpConnectionManager`; `build_router` returns `(Router, McpConnectionManager)`; manager started at startup
 
-**4. Connection lifecycle**
+**`server/src/main.rs`** — graceful shutdown via `.with_graceful_shutdown`, calls `mcp.shutdown_all()` on SIGTERM/SIGINT
 
-On server startup: connect to all MCP servers that have `enabled = 1`. On MCP server create/update via API: connect or reconnect. On delete: disconnect and remove from pool.
+### Design notes
 
-Update `mcp_servers.status` as connections change: `inactive` → `connecting` → `connected` or `error`. Broadcast status changes via global SSE event so the UI can update badges in real time.
-
-**5. Graceful shutdown**
-
-On Rust server exit (SIGTERM/SIGINT): disconnect all remote servers, kill all local child processes. Use a shutdown hook in the Axum server.
+- The manager is **"bring your own binary"** — it assumes the executable is already installed and runnable. `npx`, `uvx`, and `docker` are the supported install mechanisms. Git-clone + venv setup is intentionally out of scope here (see Story 4.3a).
+- `working_dir` is **not yet implemented** on `LocalConfig` — deferred to 4.3a where the full `~/.agent-deck` directory structure is established.
+- Avatar upload (`POST /api/personas/:id/avatar`) exists in `routes/personas.rs` but has no UI and is effectively dead code. Deferred to a future story once the personas directory structure (4.3a) is in place.
 
 ### Testing checklist
 
-- [ ] Local server starts as subprocess, responds to `initialize`
-- [ ] Remote server connects with credential in auth header
-- [ ] Reconnect with backoff after connection loss
-- [ ] Status field updates correctly through lifecycle
-- [ ] All child processes killed on server shutdown
-- [ ] `GET /api/mcp-servers` shows live status
+- [x] 13 new unit tests: tag validation, credential placeholder parsing, JSON-RPC serialisation, `McpStatus` helpers
+- [x] 152 total Rust tests passing
+- [ ] Live integration: local server starts as subprocess, responds to `initialize`
+- [ ] Live integration: remote server connects with credential in auth header
+- [ ] Live integration: reconnect with backoff after connection loss
+- [ ] Live integration: all child processes killed on server shutdown
+
+---
+
+## Story 4.3a — `~/.agent-deck` Data Directory and MCP Filesystem Sync ✅ Complete
+
+**Branch:** `feature/phase4.3a-mcp-data-dir`
+
+### Context
+
+During 4.3 implementation two structural gaps were identified:
+
+1. The server has no stable data directory. The database defaults to `sqlite:./data/agent-deck.db` relative to the working directory, which breaks headless/service installs. All user-accessible files (MCP configs, persona instructions) need a home that survives binary updates and `cargo clean`.
+2. MCP server configs live only in the database. For the filesystem to be a usable interface for power users — and to support future `working_dir`-based setups (venvs, cloned repos) — the `~/.agent-deck/mcp/` directory should be the authoritative config store, with the DB acting as an index and runtime state cache.
+
+### Directory layout
+
+```
+~/.agent-deck/
+├── .database/
+│   └── agent-deck.db          # DB hidden from casual browsing
+├── mcp/
+│   └── <server-id>/
+│       ├── config.json        # Authoritative MCP server config (name, tag, server_type, executable/url, args, env)
+│       └── ...                # Working files — venv, repo, logs — unmanaged, user's space
+└── personas/
+    ├── meta.json              # Index: [{ id, name, emoji }]
+    └── <persona-id>/
+        ├── meta.json          # { id, name, emoji, default_model, default_provider }
+        └── instructions.md   # system_prompt content — DB authoritative, file is mirror
+```
+
+### Source of truth
+
+| Data | Authoritative | Synced to |
+|---|---|---|
+| MCP server config | `mcp/<id>/config.json` | DB `config` column — on startup sync + every API write |
+| MCP runtime state | DB (`status`, `enabled`, tool cache) | Not written to disk |
+| Persona metadata | DB | `personas/<id>/meta.json` on every create/update |
+| Persona instructions | DB | `personas/<id>/instructions.md` on every create/update |
+| Credentials | DB (encrypted) | Never written to disk |
+
+### What to build
+
+**1. `config.rs` — introduce `data_dir`**
+
+- Default: `~/.agent-deck` (resolved via `dirs::home_dir()`)
+- Override: `AGENT_DECK_DATA_DIR` env var
+- Derived paths (all computed from `data_dir`, never configured separately):
+  - `database_url` → `{data_dir}/.database/agent-deck.db`
+  - `mcp_dir` → `{data_dir}/mcp`
+  - `personas_dir` → `{data_dir}/personas`
+- Add `dirs` crate to workspace dependencies
+
+**2. `db/mod.rs` — dev-path migration hint**
+
+On startup, if `~/.agent-deck/.database/agent-deck.db` does not exist but `./data/agent-deck.db` does, log a clearly visible hint:
+```
+WARN  Found existing database at ./data/agent-deck.db
+WARN  Default location is now ~/.agent-deck/.database/agent-deck.db
+WARN  To migrate: mv ./data/agent-deck.db ~/.agent-deck/.database/agent-deck.db
+WARN  Using ./data/agent-deck.db for this session
+```
+Do not auto-migrate. Use the old path for the session so existing dev setups keep working.
+
+**3. `services/mcp.rs` — filesystem sync**
+
+`startup_sync(data_dir)`:
+- Create `~/.agent-deck/mcp/` if absent
+- Scan for `<server-id>/config.json` files
+- For each: upsert into `mcp_servers` (insert if missing, update `config` column if changed)
+- For any DB row whose directory no longer exists: set `enabled = 0`, status = `inactive`
+- Called from `McpConnectionManager::start()` before connecting
+
+On API **create** (`POST /api/mcp-servers`):
+- Write `~/.agent-deck/mcp/<id>/config.json` after DB insert
+
+On API **update** (`PUT /api/mcp-servers/:id`):
+- Rewrite `config.json` after DB update
+
+On API **delete** (`DELETE /api/mcp-servers/:id`):
+- Remove `~/.agent-deck/mcp/<id>/` directory after DB delete
+
+`LocalConfig` gains `working_dir: Option<String>`. If `None`, defaults to `~/.agent-deck/mcp/<server-id>/` at spawn time. `Command::current_dir()` set accordingly.
+
+**4. `routes/personas.rs` — persona directory mirror**
+
+On **create**: write `~/.agent-deck/personas/<id>/meta.json` and `instructions.md`
+
+On **update**: rewrite both files
+
+On **delete**: remove `~/.agent-deck/personas/<id>/` directory
+
+Update root `~/.agent-deck/personas/meta.json` index on every create/update/delete.
+
+Avatar upload (`POST /api/personas/:id/avatar`): write to `~/.agent-deck/personas/<id>/avatar.<ext>` instead of `data/avatars/`. Note: avatar upload has no UI yet — this is plumbing only.
+
+**5. Startup sequence in `main.rs`**
+
+```
+1. Resolve data_dir (~/.agent-deck or AGENT_DECK_DATA_DIR)
+2. Create directory structure (data_dir, .database/, mcp/, personas/)
+3. Check for dev-path DB migration hint
+4. Init DB at data_dir/.database/agent-deck.db
+5. Build router (MCP manager startup_sync runs here before connecting)
+6. Bind and serve
+```
+
+### What was built
+
+- **`dirs` crate** added to workspace; `config.rs` rewritten with `data_dir`, `mcp_dir`, `personas_dir` fields all derived from `AGENT_DECK_DATA_DIR` env var or `~/.agent-deck`
+- **`main.rs`** creates the full directory tree on startup; dev-path migration hint warns when `./data/agent-deck.db` exists and the new path doesn't
+- **`services/mcp.rs`** — `McpConnectionManager` gains `mcp_dir`; `startup_sync()` scans `mcp/<id>/config.json` files and upserts/disables DB rows; `write_config_file()` and `delete_config_dir()` called from API handlers; `LocalConfig` gains `working_dir` field, defaults to `mcp/<id>/` at spawn time
+- **`services/personas.rs`** — new file with `write_persona_files`, `delete_persona_dir`, `update_root_index` helpers
+- **`routes/tokens.rs`** — `create_mcp`, `update_mcp`, `delete_mcp` all mirror changes to `~/.agent-deck/mcp/`
+- **`routes/personas.rs`** — `create`, `update`, `delete` all mirror changes to `~/.agent-deck/personas/`; avatar upload writes to `personas_dir/<id>/avatar.<ext>`
+- **14 new tests** added; all 166 pass
+
+### Testing checklist
+
+- [x] `~/.agent-deck` directory tree created on first run
+- [x] `AGENT_DECK_DATA_DIR` override respected
+- [x] Dev-path migration hint logged when old DB exists
+- [x] `startup_sync` upserts config.json files into DB
+- [x] `startup_sync` disables DB rows whose directories are gone
+- [x] `POST /api/mcp-servers` writes `config.json`
+- [x] `PUT /api/mcp-servers/:id` rewrites `config.json`
+- [x] `DELETE /api/mcp-servers/:id` removes directory
+- [x] `LocalConfig` `working_dir` defaults to `~/.agent-deck/mcp/<id>/`
+- [x] Persona create/update writes `meta.json` + `instructions.md`
+- [x] Persona delete removes directory
+- [x] Root personas `meta.json` index stays in sync
 
 ---
 

@@ -115,22 +115,32 @@ function ToolInspector({
   const [loading, setLoading] = useState(false);
   const [fetched, setFetched] = useState(false);
 
-  const handleToggle = useCallback(async () => {
-    const next = !open;
-    setOpen(next);
-    if (next && !fetched) {
+  // Fetch tools on mount so the count is visible immediately.
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchTools() {
       setLoading(true);
       try {
         const res = await mcpServersApi.listTools(serverId);
-        setTools(res.data);
+        if (!cancelled) setTools(res.data);
       } catch {
-        setTools([]);
+        if (!cancelled) setTools([]);
       } finally {
-        setLoading(false);
-        setFetched(true);
+        if (!cancelled) {
+          setLoading(false);
+          setFetched(true);
+        }
       }
     }
-  }, [open, fetched, serverId]);
+    fetchTools();
+    return () => {
+      cancelled = true;
+    };
+  }, [serverId]);
+
+  const handleToggle = useCallback(() => {
+    setOpen((prev) => !prev);
+  }, []);
 
   return (
     <div style={{ marginTop: 8 }}>
@@ -476,10 +486,43 @@ function serverToFormState(server: McpServer): FormState {
 
 function formStateToConfig(form: FormState) {
   if (form.server_type === "local") {
-    const args = form.local.args
-      .split("\n")
-      .map((s) => s.trim())
-      .filter(Boolean);
+    // Defensively handle the case where the user pastes a JSON array like
+    // ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"] — parse it
+    // directly rather than treating the whole thing as a single arg.
+    let args: string[];
+    const trimmedArgs = form.local.args.trim();
+    if (trimmedArgs.startsWith("[") && trimmedArgs.endsWith("]")) {
+      try {
+        const parsed = JSON.parse(trimmedArgs);
+        if (
+          Array.isArray(parsed) &&
+          parsed.every((a) => typeof a === "string")
+        ) {
+          args = parsed;
+        } else {
+          args = trimmedArgs
+            .split("\n")
+            .map((s) => s.trim())
+            .filter(Boolean);
+        }
+      } catch {
+        args = trimmedArgs
+          .split("\n")
+          .map((s) => s.trim())
+          .filter(Boolean);
+      }
+    } else {
+      // Normal case: one arg per line, strip any accidental surrounding quotes or commas.
+      args = form.local.args
+        .split("\n")
+        .map((s) =>
+          s
+            .trim()
+            .replace(/^["']|["'],?$|,$/g, "")
+            .trim(),
+        )
+        .filter(Boolean);
+    }
     const env: Record<string, string> = {};
     for (const pair of form.local.envPairs) {
       if (pair.key.trim()) env[pair.key.trim()] = pair.value;
@@ -650,14 +693,14 @@ function McpForm({
             gridColumn: "1 / -1",
           }}
         >
-          <FieldLabel>Source URL</FieldLabel>
+          <FieldLabel>Source URL (optional)</FieldLabel>
           <FieldInput
             value={form.source_url}
             onChange={(e) => set("source_url", e.target.value)}
             placeholder="https://github.com/modelcontextprotocol/servers"
           />
           <FieldHint>
-            Link to the server's documentation or repository (optional).
+            Link to the server's documentation or repository.
           </FieldHint>
         </div>
 
@@ -746,7 +789,9 @@ function McpForm({
               <FieldTextarea
                 value={form.local.args}
                 onChange={(e) => setLocal("args", e.target.value)}
-                placeholder={"/Users/marcus/Documents\n/Users/marcus/Projects"}
+                placeholder={
+                  "-y\n@modelcontextprotocol/server-filesystem\n/tmp"
+                }
                 style={{
                   minHeight: 64,
                   fontFamily: '"SF Mono","Fira Code",monospace',

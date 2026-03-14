@@ -13,6 +13,7 @@ use crate::{
         mcp_server::{CreateMcpServer, McpServer, UpdateMcpServer},
     },
     routes::AppState,
+    services::mcp::validate_tag,
 };
 
 // ─── MCP Servers ───────────────────────────────────────────────────────────────
@@ -31,7 +32,7 @@ pub async fn list_mcp(State(state): State<AppState>) -> AppResult<impl IntoRespo
     let user_id = get_user_id(&state).await?;
 
     let servers: Vec<McpServer> = sqlx::query_as(
-        "SELECT id, user_id, name, description, source_url, server_type, config, status, enabled, created_at, updated_at
+        "SELECT id, user_id, name, tag, description, source_url, server_type, config, status, enabled, created_at, updated_at
          FROM mcp_servers
          WHERE user_id = ?
          ORDER BY created_at ASC",
@@ -51,7 +52,7 @@ pub async fn get_mcp(
     let user_id = get_user_id(&state).await?;
 
     let server: Option<McpServer> = sqlx::query_as(
-        "SELECT id, user_id, name, description, source_url, server_type, config, status, enabled, created_at, updated_at
+        "SELECT id, user_id, name, tag, description, source_url, server_type, config, status, enabled, created_at, updated_at
          FROM mcp_servers
          WHERE id = ? AND user_id = ?",
     )
@@ -79,17 +80,26 @@ pub async fn create_mcp(
             "server_type must be 'local' or 'remote'".to_string(),
         ));
     }
+    // Validate tag if explicitly provided; the model will derive one from name
+    // otherwise, but we still validate the derived value.
+    if let Some(ref t) = payload.tag {
+        validate_tag(t).map_err(AppError::BadRequest)?;
+    }
 
     let user_id = get_user_id(&state).await?;
     let server = McpServer::new(&user_id, payload);
 
+    // Validate the final (possibly derived) tag.
+    validate_tag(&server.tag).map_err(AppError::BadRequest)?;
+
     sqlx::query(
-        "INSERT INTO mcp_servers (id, user_id, name, description, source_url, server_type, config, status, enabled, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO mcp_servers (id, user_id, name, tag, description, source_url, server_type, config, status, enabled, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&server.id)
     .bind(&server.user_id)
     .bind(&server.name)
+    .bind(&server.tag)
     .bind(&server.description)
     .bind(&server.source_url)
     .bind(&server.server_type)
@@ -100,6 +110,20 @@ pub async fn create_mcp(
     .bind(&server.updated_at)
     .execute(&state.pool)
     .await?;
+
+    // Mirror config to filesystem (best-effort).
+    if let Err(e) = state.mcp.write_config_file(&server).await {
+        tracing::warn!("mcp: failed to write config file: {}", e);
+    }
+
+    // Connect the newly created server if it is enabled.
+    if server.enabled {
+        let mcp = state.mcp.clone();
+        let server_id = server.id.clone();
+        tokio::spawn(async move {
+            mcp.connect_server(&server_id).await;
+        });
+    }
 
     Ok((StatusCode::CREATED, Json(json!({ "data": server }))))
 }
@@ -113,7 +137,7 @@ pub async fn update_mcp(
     let user_id = get_user_id(&state).await?;
 
     let existing: Option<McpServer> = sqlx::query_as(
-        "SELECT id, user_id, name, description, source_url, server_type, config, status, enabled, created_at, updated_at
+        "SELECT id, user_id, name, tag, description, source_url, server_type, config, status, enabled, created_at, updated_at
          FROM mcp_servers
          WHERE id = ? AND user_id = ?",
     )
@@ -128,6 +152,13 @@ pub async fn update_mcp(
     };
 
     let name = payload.name.as_deref().unwrap_or(&existing.name);
+    let tag = match &payload.tag {
+        Some(t) => {
+            validate_tag(t).map_err(AppError::BadRequest)?;
+            t.as_str()
+        }
+        None => existing.tag.as_str(),
+    };
     let description = match &payload.description {
         Some(v) => Some(v.as_str()),
         None => existing.description.as_deref(),
@@ -146,10 +177,11 @@ pub async fn update_mcp(
 
     sqlx::query(
         "UPDATE mcp_servers
-         SET name = ?, description = ?, source_url = ?, config = ?, enabled = ?, updated_at = ?
+         SET name = ?, tag = ?, description = ?, source_url = ?, config = ?, enabled = ?, updated_at = ?
          WHERE id = ? AND user_id = ?",
     )
     .bind(name)
+    .bind(tag)
     .bind(description)
     .bind(source_url)
     .bind(&config)
@@ -160,10 +192,12 @@ pub async fn update_mcp(
     .execute(&state.pool)
     .await?;
 
+    let was_enabled = existing.enabled;
     let updated = McpServer {
-        id: existing.id,
+        id: existing.id.clone(),
         user_id: existing.user_id,
         name: name.to_string(),
+        tag: tag.to_string(),
         description: description.map(|s| s.to_string()),
         source_url: source_url.map(|s| s.to_string()),
         server_type: existing.server_type,
@@ -174,20 +208,41 @@ pub async fn update_mcp(
         updated_at: now,
     };
 
+    // Mirror updated config to filesystem (best-effort).
+    if let Err(e) = state.mcp.write_config_file(&updated).await {
+        tracing::warn!("mcp: failed to write config file: {}", e);
+    }
+
+    // Reconnect if anything that affects the connection changed.
+    let config_changed = payload.config.is_some();
+    let tag_changed = payload.tag.is_some();
+    let mcp = state.mcp.clone();
+    let server_id = existing.id.clone();
+    tokio::spawn(async move {
+        if enabled && (!was_enabled || config_changed || tag_changed) {
+            // Newly enabled, config change, or tag change → reconnect.
+            mcp.connect_server(&server_id).await;
+        } else if !enabled && was_enabled {
+            // Disabled → disconnect.
+            mcp.disconnect_server(&server_id).await;
+        }
+    });
+
     Ok((StatusCode::OK, Json(json!({ "data": updated }))))
 }
 
 /// GET /api/mcp-servers/:id/tools
 ///
-/// Returns the list of tools exposed by this MCP server.
-/// TODO (Phase 7): Connect to live MCP process and enumerate tools dynamically.
+/// Returns the cached tool list for the given MCP server.  Tools are
+/// populated after the connection manager completes the `tools/list`
+/// handshake.  Returns an empty array when the server is not yet connected.
 pub async fn list_mcp_tools(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
 
-    // Verify the server exists and belongs to this user
+    // Verify the server exists and belongs to this user.
     let exists: Option<(String,)> =
         sqlx::query_as("SELECT id FROM mcp_servers WHERE id = ? AND user_id = ?")
             .bind(&id)
@@ -199,8 +254,8 @@ pub async fn list_mcp_tools(
         return Err(AppError::NotFound(format!("MCP server '{}' not found", id)));
     }
 
-    // TODO (Phase 7): enumerate tools from the live MCP process
-    Ok((StatusCode::OK, Json(json!({ "data": [] }))))
+    let tools = state.mcp.cached_tools(&id).await;
+    Ok((StatusCode::OK, Json(json!({ "data": tools }))))
 }
 
 /// DELETE /api/mcp-servers/:id
@@ -219,6 +274,23 @@ pub async fn delete_mcp(
     if result.rows_affected() == 0 {
         return Err(AppError::NotFound(format!("MCP server '{}' not found", id)));
     }
+
+    // Remove the config directory from the filesystem (best-effort).
+    {
+        let mcp2 = state.mcp.clone();
+        let id2 = id.clone();
+        tokio::spawn(async move {
+            if let Err(e) = mcp2.delete_config_dir(&id2).await {
+                tracing::warn!("mcp: failed to delete config dir for '{}': {}", id2, e);
+            }
+        });
+    }
+
+    // Disconnect and remove from the connection pool.
+    let mcp = state.mcp.clone();
+    tokio::spawn(async move {
+        mcp.disconnect_server(&id).await;
+    });
 
     Ok((StatusCode::OK, Json(json!({ "data": { "deleted": true } }))))
 }
