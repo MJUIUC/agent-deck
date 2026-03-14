@@ -35,7 +35,6 @@ export interface Credential {
 export interface CreateCredentialPayload {
   key: string;
   display_name: string;
-  service: string;
   credential_type: CredentialType;
   service_url?: string;
   username?: string;

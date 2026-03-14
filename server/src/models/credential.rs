@@ -46,7 +46,8 @@ pub struct CreateCredential {
     /// from other records (e.g. MCP server config, provider `credential_key`).
     pub key: String,
     pub display_name: String,
-    pub service: String,
+    #[serde(default)]
+    pub service: Option<String>,
     /// Must be one of: "api_key", "pat", "bearer_token", "key_secret_pair".
     pub credential_type: String,
     pub service_url: Option<String>,
@@ -66,7 +67,7 @@ pub struct CreateCredential {
 #[derive(Debug, Deserialize)]
 pub struct UpdateCredential {
     pub display_name: Option<String>,
-    pub service: Option<String>,
+    pub service: Option<String>, // remains Option — omitting it leaves the existing value unchanged
     pub credential_type: Option<String>,
     pub service_url: Option<String>,
     pub username: Option<String>,
@@ -98,7 +99,7 @@ impl Credential {
             id: Uuid::new_v4().to_string(),
             key: req.key.clone(),
             display_name: req.display_name.clone(),
-            service: req.service.clone(),
+            service: req.service.clone().unwrap_or_default(),
             credential_type: req.credential_type.clone(),
             service_url: req.service_url.clone(),
             username: req.username.clone(),

@@ -43,16 +43,6 @@ const CREDENTIAL_TYPE_LABELS: Record<CredentialType, string> = {
   key_secret_pair: "Key / Secret Pair",
 };
 
-const COMMON_SERVICES = [
-  "github",
-  "openai",
-  "anthropic",
-  "google",
-  "aws",
-  "azure",
-  "custom",
-];
-
 // ─── CredentialForm ───────────────────────────────────────────────────────────
 
 interface CredentialFormProps {
@@ -65,12 +55,7 @@ function CredentialForm({ editing, onSaved, onCancel }: CredentialFormProps) {
   const [key, setKey] = useState(editing?.key ?? "");
   const [keyTouched, setKeyTouched] = useState(false);
   const [displayName, setDisplayName] = useState(editing?.display_name ?? "");
-  const [service, setService] = useState(editing?.service ?? "");
-  const [serviceCustom, setServiceCustom] = useState(
-    editing?.service && !COMMON_SERVICES.includes(editing.service)
-      ? editing.service
-      : "",
-  );
+
   const [credentialType, setCredentialType] = useState<CredentialType>(
     (editing?.credential_type as CredentialType) ?? "api_key",
   );
@@ -86,23 +71,11 @@ function CredentialForm({ editing, onSaved, onCancel }: CredentialFormProps) {
 
   const isEditing = !!editing;
 
-  // Derive the effective service value (dropdown or custom text)
-  const effectiveService =
-    service === "custom" || (service === "" && serviceCustom)
-      ? serviceCustom
-      : service;
-
-  const handleServiceDropdown = (val: string) => {
-    setService(val);
-    if (val !== "custom") setServiceCustom("");
-  };
-
   const handleSave = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
 
     if (!displayName.trim()) return setError("Display name is required.");
-    if (!effectiveService.trim()) return setError("Service is required.");
     if (!isEditing && !key.trim())
       return setError(
         "Display name is required to generate a key — please fill it in first.",
@@ -113,7 +86,6 @@ function CredentialForm({ editing, onSaved, onCancel }: CredentialFormProps) {
       if (isEditing) {
         const payload: Record<string, string | undefined> = {
           display_name: displayName.trim(),
-          service: effectiveService.trim(),
           credential_type: credentialType,
           service_url: serviceUrl.trim() || undefined,
           username: username.trim() || undefined,
@@ -126,7 +98,6 @@ function CredentialForm({ editing, onSaved, onCancel }: CredentialFormProps) {
         const payload: CreateCredentialPayload = {
           key: key.trim(),
           display_name: displayName.trim(),
-          service: effectiveService.trim(),
           credential_type: credentialType,
           service_url: serviceUrl.trim() || undefined,
           username: username.trim() || undefined,
@@ -212,45 +183,6 @@ function CredentialForm({ editing, onSaved, onCancel }: CredentialFormProps) {
               ))}
             </FieldSelect>
           </div>
-
-          {/* Service */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <FieldLabel>Service</FieldLabel>
-            <FieldSelect
-              value={
-                service === "" && serviceCustom
-                  ? "custom"
-                  : COMMON_SERVICES.includes(service)
-                    ? service
-                    : service
-                      ? "custom"
-                      : ""
-              }
-              onChange={(e) => handleServiceDropdown(e.target.value)}
-            >
-              <option value="">Select service…</option>
-              {COMMON_SERVICES.filter((s) => s !== "custom").map((s) => (
-                <option key={s} value={s}>
-                  {s.charAt(0).toUpperCase() + s.slice(1)}
-                </option>
-              ))}
-              <option value="custom">Custom…</option>
-            </FieldSelect>
-          </div>
-
-          {/* Custom service text input */}
-          {(service === "custom" ||
-            (service === "" && serviceCustom) ||
-            (service && !COMMON_SERVICES.includes(service))) && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <FieldLabel>Service Name</FieldLabel>
-              <FieldInput
-                placeholder="e.g. my-internal-api"
-                value={serviceCustom}
-                onChange={(e) => setServiceCustom(e.target.value)}
-              />
-            </div>
-          )}
 
           {/* Optional metadata */}
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -627,19 +559,6 @@ function CredentialRow({ credential, onEdit, onDelete }: CredentialRowProps) {
         </div>
       </div>
 
-      {/* Service */}
-      <div
-        style={{
-          fontSize: 12,
-          color: "var(--text-secondary)",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {credential.service}
-      </div>
-
       {/* Type badge */}
       <div>
         <span
@@ -731,14 +650,14 @@ function CredentialTable({
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "1fr 100px 130px 90px 80px",
+          gridTemplateColumns: "1fr 130px 90px 80px",
           gap: 12,
           padding: "8px 14px",
           borderBottom: "1px solid var(--border-subtle)",
           background: "var(--bg-tertiary)",
         }}
       >
-        {["Name / Key", "Service", "Type", "Secret", "Created"].map((h) => (
+        {["Name / Key", "Type", "Secret", "Created"].map((h) => (
           <div
             key={h}
             style={{

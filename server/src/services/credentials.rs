@@ -356,7 +356,7 @@ pub async fn migrate_provider_api_key(
     let req = CreateCredential {
         key: cred_key.clone(),
         display_name: format!("{} API Key", provider_kind),
-        service: provider_kind.to_string(),
+        service: Some(provider_kind.to_string()),
         credential_type: "api_key".to_string(),
         service_url: None,
         username: None,
@@ -412,7 +412,7 @@ mod tests {
         CreateCredential {
             key: "openai_test".to_string(),
             display_name: "OpenAI Test Key".to_string(),
-            service: "openai".to_string(),
+            service: Some("openai".to_string()),
             credential_type: "api_key".to_string(),
             service_url: None,
             username: None,
@@ -426,7 +426,7 @@ mod tests {
         CreateCredential {
             key: "db_password_test".to_string(),
             display_name: "DB Password".to_string(),
-            service: "postgres".to_string(),
+            service: Some("postgres".to_string()),
             credential_type: "key_secret_pair".to_string(),
             service_url: Some("postgres://localhost/mydb".to_string()),
             username: Some("admin".to_string()),
