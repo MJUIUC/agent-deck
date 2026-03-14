@@ -4,6 +4,7 @@ import React, { useState } from "react";
 
 export type SettingsTab =
   | "providers"
+  | "credentials"
   | "personas"
   | "mcp-servers"
   | "mobile"

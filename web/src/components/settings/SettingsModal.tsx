@@ -4,6 +4,7 @@ import type { SettingsTab } from "./shared";
 import { SettingsSidebar } from "./SettingsNav";
 import { ProviderSettings } from "./ProviderSettings";
 import { PersonaSettings } from "./PersonaSettings";
+import { CredentialsSettings } from "./CredentialsSettings";
 import { McpServerSettings } from "./McpServerSettings";
 import { MobileSettings } from "./MobileSettings";
 import { GeneralSettings } from "./GeneralSettings";
@@ -124,6 +125,7 @@ export function SettingsModal({
               {tab === "providers" && (
                 <ProviderSettings onDataChanged={handleDataChanged} />
               )}
+              {tab === "credentials" && <CredentialsSettings />}
               {tab === "personas" && (
                 <PersonaSettings onDataChanged={handleDataChanged} />
               )}

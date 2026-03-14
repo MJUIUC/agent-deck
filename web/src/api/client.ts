@@ -11,6 +11,50 @@ import type {
   SlashCommandResponse,
 } from "@/types";
 
+// ── Credential types ──────────────────────────────────────────────────────────
+
+export type CredentialType =
+  | "api_key"
+  | "pat"
+  | "bearer_token"
+  | "key_secret_pair";
+
+export interface Credential {
+  id: string;
+  key: string;
+  display_name: string;
+  service: string;
+  credential_type: CredentialType;
+  service_url?: string;
+  username?: string;
+  email?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateCredentialPayload {
+  key: string;
+  display_name: string;
+  service: string;
+  credential_type: CredentialType;
+  service_url?: string;
+  username?: string;
+  email?: string;
+  secret?: string;
+  password?: string;
+}
+
+export interface UpdateCredentialPayload {
+  display_name?: string;
+  service?: string;
+  credential_type?: CredentialType;
+  service_url?: string;
+  username?: string;
+  email?: string;
+  secret?: string;
+  password?: string;
+}
+
 // Base fetch helper — throws on non-OK responses with the error body
 async function apiFetch<T>(
   path: string,
@@ -410,6 +454,36 @@ export const pairingApi = {
     };
   }> {
     return apiFetch("/api/pairing/generate", { method: "POST" });
+  },
+};
+
+// ── Credentials ───────────────────────────────────────────────────────────────
+
+export const credentialsApi = {
+  list(): Promise<Credential[]> {
+    return apiFetch("/api/credentials");
+  },
+
+  get(id: string): Promise<Credential> {
+    return apiFetch(`/api/credentials/${id}`);
+  },
+
+  create(payload: CreateCredentialPayload): Promise<Credential> {
+    return apiFetch("/api/credentials", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  update(id: string, payload: UpdateCredentialPayload): Promise<Credential> {
+    return apiFetch(`/api/credentials/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  delete(id: string): Promise<{ deleted: boolean; warnings?: string[] }> {
+    return apiFetch(`/api/credentials/${id}`, { method: "DELETE" });
   },
 };
 
