@@ -237,7 +237,7 @@ function CredentialForm({ editing, onSaved, onCancel }: CredentialFormProps) {
           {isServiceAccount && (
             <>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <FieldLabel>Username</FieldLabel>
+                <FieldLabel>Service Account Username</FieldLabel>
                 <FieldInput
                   placeholder="johndoe"
                   value={username}
@@ -246,12 +246,60 @@ function CredentialForm({ editing, onSaved, onCancel }: CredentialFormProps) {
               </div>
 
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <FieldLabel>Email</FieldLabel>
+                <FieldLabel>Service Account Email</FieldLabel>
                 <FieldInput
                   placeholder="john@example.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                 />
+              </div>
+
+              <div
+                style={{
+                  gridColumn: "1 / -1",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 6,
+                }}
+              >
+                <FieldLabel>Service Account Password</FieldLabel>
+                <div style={{ position: "relative" }}>
+                  <FieldInput
+                    mono
+                    type={showPassword ? "text" : "password"}
+                    placeholder={
+                      isEditing
+                        ? "Leave blank to keep existing"
+                        : "Paste password…"
+                    }
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    style={{ paddingRight: 38 }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    tabIndex={-1}
+                    style={{
+                      position: "absolute",
+                      right: 10,
+                      top: "50%",
+                      transform: "translateY(-50%)",
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      color: "var(--text-tertiary)",
+                      display: "flex",
+                      alignItems: "center",
+                      padding: 0,
+                    }}
+                  >
+                    {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                  </button>
+                </div>
+                <FieldHint>
+                  Encrypted with AES-256-GCM the moment it's saved.
+                </FieldHint>
               </div>
             </>
           )}
@@ -383,57 +431,6 @@ function CredentialForm({ editing, onSaved, onCancel }: CredentialFormProps) {
                   {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
                 </button>
               </div>
-            </div>
-          )}
-
-          {/* Password — service_account only, encrypted */}
-          {isServiceAccount && (
-            <div
-              style={{
-                gridColumn: "1 / -1",
-                display: "flex",
-                flexDirection: "column",
-                gap: 6,
-              }}
-            >
-              <FieldLabel>Password</FieldLabel>
-              <div style={{ position: "relative" }}>
-                <FieldInput
-                  mono
-                  type={showPassword ? "text" : "password"}
-                  placeholder={
-                    isEditing
-                      ? "Leave blank to keep existing"
-                      : "Paste password…"
-                  }
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  style={{ paddingRight: 38 }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((v) => !v)}
-                  tabIndex={-1}
-                  style={{
-                    position: "absolute",
-                    right: 10,
-                    top: "50%",
-                    transform: "translateY(-50%)",
-                    background: "none",
-                    border: "none",
-                    cursor: "pointer",
-                    color: "var(--text-tertiary)",
-                    display: "flex",
-                    alignItems: "center",
-                    padding: 0,
-                  }}
-                >
-                  {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
-                </button>
-              </div>
-              <FieldHint>
-                Encrypted with AES-256-GCM the moment it's saved.
-              </FieldHint>
             </div>
           )}
         </div>
