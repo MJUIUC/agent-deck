@@ -52,7 +52,9 @@ export function ChatView({
   );
   const isStreaming = useMessageStore((s) => s.isStreaming[thread.id] ?? false);
   const isSending = useMessageStore((s) => s.isSending[thread.id] ?? false);
-  const isLoadingMessages = useMessageStore((s) => s.isLoadingMessages);
+  const isLoadingMessages = useMessageStore(
+    (s) => s.isLoadingMessages[thread.id] ?? false,
+  );
   const messageError = useMessageStore((s) => s.error);
   const loadMessages = useMessageStore((s) => s.loadMessages);
   const sendMessage = useMessageStore((s) => s.sendMessage);

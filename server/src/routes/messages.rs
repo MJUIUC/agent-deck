@@ -130,8 +130,10 @@ pub async fn list(
 /// is triggered asynchronously and streams its response via the thread's SSE
 /// stream at `/api/threads/:id/stream`.
 ///
-/// In Phase 1 this just persists the user message and returns it.
-/// The agent invocation is wired up in Phase 2.
+/// The agent task yields once after spawning so the Tokio runtime has an
+/// opportunity to flush the HTTP 201 response before the agent begins work.
+/// Combined with wait_for_subscriber this ensures the client has the confirmed
+/// user message id before any SSE token can arrive.
 pub async fn send(
     State(state): State<AppState>,
     Path(thread_id): Path<String>,
@@ -181,15 +183,17 @@ pub async fn send(
         .execute(&state.pool)
         .await?;
 
-    // Spawn the agent run-loop as a background Tokio task.
-    // We clone state (cheap — it's all Arc/clone-cheap handles) and move
-    // the thread_id + content in.  The task waits briefly for the client's
-    // EventSource to connect before starting to stream tokens, so that tokens
-    // aren't fired into the void before the browser is ready to receive them.
     let run_state = state.clone();
     let run_thread_id = thread_id.clone();
     let run_content = payload.content.clone();
     tokio::spawn(async move {
+        // Yield once so the Tokio runtime can schedule the HTTP response flush
+        // before this task does any work. This is a best-effort yield — it gives
+        // the runtime a scheduling opportunity without adding a fixed delay or
+        // requiring a round-trip signal. The wait_for_subscriber below provides
+        // the stronger guarantee that the SSE connection is open before streaming.
+        tokio::task::yield_now().await;
+
         // Wait up to 3 seconds for the client SSE connection to be established.
         // If no subscriber appears in time we proceed anyway — the message_complete
         // event and DB persistence still happen, so the user sees the response on
