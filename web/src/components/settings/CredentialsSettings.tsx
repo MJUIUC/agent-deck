@@ -8,6 +8,14 @@ import {
 } from "@/api/client";
 import { Btn, FieldLabel, FieldInput, FieldSelect, FieldHint } from "./shared";
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface DeleteState {
+  credential: Credential;
+  warnings: string[];
+  deleting: boolean;
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
@@ -79,9 +87,15 @@ interface CredentialFormProps {
   editing: Credential | null;
   onSaved: () => void;
   onCancel: () => void;
+  onDelete?: (c: Credential) => void;
 }
 
-function CredentialForm({ editing, onSaved, onCancel }: CredentialFormProps) {
+function CredentialForm({
+  editing,
+  onSaved,
+  onCancel,
+  onDelete,
+}: CredentialFormProps) {
   const [key, setKey] = useState(editing?.key ?? "");
   const [keyTouched, setKeyTouched] = useState(false);
   const [displayName, setDisplayName] = useState(editing?.display_name ?? "");
@@ -453,12 +467,24 @@ function CredentialForm({ editing, onSaved, onCancel }: CredentialFormProps) {
           style={{
             display: "flex",
             justifyContent: "flex-end",
+            alignItems: "center",
             gap: 8,
             marginTop: 18,
             paddingTop: 16,
             borderTop: "1px solid var(--border-subtle)",
           }}
         >
+          {isEditing && onDelete && editing && (
+            <Btn
+              variant="danger"
+              sm
+              onClick={() => onDelete(editing)}
+              style={{ marginRight: "auto" }}
+            >
+              <Trash2 size={12} />
+              Delete
+            </Btn>
+          )}
           <Btn variant="ghost" onClick={onCancel}>
             Cancel
           </Btn>
@@ -599,12 +625,9 @@ function DeleteConfirmDialog({
 interface CredentialRowProps {
   credential: Credential;
   onEdit: () => void;
-  onDelete: () => void;
 }
 
-function CredentialRow({ credential, onEdit, onDelete }: CredentialRowProps) {
-  const [hovered, setHovered] = useState(false);
-
+function CredentialRow({ credential, onEdit }: CredentialRowProps) {
   const formattedDate = new Date(credential.created_at).toLocaleDateString(
     undefined,
     { year: "numeric", month: "short", day: "numeric" },
@@ -612,17 +635,12 @@ function CredentialRow({ credential, onEdit, onDelete }: CredentialRowProps) {
 
   return (
     <div
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
       style={{
         display: "grid",
-        gridTemplateColumns: "1fr 160px 80px 90px",
+        gridTemplateColumns: "1fr 160px 80px 90px 60px",
         alignItems: "center",
         gap: 12,
         padding: "12px 14px",
-        borderRadius: 8,
-        background: hovered ? "var(--bg-tertiary)" : "transparent",
-        transition: "background 0.12s",
       }}
     >
       {/* Display name + key */}
@@ -654,19 +672,16 @@ function CredentialRow({ credential, onEdit, onDelete }: CredentialRowProps) {
         </div>
       </div>
 
-      {/* Type badge */}
-      <div>
-        <span
-          style={{
-            display: "inline-block",
-            fontSize: 11,
-            color: "var(--text-secondary)",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {CREDENTIAL_TYPE_CONFIG[credential.credential_type as CredentialType]
-            ?.label ?? credential.credential_type}
-        </span>
+      {/* Type */}
+      <div
+        style={{
+          fontSize: 11,
+          color: "var(--text-secondary)",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {CREDENTIAL_TYPE_CONFIG[credential.credential_type as CredentialType]
+          ?.label ?? credential.credential_type}
       </div>
 
       {/* Masked secret */}
@@ -692,65 +707,35 @@ function CredentialRow({ credential, onEdit, onDelete }: CredentialRowProps) {
         {formattedDate}
       </div>
 
-      {/* Actions — sit outside the grid, absolutely positioned on hover */}
-      {hovered && (
-        <div
+      {/* Edit action */}
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <button
+          type="button"
+          onClick={onEdit}
           style={{
-            position: "absolute",
-            right: 14,
             display: "flex",
             alignItems: "center",
-            gap: 4,
+            gap: 5,
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            color: "var(--text-tertiary)",
+            fontSize: 12,
+            padding: "4px 8px",
+            borderRadius: 6,
+            fontFamily: "inherit",
           }}
+          onMouseEnter={(e) =>
+            (e.currentTarget.style.color = "var(--text-primary)")
+          }
+          onMouseLeave={(e) =>
+            (e.currentTarget.style.color = "var(--text-tertiary)")
+          }
         >
-          <button
-            type="button"
-            onClick={onEdit}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 5,
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              color: "var(--text-tertiary)",
-              fontSize: 12,
-              padding: "4px 8px",
-              borderRadius: 6,
-              fontFamily: "inherit",
-            }}
-            onMouseEnter={(e) =>
-              (e.currentTarget.style.color = "var(--text-primary)")
-            }
-            onMouseLeave={(e) =>
-              (e.currentTarget.style.color = "var(--text-tertiary)")
-            }
-          >
-            <Pencil size={11} />
-            Edit
-          </button>
-          <button
-            type="button"
-            onClick={onDelete}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              color: "var(--text-tertiary)",
-              padding: "4px 6px",
-              borderRadius: 6,
-            }}
-            onMouseEnter={(e) => (e.currentTarget.style.color = "var(--error)")}
-            onMouseLeave={(e) =>
-              (e.currentTarget.style.color = "var(--text-tertiary)")
-            }
-          >
-            <Trash2 size={13} />
-          </button>
-        </div>
-      )}
+          <Pencil size={11} />
+          Edit
+        </button>
+      </div>
     </div>
   );
 }
@@ -760,14 +745,9 @@ function CredentialRow({ credential, onEdit, onDelete }: CredentialRowProps) {
 interface CredentialTableProps {
   credentials: Credential[];
   onEdit: (c: Credential) => void;
-  onDelete: (c: Credential) => void;
 }
 
-function CredentialTable({
-  credentials,
-  onEdit,
-  onDelete,
-}: CredentialTableProps) {
+function CredentialTable({ credentials, onEdit }: CredentialTableProps) {
   return (
     <div
       style={{
@@ -781,14 +761,14 @@ function CredentialTable({
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "1fr 160px 80px 90px",
+          gridTemplateColumns: "1fr 160px 80px 90px 60px",
           gap: 12,
           padding: "8px 14px",
           borderBottom: "1px solid var(--border-subtle)",
           background: "var(--bg-tertiary)",
         }}
       >
-        {["Name / Key", "Type", "Secret", "Created"].map((h) => (
+        {["Name / Key", "Type", "Secret", "Created", ""].map((h) => (
           <div
             key={h}
             style={{
@@ -817,11 +797,7 @@ function CredentialTable({
               position: "relative",
             }}
           >
-            <CredentialRow
-              credential={c}
-              onEdit={() => onEdit(c)}
-              onDelete={() => onDelete(c)}
-            />
+            <CredentialRow credential={c} onEdit={() => onEdit(c)} />
           </div>
         ))}
       </div>
@@ -836,9 +812,7 @@ export function CredentialsSettings() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Credential | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<Credential | null>(null);
-  const [deleteWarnings, setDeleteWarnings] = useState<string[]>([]);
-  const [deleting, setDeleting] = useState(false);
+  const [deleteState, setDeleteState] = useState<DeleteState | null>(null);
 
   const loadCredentials = useCallback(async () => {
     setLoading(true);
@@ -866,29 +840,31 @@ export function CredentialsSettings() {
   }, []);
 
   const handleDeleteRequest = useCallback((c: Credential) => {
-    setDeleteTarget(c);
-    setDeleteWarnings([]);
+    setDeleteState({ credential: c, warnings: [], deleting: false });
   }, []);
 
   const handleDeleteConfirm = useCallback(async () => {
-    if (!deleteTarget) return;
-    setDeleting(true);
+    if (!deleteState) return;
+    setDeleteState((s) => s && { ...s, deleting: true });
     try {
-      const result = await credentialsApi.delete(deleteTarget.id);
-      // result is either void (204) or { deleted, warnings } (200)
+      const result = await credentialsApi.delete(deleteState.credential.id);
       const warnings =
         result && typeof result === "object" && "warnings" in result
           ? (result.warnings ?? [])
           : [];
-      setDeleteWarnings(warnings);
-      setDeleteTarget(null);
+      if (warnings.length > 0) {
+        setDeleteState((s) => s && { ...s, warnings, deleting: false });
+      } else {
+        setDeleteState(null);
+        setShowForm(false);
+        setEditing(null);
+      }
       await loadCredentials();
     } catch (err) {
       console.error("Delete failed:", err);
-    } finally {
-      setDeleting(false);
+      setDeleteState((s) => s && { ...s, deleting: false });
     }
-  }, [deleteTarget, loadCredentials]);
+  }, [deleteState, loadCredentials]);
 
   const openAdd = useCallback(() => {
     setEditing(null);
@@ -938,6 +914,7 @@ export function CredentialsSettings() {
           editing={editing}
           onSaved={handleSaved}
           onCancel={cancelForm}
+          onDelete={handleDeleteRequest}
         />
       )}
 
@@ -987,11 +964,7 @@ export function CredentialsSettings() {
         !showForm &&
         credentials.length > 0 && (
           <>
-            <CredentialTable
-              credentials={credentials}
-              onEdit={handleEdit}
-              onDelete={handleDeleteRequest}
-            />
+            <CredentialTable credentials={credentials} onEdit={handleEdit} />
             <div style={{ marginTop: 14 }}>
               <Btn variant="ghost" onClick={openAdd}>
                 <Plus size={13} />
@@ -1003,13 +976,13 @@ export function CredentialsSettings() {
       )}
 
       {/* Delete confirmation dialog */}
-      {deleteTarget && (
+      {deleteState && (
         <DeleteConfirmDialog
-          credential={deleteTarget}
-          warnings={deleteWarnings}
-          deleting={deleting}
+          credential={deleteState.credential}
+          warnings={deleteState.warnings}
+          deleting={deleteState.deleting}
           onConfirm={handleDeleteConfirm}
-          onCancel={() => setDeleteTarget(null)}
+          onCancel={() => setDeleteState(null)}
         />
       )}
     </div>
