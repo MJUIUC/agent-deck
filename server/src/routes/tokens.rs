@@ -244,7 +244,7 @@ pub async fn list_mcp_tools(
         return Err(AppError::NotFound(format!("MCP server '{}' not found", id)));
     }
 
-    let tools = state.mcp.cached_tools(&id);
+    let tools = state.mcp.cached_tools(&id).await;
     Ok((StatusCode::OK, Json(json!({ "data": tools }))))
 }
 

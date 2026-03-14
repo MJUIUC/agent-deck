@@ -130,8 +130,6 @@ struct McpConnectionInner {
     auth_header: Option<String>,
     /// The URL for remote servers.
     remote_url: Option<String>,
-    /// Cached tool list populated after `tools/list` succeeds.
-    tools: Vec<McpTool>,
     /// Whether the shutdown signal has been sent (prevents reconnect loops).
     shutting_down: bool,
 }
@@ -145,7 +143,6 @@ impl McpConnectionInner {
             http_client: None,
             auth_header: None,
             remote_url: None,
-            tools: Vec::new(),
             shutting_down: false,
         }
     }
@@ -158,7 +155,6 @@ impl McpConnectionInner {
             http_client: Some(client),
             auth_header,
             remote_url: Some(url),
-            tools: Vec::new(),
             shutting_down: false,
         }
     }
@@ -179,6 +175,10 @@ struct McpConnection {
     /// Current connection status (mirrored here for fast in-memory reads).
     #[allow(dead_code)]
     status: RwLock<McpStatus>,
+    /// Cached tool list — stored outside `inner` so it can be read from async
+    /// contexts without blocking.  Written once after `tools/list` succeeds,
+    /// then refreshed on every reconnect.
+    tools: RwLock<Vec<McpTool>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -327,16 +327,11 @@ impl McpConnectionManager {
     }
 
     /// Return the cached tool list for a server (empty if not connected yet).
-    pub fn cached_tools(&self, server_id: &str) -> Vec<McpTool> {
-        self.connections
-            .get(server_id)
-            .map(|conn| {
-                // We need a blocking read — this is only called from async HTTP
-                // handlers, so we use `blocking_read()` which is fine on a
-                // multi-thread Tokio runtime.
-                conn.inner.blocking_lock().tools.clone()
-            })
-            .unwrap_or_default()
+    pub async fn cached_tools(&self, server_id: &str) -> Vec<McpTool> {
+        match self.connections.get(server_id) {
+            Some(conn) => conn.tools.read().await.clone(),
+            None => Vec::new(),
+        }
     }
 
     /// Graceful shutdown: disconnect every server and kill every child process.
@@ -555,7 +550,6 @@ impl McpConnectionManager {
             "mcp: local server connected, {} tool(s) discovered",
             tools.len()
         );
-        conn.tools = tools;
 
         // Put stdout back onto the child for monitoring (via a shared Arc).
         // We wrap the reader in a background task that watches for EOF (process exit).
@@ -566,6 +560,7 @@ impl McpConnectionManager {
             server_id: row.id.clone(),
             inner: Mutex::new(conn),
             status: RwLock::new(McpStatus::Connected),
+            tools: RwLock::new(tools),
         };
 
         // Stash the stdout reader into a task-local slot so `monitor_connection`
@@ -698,12 +693,12 @@ impl McpConnectionManager {
 
         let mut inner = McpConnectionInner::new_remote(client, cfg.url, auth_header_value);
         inner.next_id = 3; // 1 and 2 used during handshake above
-        inner.tools = tools;
 
         Ok(McpConnection {
             server_id: row.id.clone(),
             inner: Mutex::new(inner),
             status: RwLock::new(McpStatus::Connected),
+            tools: RwLock::new(tools),
         })
     }
 
