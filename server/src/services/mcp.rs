@@ -358,7 +358,7 @@ impl McpConnectionManager {
                 Some(r) => r,
                 None => {
                     info!(
-                        "mcp: server {} no longer in DB, stopping supervision",
+                        "mcp server {} no longer in DB, stopping supervision",
                         server_id
                     );
                     return;
@@ -367,10 +367,7 @@ impl McpConnectionManager {
 
             // If the server was disabled externally, stop.
             if !row.enabled {
-                info!(
-                    "mcp: server {} is disabled, stopping supervision",
-                    server_id
-                );
+                info!("mcp server {} is disabled, stopping supervision", server_id);
                 self.set_db_status(server_id, "inactive").await;
                 self.broadcast_status(server_id, McpStatus::Inactive);
                 return;
@@ -387,7 +384,7 @@ impl McpConnectionManager {
                     // a sustained stable period.
                     connected_at = Some(tokio::time::Instant::now());
                     self.set_status(server_id, McpStatus::Connected).await;
-                    info!("mcp: server {} connected", server_id);
+                    info!("mcp server {} connected", server_id);
 
                     // Monitor until the connection drops (or shutdown requested).
                     self.monitor_connection(server_id, &conn).await;
@@ -407,7 +404,7 @@ impl McpConnectionManager {
                     connected_at = None;
 
                     warn!(
-                        "mcp: server {} connection lost, will retry in {}s",
+                        "mcp server {} connection lost, will retry in {}s",
                         server_id,
                         backoff.as_secs()
                     );
@@ -417,7 +414,7 @@ impl McpConnectionManager {
                 }
                 Err(e) => {
                     let msg = format!("{:#}", e);
-                    error!("mcp: server {} failed to connect: {}", server_id, msg);
+                    error!("mcp server {} failed to connect: {}", server_id, msg);
                     self.set_status(server_id, McpStatus::Error(msg)).await;
                 }
             }
@@ -501,13 +498,14 @@ impl McpConnectionManager {
 
         // Capture stderr in a background task for diagnostics.
         let server_id = row.id.clone();
+        let stderr_server_id = server_id.clone();
         tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 // stderr is normal for stdio MCP servers — they use it for
                 // human-readable status output since stdout is reserved for
                 // JSON-RPC.  Log at debug so it doesn't pollute normal output.
-                tracing::debug!("mcp[{}] stderr: {}", server_id, line);
+                tracing::debug!("mcp[{}] stderr: {}", stderr_server_id, line);
             }
         });
 
@@ -545,13 +543,14 @@ impl McpConnectionManager {
         let tools = Self::list_tools_stdio(&mut conn, &mut reader)
             .await
             .unwrap_or_else(|e| {
-                warn!("mcp: tools/list failed: {}", e);
+                warn!("tools/list failed: {}", e);
                 Vec::new()
             });
 
         info!(
-            "mcp: local server connected, {} tool(s) discovered",
-            tools.len()
+            server_id = %server_id,
+            tool_count = tools.len(),
+            "local mcp server detected"
         );
 
         // Put stdout back onto the child for monitoring (via a shared Arc).

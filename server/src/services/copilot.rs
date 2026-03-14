@@ -166,9 +166,9 @@ impl CopilotApiService {
     pub async fn shutdown(&self) {
         let mut guard = self.inner.child.lock().await;
         if let Some(child) = guard.as_mut() {
-            info!("copilot-api: sending SIGTERM to child process");
+            info!("sending SIGTERM to child process");
             if let Err(e) = child.start_kill() {
-                warn!("copilot-api: failed to kill child: {}", e);
+                warn!("failed to kill child: {}", e);
             }
             // Give it up to 5 seconds to exit gracefully
             let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
@@ -183,7 +183,7 @@ impl CopilotApiService {
     /// port is released), then clears the slot so the supervision loop spawns
     /// a fresh process.  The caller does not need to call `start()` again.
     pub async fn restart(&self) {
-        info!("copilot-api: restart requested (new GitHub token written to disk)");
+        info!("copilot-api restart requested (new GitHub token written to disk)");
         self.set_status(
             CopilotStatus::Reconnecting,
             Some("Restarting to load new token".to_string()),
@@ -193,7 +193,7 @@ impl CopilotApiService {
         let mut guard = self.inner.child.lock().await;
         if let Some(child) = guard.as_mut() {
             if let Err(e) = child.start_kill() {
-                warn!("copilot-api: failed to kill child during restart: {}", e);
+                warn!("copilot-api failed to kill child during restart: {}", e);
             }
             // Wait for the process to fully exit so the port (4141) is released
             // before the supervise_loop spawns a new instance.
@@ -217,18 +217,18 @@ impl CopilotApiService {
                     backoff = MIN_BACKOFF; // reset on successful spawn
 
                     self.set_status(CopilotStatus::Connecting, None).await;
-                    info!("copilot-api: process spawned, waiting for health check");
+                    info!("copilot-api process spawned, waiting for health check");
 
                     // Wait for health check to pass (with timeout)
                     match self.wait_until_healthy().await {
                         Ok(()) => {
                             self.set_status(CopilotStatus::Connected, None).await;
-                            info!("copilot-api: healthy on {}", self.base_url());
+                            info!("copilot-api healthy on {}", self.base_url());
 
                             // Block until the child exits
                             self.wait_for_exit().await;
 
-                            warn!("copilot-api: process exited unexpectedly");
+                            warn!("copilot-api process exited unexpectedly");
                             self.set_status(
                                 CopilotStatus::Reconnecting,
                                 Some("Process exited unexpectedly".to_string()),
@@ -236,7 +236,7 @@ impl CopilotApiService {
                             .await;
                         }
                         Err(e) => {
-                            warn!("copilot-api: health check timed out: {}", e);
+                            warn!("copilot-api health check timed out: {}", e);
                             self.set_status(
                                 CopilotStatus::Reconnecting,
                                 Some(format!("Health check failed: {}", e)),
@@ -252,13 +252,13 @@ impl CopilotApiService {
                     }
                 }
                 Err(e) => {
-                    let msg = format!("Failed to spawn copilot-api: {}", e);
+                    let msg = format!("Failed to spawn copilot-api {}", e);
                     error!("{}", msg);
                     self.set_status(CopilotStatus::Error(msg), None).await;
                 }
             }
 
-            info!("copilot-api: restarting in {} seconds", backoff.as_secs());
+            info!("copilot-api restarting in {} seconds", backoff.as_secs());
             sleep(backoff).await;
             backoff = (backoff * 2).min(MAX_BACKOFF);
         }
@@ -291,7 +291,7 @@ impl CopilotApiService {
                 if pid == current_pid {
                     continue;
                 }
-                info!("copilot-api: killing stale port holder PID {}", pid);
+                info!("copilot-api killing stale port holder PID {}", pid);
                 // Use `kill` via Command — no libc dependency needed.
                 let _ = Command::new("kill")
                     .args(["-TERM", &pid.to_string()])
@@ -441,7 +441,7 @@ impl CopilotApiService {
             return Ok(());
         }
 
-        info!("copilot-api: dist/main.js not found — building...");
+        info!("copilot-api dist/main.js not found — building...");
 
         let npm = Self::resolve_npm_binary().ok_or_else(|| {
             anyhow!(
@@ -451,7 +451,7 @@ impl CopilotApiService {
         })?;
 
         // Step 1: npm install
-        info!("copilot-api: running npm install");
+        info!("copilot-api running npm install");
         let install_status = Command::new(&npm)
             .args(["install"])
             .current_dir(copilot_dir)
@@ -477,7 +477,7 @@ impl CopilotApiService {
             ));
         }
 
-        info!("copilot-api: running tsdown build");
+        info!("copilot-api running tsdown build");
         let build_status = Command::new(&tsdown)
             .current_dir(copilot_dir)
             .stdout(Stdio::null())
@@ -493,7 +493,7 @@ impl CopilotApiService {
             ));
         }
 
-        info!("copilot-api: build complete — dist/main.js is ready");
+        info!("copilot-api build complete — dist/main.js is ready");
         Ok(())
     }
 
@@ -534,7 +534,7 @@ impl CopilotApiService {
                          Install Node.js 24+ (https://nodejs.org) to use the GitHub Copilot provider."
                     )
                 } else {
-                    anyhow!("Failed to spawn copilot-api: {}", e)
+                    anyhow!("Failed to spawn copilot-api {}", e)
                 }
             })?;
 
@@ -593,7 +593,7 @@ impl CopilotApiService {
                         }
                         Ok(None) => {} // still running
                         Err(e) => {
-                            warn!("copilot-api: error polling child: {}", e);
+                            warn!("copilot-api error polling child: {}", e);
                             *guard = None;
                             return;
                         }
