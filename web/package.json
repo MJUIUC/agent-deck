@@ -22,6 +22,7 @@
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.13.1",
     "remark-gfm": "^4.0.1",
+    "zukeeper": "^1.0.2",
     "zustand": "^5.0.11"
   },
   "devDependencies": {
@@ -38,6 +39,7 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
     "globals": "^16.5.0",
+    "happy-dom": "^20.8.4",
     "jsdom": "^27.0.1",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.48.0",

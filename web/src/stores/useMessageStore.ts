@@ -279,4 +279,14 @@ const storeCreator: StateCreator<MessageStore> = (set, get) => ({
   },
 });
 
-export const useMessageStore = create<MessageStore>(zukeeper(storeCreator));
+// Only wrap with zukeeper in a real browser dev environment — it uses
+// window.postMessage for devtools and swallows function return values,
+// which breaks async store actions in tests.
+const isDev =
+  typeof window !== "undefined" &&
+  typeof process !== "undefined" &&
+  process.env.NODE_ENV === "development";
+
+export const useMessageStore = create<MessageStore>(
+  isDev ? zukeeper(storeCreator) : storeCreator,
+);
