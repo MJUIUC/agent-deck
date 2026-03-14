@@ -13,8 +13,10 @@ data/
 .env
 server/.env
 
-# Build artifacts — allow the built web assets so the server can serve them
-# (the placeholder index.html is replaced by `npm run build` inside web/)
+# Build artifacts — ignore hashed JS/CSS bundles (new hash every build, causes
+# churn in git history) but keep index.html tracked so the server can serve the
+# app without a build step in CI/dev.
+server/public/assets/
 server/public/node_modules/
 
 # Node / web
