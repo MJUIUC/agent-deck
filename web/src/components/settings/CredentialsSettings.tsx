@@ -703,13 +703,15 @@ function CredentialRow({ credential, onEdit, onDelete }: CredentialRowProps) {
             right: 14,
             display: "flex",
             gap: 6,
+            background: "var(--bg-tertiary)",
+            paddingLeft: 8,
           }}
         >
-          <Btn sm variant="ghost" onClick={onEdit}>
+          <Btn sm variant="ghost" onClick={onEdit} style={{ opacity: 0.7 }}>
             <Pencil size={11} />
             Edit
           </Btn>
-          <Btn sm variant="danger" onClick={onDelete}>
+          <Btn sm variant="danger" onClick={onDelete} style={{ opacity: 0.7 }}>
             <Trash2 size={11} />
           </Btn>
         </div>
