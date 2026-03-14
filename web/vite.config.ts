@@ -12,8 +12,10 @@ export default defineConfig({
   },
   test: {
     globals: true,
-    environment: "node",
+    environment: "jsdom",
+    setupFiles: ["src/test/setup.ts"],
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+    pool: "vmThreads",
   },
   build: {
     outDir: path.resolve(__dirname, "../server/public"),
