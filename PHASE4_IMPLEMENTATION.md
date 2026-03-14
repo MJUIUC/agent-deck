@@ -77,7 +77,7 @@ Additionally, SQLite pool set to `max_connections(1)` with `.serialized(true)` t
 
 ---
 
-## Story 4.1 — Credential Store and Encryption
+## Story 4.1 — Credential Store and Encryption ✅ Complete
 
 **Branch:** `feature/phase4-credential-store`
 
@@ -152,35 +152,59 @@ The `providers.api_key` column currently stores keys as plaintext. Write a migra
 
 ### Testing checklist
 
-- [ ] Master key generated on first run, same key on restart
-- [ ] Master key absent from all log output
-- [ ] Encrypt → decrypt round-trip produces original plaintext
-- [ ] Different encryptions of the same plaintext produce different ciphertext (nonce uniqueness)
-- [ ] `GET /api/credentials` never contains `encrypted_data`
-- [ ] Provider chat still works after migration (key resolution through credential store)
-- [ ] `cargo build` passes, all tests pass
+- [x] Master key generated on first run, same key on restart
+- [x] Master key absent from all log output
+- [x] Encrypt → decrypt round-trip produces original plaintext
+- [x] Different encryptions of the same plaintext produce different ciphertext (nonce uniqueness)
+- [x] `GET /api/credentials` never contains `encrypted_data`
+- [x] Provider chat still works after migration (key resolution through credential store)
+- [x] `cargo build` passes, all tests pass (139/139)
+
+### What was built
+
+- `server/src/services/encryption.rs` — AES-256-GCM `encrypt`/`decrypt` helpers with random 96-bit nonce, base64-encoded `nonce || ciphertext || auth_tag` output format
+- `server/src/services/credentials.rs` — master key bootstrap (`get_or_create_master_key`), full CRUD service, `resolve_secret`, `migrate_provider_api_key`, 20 unit tests
+- `server/src/models/credential.rs` — `Credential`, `CredentialWithData`, `CreateCredential`, `UpdateCredential`, `CredentialSecret` structs. `service` field is `Option<String>` with `#[serde(default)]`
+- `server/src/routes/credentials.rs` — REST handlers for `GET/POST/PUT/DELETE /api/credentials` + route-level integration tests
+- `server/src/db/migrations/004_phase4_credentials.sql` — `credentials` table, `credential_key` column on `providers`
+- `server/src/db/migrations/005_credential_type_service_account.sql` — adds `service_account` to `credential_type` CHECK constraint via table-recreate (SQLite pattern)
 
 ---
 
-## Story 4.2 — Credentials Settings UI
+## Story 4.2 — Credentials Settings UI ✅ Complete
 
 **Branch:** `feature/phase4-credentials-ui`
 
-### What to build
+### What was built
 
-New route: `/settings/credentials`
+**Navigation:** 🔑 Credentials nav item added to `SettingsNav` between Providers and Personas. `"credentials"` added to `SettingsTab` union. `SettingsModal` renders `<CredentialsSettings />` on that tab.
 
-**List view:** Table showing all credentials with columns: display name, service, credential type, created date. No secret values — show a masked indicator like `••••••••`. Edit and delete buttons per row.
+**List view:** Table with columns: Name/Key, Type, Secret (masked `••••••••`), Created. Always-visible Edit button per row. No hover overlay — edit opens the form inline, delete lives inside the edit form.
 
-**Add/edit form:** Fields: display name (text), service (text or dropdown with common values: github, openai, anthropic, custom), credential type (dropdown: API Key, Personal Access Token, Bearer Token, Key/Secret Pair), secret value (password input, masked). For `key_secret_pair` type, show two fields (key and secret).
+**Credential types:** `api_key`, `pat`, `bearer_token`, `key_secret_pair`, `service_account`. Each type has a `CREDENTIAL_TYPE_CONFIG` entry with `label`, `keyLabel`, and `keyPlaceholder` — all per-type string logic is centralised here.
 
-**Delete:** Confirmation dialog. If the credential is referenced by an MCP server's `credential_key`, show a warning listing which servers use it.
+**Add form:**
+- Display Name + Credential Type (top row)
+- Service URL (all types)
+- `service_account` type only: Service Account Username, Service Account Email (plaintext — visible to agents), Service Account Password (encrypted)
+- All other types: API Key field (+ API Secret for `key_secret_pair`)
+- Key field: auto-generated from display name on blur via `slugify()`, only alphanumerics and underscores accepted (`sanitizeKey()` enforced on every keystroke), `keyTouched` flag prevents overwriting manual edits
+- Credential type locked to dropdown selection — cannot be changed after creation
 
-**Provider settings integration:** The existing provider add/edit form's API key field now reads from and writes to the credential store. When editing a provider, if it has a linked credential, the API key field shows `••••••••` with a "Change" button. Saving with a new key value updates the credential.
+**Edit form:**
+- Same fields as add, key shown read-only with hint
+- Credential type select disabled with hint
+- Save Changes button disabled until form is actually dirty (compares all fields against original `editing` record)
+- If a secret field is dirty, clicking Save shows an inline `WarningBox` ("Replace existing secret?") before the API call — matches the `GeneralSettings` pattern
+- Delete button on the left of the action bar, triggers `DeleteConfirmDialog` with MCP server reference warnings
+
+**API client:** `credentialsApi` (`list`, `get`, `create`, `update`, `delete`) + `Credential`, `CreateCredentialPayload`, `UpdateCredentialPayload`, `CredentialType` types. `apiFetch` fixed to handle 204/empty responses without throwing.
+
+**Not yet done:** Provider settings integration (masked API key field + "Change" button linked to credential store) — deferred to after 4.3 when provider ↔ credential linkage is settled.
 
 ### Navigation
 
-Add "Credentials" to the settings sidebar nav, between "Providers" and "MCP Servers" (logical flow: you set up credentials, then reference them when configuring MCP servers).
+Credentials sits between Providers and Personas in the sidebar. Logical flow: Providers → Credentials → MCP Servers.
 
 ---
 
