@@ -112,12 +112,23 @@ function CredentialForm({
   const [showPassword, setShowPassword] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showSecretWarning, setShowSecretWarning] = useState(false);
 
   const isEditing = !!editing;
+
+  // True when editing and the user has typed a new secret/password value
+  const secretIsDirty = isEditing && (!!secret || !!password);
 
   const handleSave = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
+
+    // If editing and a secret field is dirty, show the warning first.
+    // The warning's confirm button calls doSave() directly.
+    if (secretIsDirty && !showSecretWarning) {
+      setShowSecretWarning(true);
+      return;
+    }
 
     if (!displayName.trim()) return setError("Display name is required.");
     if (!isEditing && !key.trim())
@@ -469,6 +480,55 @@ function CredentialForm({
           </p>
         )}
 
+        {/* Secret replacement warning — mirrors GeneralSettings WarningBox pattern */}
+        {showSecretWarning && (
+          <div
+            style={{
+              marginTop: 14,
+              background: "rgba(196,162,74,0.08)",
+              border: "1px solid rgba(196,162,74,0.35)",
+              borderRadius: 8,
+              padding: "14px 16px",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 13,
+                color: "var(--warning)",
+                fontWeight: 600,
+                marginBottom: 6,
+              }}
+            >
+              ⚠ Replace existing secret?
+            </div>
+            <p
+              style={{
+                margin: "0 0 12px",
+                fontSize: 13,
+                color: "var(--text-secondary)",
+                lineHeight: 1.55,
+              }}
+            >
+              The existing secret will be permanently overwritten and cannot be
+              recovered. Make sure you have the new value saved somewhere safe
+              before continuing.
+            </p>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Btn variant="danger" sm onClick={handleSave} disabled={saving}>
+                {saving ? "Saving…" : "Yes, replace it"}
+              </Btn>
+              <Btn
+                variant="ghost"
+                sm
+                onClick={() => setShowSecretWarning(false)}
+                disabled={saving}
+              >
+                Cancel
+              </Btn>
+            </div>
+          </div>
+        )}
+
         <div
           style={{
             display: "flex",
@@ -494,24 +554,30 @@ function CredentialForm({
           <Btn variant="ghost" onClick={onCancel}>
             Cancel
           </Btn>
-          <button
-            type="submit"
-            disabled={saving}
-            style={{
-              padding: "8px 16px",
-              borderRadius: 7,
-              fontSize: 13,
-              fontWeight: 500,
-              cursor: saving ? "default" : "pointer",
-              border: "none",
-              background: "var(--accent-primary)",
-              color: "var(--text-inverse)",
-              opacity: saving ? 0.5 : 1,
-              fontFamily: "inherit",
-            }}
-          >
-            {saving ? "Saving…" : isEditing ? "Save Changes" : "Add Credential"}
-          </button>
+          {!showSecretWarning && (
+            <button
+              type="submit"
+              disabled={saving}
+              style={{
+                padding: "8px 16px",
+                borderRadius: 7,
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: saving ? "default" : "pointer",
+                border: "none",
+                background: "var(--accent-primary)",
+                color: "var(--text-inverse)",
+                opacity: saving ? 0.5 : 1,
+                fontFamily: "inherit",
+              }}
+            >
+              {saving
+                ? "Saving…"
+                : isEditing
+                  ? "Save Changes"
+                  : "Add Credential"}
+            </button>
+          )}
         </div>
       </form>
     </div>
