@@ -291,14 +291,14 @@ function CredentialForm({ editing, onSaved, onCancel }: CredentialFormProps) {
             }}
           >
             <FieldLabel>
-              {isKeySecretPair ? "Key / Token" : "Secret"}
+              {isKeySecretPair ? "Key / Token" : "API Key"}
             </FieldLabel>
             <div style={{ position: "relative" }}>
               <FieldInput
                 mono
                 type={showSecret ? "text" : "password"}
                 placeholder={
-                  isEditing ? "Leave blank to keep existing" : "Paste secret…"
+                  isEditing ? "Leave blank to keep existing" : "Paste API key…"
                 }
                 value={secret}
                 onChange={(e) => setSecret(e.target.value)}
@@ -325,7 +325,9 @@ function CredentialForm({ editing, onSaved, onCancel }: CredentialFormProps) {
                 {showSecret ? <EyeOff size={14} /> : <Eye size={14} />}
               </button>
             </div>
-            <FieldHint>Encrypted with AES-256-GCM at rest.</FieldHint>
+            <FieldHint>
+              Your API key — encrypted with AES-256-GCM the moment it's saved.
+            </FieldHint>
           </div>
 
           {/* Password (key_secret_pair only) */}
