@@ -179,3 +179,18 @@ export interface StreamingMessage {
   content: string;
   started_at: string;
 }
+
+// ── Thread state machine ──────────────────────────────────────────────────────
+
+export type ThreadPhase =
+  | { status: "idle" }
+  | { status: "sending"; optimisticId: string }
+  | { status: "streaming"; content: string }
+  | { status: "error"; message: string; recoverable: boolean };
+
+export interface ThreadState {
+  messages: Message[];
+  phase: ThreadPhase;
+}
+
+export type ThreadMap = Record<string, ThreadState>;

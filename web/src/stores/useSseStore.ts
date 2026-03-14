@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { useMessageStore } from "./useMessageStore";
 import { useThreadStore } from "./useThreadStore";
+import { bufferToken } from "./tokenBuffer";
 import type { SseThreadEvent, SseGlobalEvent } from "@/types";
 
 // Reconnection config
@@ -97,7 +98,9 @@ export const useSseStore = create<SseStore>((set, get) => ({
         try {
           const data = JSON.parse(e.data) as SseThreadEvent;
           if (data.event === "token") {
-            useMessageStore.getState().appendToken(threadId, data.token);
+            bufferToken(threadId, data.token, (tid, buffered) => {
+              useMessageStore.getState().appendToken(tid, buffered);
+            });
           }
         } catch {
           // ignore parse errors
@@ -165,6 +168,19 @@ export const useSseStore = create<SseStore>((set, get) => ({
       const handleConnError = () => {
         // Only attempt reconnect if this is still the active thread
         if (get().threadConnectionId !== threadId) return;
+
+        // If the message store shows this thread was mid-stream, the agent
+        // run is gone and message_complete will never arrive. Surface an error
+        // so the phase resets to idle and the UI shows a retry prompt instead
+        // of staying stuck in a permanent streaming state.
+        const msgState = useMessageStore.getState();
+        const phase = msgState.threads[threadId]?.phase;
+        if (phase?.status === "streaming" || phase?.status === "sending") {
+          msgState.setStreamingError(
+            threadId,
+            "Response interrupted, please try again",
+          );
+        }
 
         set({
           threadConnected: false,

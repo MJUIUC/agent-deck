@@ -5,7 +5,7 @@ import {
   useCallback,
   useRef,
 } from "react";
-import type { Thread, Message } from "@/types";
+import type { Thread, ThreadState } from "@/types";
 import { useMessageStore } from "@/stores/useMessageStore";
 import { useSseStore } from "@/stores/useSseStore";
 import { useThreadStore } from "@/stores/useThreadStore";
@@ -26,10 +26,12 @@ interface ChatViewProps {
   onMobileMenuOpen?: () => void;
 }
 
-// Stable fallbacks — same reference every render, so Zustand's getSnapshot
+// Stable fallback — same reference every render, so Zustand's getSnapshot
 // never thinks the value changed when the thread key is simply absent.
-const EMPTY_MESSAGES: Message[] = [];
-const EMPTY_STRING = "";
+const IDLE_THREAD_STATE: ThreadState = {
+  messages: [],
+  phase: { status: "idle" },
+};
 
 export function ChatView({
   thread,
@@ -44,20 +46,29 @@ export function ChatView({
   const threadIdRef = useRef(thread.id);
   threadIdRef.current = thread.id;
 
-  const messages = useMessageStore(
-    (s) => s.messagesByThread[thread.id] ?? EMPTY_MESSAGES,
+  // Single selector — one snapshot, one re-render per state change.
+  const threadState = useMessageStore(
+    (s) => s.threads[thread.id] ?? IDLE_THREAD_STATE,
   );
-  const streamingContent = useMessageStore(
-    (s) => s.streamingContent[thread.id] ?? EMPTY_STRING,
-  );
-  const isStreaming = useMessageStore((s) => s.isStreaming[thread.id] ?? false);
-  const isSending = useMessageStore((s) => s.isSending[thread.id] ?? false);
-  const isLoadingMessages = useMessageStore(
-    (s) => s.isLoadingMessages[thread.id] ?? false,
-  );
-  const messageError = useMessageStore((s) => s.error);
   const loadMessages = useMessageStore((s) => s.loadMessages);
   const sendMessage = useMessageStore((s) => s.sendMessage);
+
+  const { messages, phase } = threadState;
+  const isStreaming = phase.status === "streaming";
+  const isSending = phase.status === "sending";
+  const streamingContent = phase.status === "streaming" ? phase.content : "";
+  const messageError = phase.status === "error" ? phase.message : null;
+
+  const visibleMessages = messages.filter((m) => m.visibility !== "hidden");
+
+  // Show the loading/empty state when there are no visible messages and we are
+  // idle. Using visibleMessages (not messages) means threads whose only
+  // messages are hidden (system prompts, tool activity, etc.) don't get stuck
+  // showing the empty-thread prompt and blocking the StreamingBubble.
+  // streaming and "loading" are mutually exclusive by construction — they are
+  // different values of the same field.
+  const isLoadingMessages =
+    visibleMessages.length === 0 && phase.status === "idle";
 
   const connectThread = useSseStore((s) => s.connectThread);
   const disconnectThread = useSseStore((s) => s.disconnectThread);
@@ -91,7 +102,6 @@ export function ChatView({
     bottomRef.current?.scrollIntoView({ behavior: "instant" });
   });
 
-  const visibleMessages = messages.filter((m) => m.visibility !== "hidden");
   const grouped = groupByDate(visibleMessages);
 
   const persona = thread.persona;
@@ -159,8 +169,9 @@ export function ChatView({
               </div>
             ))}
 
-            {/* Streaming bubble */}
-            {isStreaming && (
+            {/* Streaming bubble — shown as soon as the message is sent so the
+                animation appears immediately, not only after the first token */}
+            {(isSending || isStreaming) && (
               <StreamingBubble
                 personaEmoji={personaEmoji}
                 personaName={personaName}

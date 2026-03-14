@@ -1,3 +1,74 @@
+# Phase 4 — Implementation Guide
+
+---
+
+## Phase 4.1a — Streaming Fix and Frontend State Machine ✅ Complete
+
+**Branch:** `feature/phase4-1a-frontend-state` → merged into `dev`
+**Commits:** `c4ae600`, `6162339`
+
+### What was built
+
+This work was triggered by a bug where the POST `/api/threads/:id/messages` response appeared to block until the agent finished generating — making the UI look frozen for the duration of the entire LLM response. Investigation revealed two separate root causes, one on the server and one on the client.
+
+#### Server: agent execution decoupled from HTTP response lifecycle
+
+**Problem:** `tokio::spawn` + `yield_now()` was not a reliable way to ensure the HTTP 201 response flushed before the agent task started work. The spawned task could and did race the handler for DB connections, causing the response to be held up until the agent completed on long threads.
+
+**Fix:** Introduced an `AgentJob` mpsc channel on `AppState`. The `send` handler writes a job to the channel and returns `201` immediately. A background worker spawned at startup (`start_agent_worker`) drains the channel and runs each job in its own `tokio::spawn`, fully decoupled from the HTTP request lifecycle.
+
+Additionally, SQLite pool set to `max_connections(1)` with `.serialized(true)` to eliminate write contention between concurrent handler and agent DB access.
+
+#### Client: Vite proxy HTTP/1.1 head-of-line blocking
+
+**Problem:** The persistent SSE connection (`/api/threads/:id/stream`) and the POST request were being routed through the Vite dev proxy over the same HTTP/1.1 keep-alive TCP connection to the Rust server. HTTP/1.1 allows only one in-flight response per connection, so the POST queued behind the infinite SSE response and wasn't delivered to the browser until the SSE connection cycled.
+
+**Fix:** Added `agent: new http.Agent({ keepAlive: false })` to the Vite proxy config for `/api`, forcing a fresh TCP connection per request.
+
+#### Client: streaming phase state machine
+
+**Problems:**
+- `StreamingBubble` only rendered when `phase === "streaming"`, meaning nothing appeared between hitting send and the first SSE token arriving
+- `sendMessage`'s POST success path was forcing `phase → idle` when it saw `sending`, which dismissed the bubble before tokens arrived
+- Every individual SSE token triggered a full Zustand set → React render → ReactMarkdown parse cycle, causing visible jank on fast streams
+- Leftover tokens in the RAF buffer after `message_complete` arrived caused a ghost bubble fragment
+
+**Fixes:**
+- `StreamingBubble` now renders on `isSending || isStreaming` — appears immediately on send
+- POST success path never touches `phase` — all phase transitions are SSE-driven: `sending → streaming` (first token), `streaming → idle` (message_complete)
+- Introduced `tokenBuffer.ts`: batches incoming tokens and flushes once per animation frame (~60fps) via `requestAnimationFrame`, one Zustand update and one ReactMarkdown parse per frame
+- `finalizeStream` calls `cancelTokenBuffer` to cancel any pending RAF and discard buffered tokens before transitioning to idle
+
+### Files changed
+
+**Server:**
+- `server/src/routes/mod.rs` — `AgentJob` struct, `agent_tx` on `AppState`, `start_agent_worker`
+- `server/src/routes/messages.rs` — send handler uses `agent_tx.send()` instead of `tokio::spawn`
+- `server/src/routes/sse.rs` — `make_state()` test helper updated for `agent_tx`
+- `server/src/db/mod.rs` — `max_connections(1)`, `.serialized(true)`
+
+**Client:**
+- `web/src/stores/tokenBuffer.ts` _(new)_ — `bufferToken`, `cancelTokenBuffer`
+- `web/src/stores/useMessageStore.ts` — `finalizeStream` calls `cancelTokenBuffer`; POST success never touches phase
+- `web/src/stores/useSseStore.ts` — token handler uses `bufferToken` instead of calling `appendToken` directly
+- `web/src/components/ChatView.tsx` — `StreamingBubble` shown on `isSending || isStreaming`
+- `web/vite.config.ts` — `agent: new http.Agent({ keepAlive: false })` on proxy
+
+**Tests:**
+- `web/src/stores/tokenBuffer.test.ts` _(new)_ — 11 tests covering buffering, RAF scheduling, cancellation, multi-thread isolation
+- `web/src/stores/useMessageStore.test.ts` — 8 new tests: phase isolation on POST success, `cancelTokenBuffer` called by `finalizeStream`, `appendToken` from all phases
+- `server/src/routes/mod.rs` — 5 new tests: channel non-blocking send, FIFO ordering, clean shutdown, backpressure, field roundtrip
+
+### Acceptance criteria met
+
+- ✅ POST `/messages` returns 201 in ~3ms regardless of agent response length
+- ✅ Streaming bubble appears immediately on send (no delay waiting for first token)
+- ✅ Tokens stream smoothly at display rate without jank
+- ✅ No ghost bubble fragment after stream completes
+- ✅ 139 Rust tests passing, frontend type-checks clean
+
+---
+
 # Phase 4 — Credentials and MCP Integration: Implementation Guide
 
 **Scope:** Encrypted credential storage for static secrets, MCP server connection management, tool discovery, agent integration, and UI polish. After this phase, agents can use external tools in chat.

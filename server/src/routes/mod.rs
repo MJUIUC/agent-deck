@@ -10,7 +10,7 @@ use axum::{
 use sqlx::SqlitePool;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc};
 use tower_http::{services::ServeDir, trace::TraceLayer};
 use tracing::warn;
 
@@ -35,6 +35,15 @@ pub mod sse;
 pub mod threads;
 pub mod tokens;
 
+/// A unit of work sent from the `send` message handler to the background
+/// agent worker.  Decouples the HTTP response lifecycle from agent execution —
+/// the handler enqueues the job and returns the 201 immediately; the worker
+/// drains the queue independently.
+pub struct AgentJob {
+    pub thread_id: String,
+    pub content: String,
+}
+
 /// Application state shared across all handlers via Axum's `State` extractor.
 #[derive(Clone)]
 pub struct AppState {
@@ -50,12 +59,39 @@ pub struct AppState {
     pub thread_senders: Arc<
         Mutex<HashMap<String, Vec<tokio::sync::mpsc::Sender<crate::routes::sse::ThreadEvent>>>>,
     >,
+    /// Agent work queue.  The `send` handler drops a job here and returns the
+    /// HTTP 201 immediately.  A single background task drains this channel and
+    /// runs each agent job in its own spawned task, keeping the queue itself
+    /// non-blocking.
+    pub agent_tx: mpsc::Sender<AgentJob>,
     /// Handle to the copilot-api side-car service.  `None` when the service
     /// could not be started (e.g. `bun` not on PATH).
     pub copilot: Option<CopilotApiService>,
 }
 
 /// Build the main application router.
+/// Spawn the background task that drains the agent work queue.
+///
+/// Each job is run in its own `tokio::spawn` so that slow or failing agent
+/// runs never block the queue from processing subsequent jobs.
+fn start_agent_worker(mut rx: mpsc::Receiver<AgentJob>, state: AppState) {
+    tokio::spawn(async move {
+        while let Some(job) = rx.recv().await {
+            let job_state = state.clone();
+            tokio::spawn(async move {
+                // Wait up to 3 seconds for the SSE client to connect before
+                // starting to stream.  If no subscriber appears in time we
+                // proceed anyway — message_complete and DB persistence still
+                // happen so the user sees the response on next load.
+                job_state
+                    .wait_for_subscriber(&job.thread_id, std::time::Duration::from_secs(3))
+                    .await;
+                crate::services::agent::run(job_state, job.thread_id, job.content).await;
+            });
+        }
+    });
+}
+
 pub async fn build_router(pool: SqlitePool, config: Config) -> anyhow::Result<Router> {
     // Initialize auth token and machine secret (generates on first run)
     let auth_token = auth_service::get_or_create_auth_token(&pool).await?;
@@ -80,6 +116,10 @@ pub async fn build_router(pool: SqlitePool, config: Config) -> anyhow::Result<Ro
     let copilot = CopilotApiService::new(global_tx.clone());
     let copilot_handle = copilot.clone();
 
+    // Agent work queue — capacity of 64 is generous; in practice there will
+    // rarely be more than a handful of concurrent agent runs.
+    let (agent_tx, agent_rx) = mpsc::channel::<AgentJob>(64);
+
     let state = AppState {
         pool,
         config: config.clone(),
@@ -87,8 +127,12 @@ pub async fn build_router(pool: SqlitePool, config: Config) -> anyhow::Result<Ro
         auth_token,
         global_tx,
         thread_senders: Arc::new(Mutex::new(HashMap::new())),
+        agent_tx,
         copilot: Some(copilot_handle),
     };
+
+    // Start the agent worker before the router starts accepting requests.
+    start_agent_worker(agent_rx, state.clone());
 
     // Start copilot-api supervision in the background.
     // This is non-blocking — the server starts immediately regardless of whether
@@ -356,6 +400,102 @@ mod tests {
         http::{Request, StatusCode},
     };
     use tower::ServiceExt;
+
+    // ── AgentJob channel tests ────────────────────────────────────────────────
+
+    /// The agent_tx channel must accept a job without blocking — the send
+    /// handler depends on this being a cheap, non-blocking enqueue.
+    #[tokio::test]
+    async fn agent_tx_send_does_not_block() {
+        let (tx, _rx) = mpsc::channel::<AgentJob>(64);
+        // try_send (non-async) must succeed immediately — channel has capacity.
+        tx.try_send(AgentJob {
+            thread_id: "t1".to_string(),
+            content: "hello".to_string(),
+        })
+        .expect("send should succeed without blocking");
+    }
+
+    /// Jobs sent to agent_tx are received by the worker in order.
+    #[tokio::test]
+    async fn agent_worker_receives_jobs_in_order() {
+        let (tx, mut rx) = mpsc::channel::<AgentJob>(64);
+
+        tx.send(AgentJob {
+            thread_id: "t1".to_string(),
+            content: "first".to_string(),
+        })
+        .await
+        .unwrap();
+
+        tx.send(AgentJob {
+            thread_id: "t2".to_string(),
+            content: "second".to_string(),
+        })
+        .await
+        .unwrap();
+
+        let job1 = rx.recv().await.unwrap();
+        assert_eq!(job1.thread_id, "t1");
+        assert_eq!(job1.content, "first");
+
+        let job2 = rx.recv().await.unwrap();
+        assert_eq!(job2.thread_id, "t2");
+        assert_eq!(job2.content, "second");
+    }
+
+    /// Dropping the sender closes the channel — the worker's recv loop exits
+    /// cleanly rather than hanging forever.
+    #[tokio::test]
+    async fn agent_worker_exits_when_sender_dropped() {
+        let (tx, mut rx) = mpsc::channel::<AgentJob>(64);
+        drop(tx);
+        // recv() must return None immediately once the sender is gone.
+        assert!(rx.recv().await.is_none());
+    }
+
+    /// The channel does not block the caller when at capacity — try_send
+    /// returns Err rather than waiting, protecting the HTTP handler from
+    /// stalling if the worker falls behind.
+    #[tokio::test]
+    async fn agent_tx_try_send_fails_when_full() {
+        // Capacity of 1 so we can fill it with a single job.
+        let (tx, _rx) = mpsc::channel::<AgentJob>(1);
+
+        tx.try_send(AgentJob {
+            thread_id: "t1".to_string(),
+            content: "fill".to_string(),
+        })
+        .expect("first send fills the channel");
+
+        // Channel is now full — try_send must not block, it must error.
+        let result = tx.try_send(AgentJob {
+            thread_id: "t2".to_string(),
+            content: "overflow".to_string(),
+        });
+
+        assert!(result.is_err(), "try_send should fail on a full channel");
+    }
+
+    /// AgentJob fields are stored and retrieved intact.
+    #[tokio::test]
+    async fn agent_job_fields_roundtrip() {
+        let (tx, mut rx) = mpsc::channel::<AgentJob>(8);
+
+        let thread_id = "d05a7947-9b72-4573-aee5-48572afaf198".to_string();
+        let content = "Plan a trip to Japan 🇯🇵".to_string();
+
+        tx.send(AgentJob {
+            thread_id: thread_id.clone(),
+            content: content.clone(),
+        })
+        .await
+        .unwrap();
+
+        let job = rx.recv().await.unwrap();
+        assert_eq!(job.thread_id, thread_id);
+        assert_eq!(job.content, content);
+    }
 
     async fn test_app() -> (Router, String) {
         let pool = sqlx::SqlitePool::connect("sqlite::memory:")

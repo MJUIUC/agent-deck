@@ -1,17 +1,40 @@
-import { create } from "zustand";
+import { create, type StateCreator } from "zustand";
+import { cancelTokenBuffer } from "./tokenBuffer";
+import zukeeper from "zukeeper";
 import { messagesApi } from "@/api/client";
-import type { Message, SlashCommandResponse } from "@/types";
+import type {
+  Message,
+  SlashCommandResponse,
+  ThreadMap,
+  ThreadPhase,
+  ThreadState,
+} from "@/types";
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+const IDLE: ThreadPhase = { status: "idle" };
+
+function getThread(threads: ThreadMap, threadId: string): ThreadState {
+  return threads[threadId] ?? { messages: [], phase: IDLE };
+}
+
+function setThread(
+  threads: ThreadMap,
+  threadId: string,
+  next: Partial<ThreadState>,
+): ThreadMap {
+  const current = getThread(threads, threadId);
+  return {
+    ...threads,
+    [threadId]: { ...current, ...next },
+  };
+}
+
+// ── Store interface ───────────────────────────────────────────────────────────
 
 interface MessageStore {
-  // State
-  messagesByThread: Record<string, Message[]>;
-  streamingContent: Record<string, string>; // threadId -> accumulated tokens
-  isStreaming: Record<string, boolean>;
-  isSending: Record<string, boolean>;
-  isLoadingMessages: Record<string, boolean>;
-  error: string | null;
+  threads: ThreadMap;
 
-  // Actions
   loadMessages: (threadId: string) => Promise<void>;
   sendMessage: (threadId: string, content: string) => Promise<void>;
   sendCommand: (
@@ -23,53 +46,48 @@ interface MessageStore {
   addMessage: (message: Message) => void;
   setStreamingError: (threadId: string, errorMsg: string) => void;
   clearMessages: (threadId: string) => void;
-  clearError: () => void;
+  clearError: (threadId: string) => void;
 }
 
-export const useMessageStore = create<MessageStore>((set) => ({
-  // ── Initial state ───────────────────────────────────────────────────────────
-  messagesByThread: {},
-  streamingContent: {},
-  isStreaming: {},
-  isSending: {},
-  isLoadingMessages: {},
-  error: null,
+// ── Store ─────────────────────────────────────────────────────────────────────
 
-  // ── Actions ─────────────────────────────────────────────────────────────────
+const storeCreator: StateCreator<MessageStore> = (set, get) => ({
+  threads: {},
+
+  // ── loadMessages ────────────────────────────────────────────────────────────
+  // Never touches phase — only updates messages. This keeps loadMessages
+  // transparent to the state machine so it can run concurrently with a send
+  // without stomping the streaming/sending phase.
 
   loadMessages: async (threadId) => {
-    set((state) => ({
-      isLoadingMessages: { ...state.isLoadingMessages, [threadId]: true },
-      error: null,
-    }));
     try {
       const res = await messagesApi.list(threadId, { limit: 100 });
-      set((state) => ({
-        messagesByThread: {
-          ...state.messagesByThread,
-          [threadId]: res.data,
-        },
-        isLoadingMessages: { ...state.isLoadingMessages, [threadId]: false },
-      }));
-    } catch (err) {
-      set((state) => ({
-        isLoadingMessages: { ...state.isLoadingMessages, [threadId]: false },
-        error: err instanceof Error ? err.message : "Failed to load messages",
-      }));
+      set((state) => {
+        const thread = getThread(state.threads, threadId);
+        return {
+          threads: setThread(state.threads, threadId, {
+            messages: res.data,
+            phase: thread.phase,
+          }),
+        };
+      });
+    } catch {
+      // Silently swallow — callers can handle UI feedback independently.
+      // We do not transition to an error phase here because loadMessages
+      // is not part of the phase model.
     }
   },
 
-  sendMessage: async (threadId, content) => {
-    set((state) => ({
-      isSending: { ...state.isSending, [threadId]: true },
-      isStreaming: { ...state.isStreaming, [threadId]: true },
-      streamingContent: { ...state.streamingContent, [threadId]: "" },
-      error: null,
-    }));
+  // ── sendMessage ─────────────────────────────────────────────────────────────
+  // idle → sending (optimisticId set)
+  // sending → idle on POST error (optimistic message removed)
+  // sending → streaming on first appendToken
 
-    // Optimistically add the user message so it appears immediately
+  sendMessage: async (threadId, content) => {
+    const optimisticId = `optimistic-${Date.now()}`;
+
     const optimisticUserMsg: Message = {
-      id: `optimistic-${Date.now()}`,
+      id: optimisticId,
       thread_id: threadId,
       role: "user",
       content,
@@ -80,141 +98,136 @@ export const useMessageStore = create<MessageStore>((set) => ({
       created_at: new Date().toISOString(),
     };
 
-    set((state) => ({
-      messagesByThread: {
-        ...state.messagesByThread,
-        [threadId]: [
-          ...(state.messagesByThread[threadId] ?? []),
-          optimisticUserMsg,
-        ],
-      },
-    }));
+    // Transition: idle → sending, append optimistic message
+    set((state) => {
+      const thread = getThread(state.threads, threadId);
+      return {
+        threads: setThread(state.threads, threadId, {
+          messages: [...thread.messages, optimisticUserMsg],
+          phase: { status: "sending", optimisticId },
+        }),
+      };
+    });
 
     try {
-      // Fire the message. The response body contains the persisted user
-      // message — use it to swap out the optimistic copy immediately so
-      // finalizeStream never sees an optimistic-* id and strips it.
       const res = await messagesApi.send(threadId, content);
       const realUserMsg = res.data;
 
+      // Replace optimistic placeholder with real server message.
+      // Do NOT touch phase here — let SSE drive phase transitions:
+      //   sending → streaming  (first appendToken)
+      //   streaming → idle     (finalizeStream on message_complete)
+      // Forcing phase to idle here would kill the streaming bubble in the
+      // window between POST resolve and the first token arriving over SSE.
       set((state) => {
-        const current = state.messagesByThread[threadId] ?? [];
-        // Replace the optimistic placeholder with the real server message,
-        // preserving its position in the list.
-        const replaced = current.map((m) =>
-          m.id === optimisticUserMsg.id ? realUserMsg : m,
+        const thread = getThread(state.threads, threadId);
+        const messages = thread.messages.map((m) =>
+          m.id === optimisticId ? realUserMsg : m,
         );
         return {
-          messagesByThread: {
-            ...state.messagesByThread,
-            [threadId]: replaced,
-          },
+          threads: setThread(state.threads, threadId, { messages }),
         };
       });
     } catch (err) {
-      // On error, remove the optimistic message and surface the error
-      set((state) => ({
-        messagesByThread: {
-          ...state.messagesByThread,
-          [threadId]: (state.messagesByThread[threadId] ?? []).filter(
-            (m) => m.id !== optimisticUserMsg.id,
-          ),
-        },
-        isSending: { ...state.isSending, [threadId]: false },
-        isStreaming: { ...state.isStreaming, [threadId]: false },
-        streamingContent: { ...state.streamingContent, [threadId]: "" },
-        error: err instanceof Error ? err.message : "Failed to send message",
-      }));
+      // Transition: sending → idle, remove optimistic message
+      set((state) => {
+        const thread = getThread(state.threads, threadId);
+        const messages = thread.messages.filter((m) => m.id !== optimisticId);
+        return {
+          threads: setThread(state.threads, threadId, {
+            messages,
+            phase: IDLE,
+          }),
+        };
+      });
       throw err;
-    } finally {
-      set((state) => ({
-        isSending: { ...state.isSending, [threadId]: false },
-      }));
     }
   },
 
+  // ── sendCommand ─────────────────────────────────────────────────────────────
+  // Commands are fire-and-forget from the phase perspective. They do not
+  // produce a stream and are not represented in the state machine.
+
   sendCommand: async (threadId, input) => {
-    // Parse "/<command> [arg1] [arg2] ..." into separate fields.
-    // e.g. "/model switch gpt-4o" → command: "model", args: ["switch", "gpt-4o"]
     const trimmed = input.trim();
     const withoutSlash = trimmed.startsWith("/") ? trimmed.slice(1) : trimmed;
     const parts = withoutSlash.split(/\s+/).filter(Boolean);
     const command = parts[0] ?? "";
     const args: string[] = parts.slice(1);
 
-    set((state) => ({
-      isSending: { ...state.isSending, [threadId]: true },
-      error: null,
-    }));
-
     try {
       const res = await messagesApi.sendCommand(threadId, command, args);
       return res.data;
-    } catch (err) {
-      set({
-        error: err instanceof Error ? err.message : "Failed to execute command",
-      });
+    } catch {
       return null;
-    } finally {
-      set((state) => ({
-        isSending: { ...state.isSending, [threadId]: false },
-      }));
     }
   },
 
+  // ── appendToken ─────────────────────────────────────────────────────────────
+  // sending → streaming (on first non-empty token)
+  // streaming → streaming (content accumulates)
+  // Empty tokens are ignored — the server used to send an empty token as a
+  // connection handshake which incorrectly kept isStreaming alive.
+
   appendToken: (threadId, token) => {
-    // Ignore empty tokens — the server used to send an empty token as a
-    // connection handshake which incorrectly set isStreaming=true forever.
     if (!token) return;
-    set((state) => ({
-      isStreaming: { ...state.isStreaming, [threadId]: true },
-      streamingContent: {
-        ...state.streamingContent,
-        [threadId]: (state.streamingContent[threadId] ?? "") + token,
-      },
-    }));
-  },
-
-  finalizeStream: (threadId, message) => {
     set((state) => {
-      // Replace the optimistic user message + any streaming placeholder
-      // with the real persisted messages from the server.
-      // We keep all non-optimistic messages and append the completed one.
-      const existing = (state.messagesByThread[threadId] ?? []).filter(
-        (m) => !m.id.startsWith("optimistic-"),
-      );
-
-      // Avoid duplicate if message_complete fires after messages were already loaded
-      const alreadyExists = existing.some((m) => m.id === message.id);
-      const updated = alreadyExists ? existing : [...existing, message];
-
+      const thread = getThread(state.threads, threadId);
+      const currentContent =
+        thread.phase.status === "streaming" ? thread.phase.content : "";
       return {
-        messagesByThread: {
-          ...state.messagesByThread,
-          [threadId]: updated,
-        },
-        streamingContent: { ...state.streamingContent, [threadId]: "" },
-        isStreaming: { ...state.isStreaming, [threadId]: false },
+        threads: setThread(state.threads, threadId, {
+          phase: { status: "streaming", content: currentContent + token },
+        }),
       };
     });
   },
+
+  // ── finalizeStream ──────────────────────────────────────────────────────────
+  // streaming → idle
+  // Strips optimistic messages, appends the completed assistant message,
+  // and is idempotent (safe to call twice).
+
+  finalizeStream: (threadId, message) => {
+    cancelTokenBuffer(threadId);
+    set((state) => {
+      const thread = getThread(state.threads, threadId);
+      const existing = thread.messages.filter(
+        (m) => !m.id.startsWith("optimistic-"),
+      );
+      const alreadyExists = existing.some((m) => m.id === message.id);
+      const messages = alreadyExists ? existing : [...existing, message];
+      return {
+        threads: setThread(state.threads, threadId, {
+          messages,
+          phase: IDLE,
+        }),
+      };
+    });
+  },
+
+  // ── addMessage ──────────────────────────────────────────────────────────────
+  // Appends a message without touching phase. Used for out-of-band messages
+  // such as routine messages arriving over SSE.
 
   addMessage: (message) => {
     set((state) => {
-      const existing = state.messagesByThread[message.thread_id] ?? [];
-      // Skip if already present
-      if (existing.some((m) => m.id === message.id)) return state;
+      const thread = getThread(state.threads, message.thread_id);
+      if (thread.messages.some((m) => m.id === message.id)) return state;
       return {
-        messagesByThread: {
-          ...state.messagesByThread,
-          [message.thread_id]: [...existing, message],
-        },
+        threads: setThread(state.threads, message.thread_id, {
+          messages: [...thread.messages, message],
+        }),
       };
     });
   },
 
+  // ── setStreamingError ───────────────────────────────────────────────────────
+  // streaming → error (recoverable: true)
+  // Strips optimistic messages, appends a synthetic error message into the
+  // message list, and surfaces the error phase so the UI can show a retry CTA.
+
   setStreamingError: (threadId, errorMsg) => {
-    // Add a synthetic error message into the message list
     const errorMessage: Message = {
       id: `error-${Date.now()}`,
       thread_id: threadId,
@@ -227,29 +240,53 @@ export const useMessageStore = create<MessageStore>((set) => ({
       created_at: new Date().toISOString(),
     };
 
-    set((state) => ({
-      messagesByThread: {
-        ...state.messagesByThread,
-        [threadId]: [
-          ...(state.messagesByThread[threadId] ?? []).filter(
-            (m) => !m.id.startsWith("optimistic-"),
-          ),
-          errorMessage,
-        ],
-      },
-      streamingContent: { ...state.streamingContent, [threadId]: "" },
-      isStreaming: { ...state.isStreaming, [threadId]: false },
-      isSending: { ...state.isSending, [threadId]: false },
-    }));
-  },
-
-  clearMessages: (threadId) => {
     set((state) => {
-      const next = { ...state.messagesByThread };
-      delete next[threadId];
-      return { messagesByThread: next };
+      const thread = getThread(state.threads, threadId);
+      const messages = [
+        ...thread.messages.filter((m) => !m.id.startsWith("optimistic-")),
+        errorMessage,
+      ];
+      return {
+        threads: setThread(state.threads, threadId, {
+          messages,
+          phase: { status: "error", message: errorMsg, recoverable: true },
+        }),
+      };
     });
   },
 
-  clearError: () => set({ error: null }),
-}));
+  // ── clearMessages ────────────────────────────────────────────────────────────
+
+  clearMessages: (threadId) => {
+    set((state) => {
+      const next = { ...state.threads };
+      delete next[threadId];
+      return { threads: next };
+    });
+  },
+
+  // ── clearError ───────────────────────────────────────────────────────────────
+  // error → idle
+
+  clearError: (threadId) => {
+    set((state) => {
+      const thread = getThread(state.threads, threadId);
+      if (thread.phase.status !== "error") return state;
+      return {
+        threads: setThread(state.threads, threadId, { phase: IDLE }),
+      };
+    });
+  },
+});
+
+// Only wrap with zukeeper in a real browser dev environment — it uses
+// window.postMessage for devtools and swallows function return values,
+// which breaks async store actions in tests.
+const isDev =
+  typeof window !== "undefined" &&
+  typeof process !== "undefined" &&
+  process.env.NODE_ENV === "development";
+
+export const useMessageStore = create<MessageStore>(
+  isDev ? zukeeper(storeCreator) : storeCreator,
+);

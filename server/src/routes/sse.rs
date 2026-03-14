@@ -290,6 +290,7 @@ mod tests {
 
     fn make_state() -> AppState {
         let (global_tx, _) = broadcast::channel(64);
+        let (agent_tx, _agent_rx) = tokio::sync::mpsc::channel(64);
         let pool = sqlx::SqlitePool::connect_lazy("sqlite::memory:").unwrap();
         AppState {
             pool,
@@ -303,6 +304,7 @@ mod tests {
             auth_token: "test-token".to_string(),
             global_tx,
             thread_senders: Arc::new(Mutex::new(HashMap::new())),
+            agent_tx,
             copilot: None,
         }
     }
