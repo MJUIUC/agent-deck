@@ -1,5 +1,14 @@
 import React, { useState, useEffect, useCallback, type FormEvent } from "react";
-import { Plus, Pencil, Trash2, KeyRound, Eye, EyeOff } from "lucide-react";
+import {
+  Plus,
+  Pencil,
+  Trash2,
+  KeyRound,
+  Eye,
+  EyeOff,
+  ChevronDown,
+  ChevronRight,
+} from "lucide-react";
 import {
   credentialsApi,
   type Credential,
@@ -55,6 +64,7 @@ function CredentialForm({ editing, onSaved, onCancel }: CredentialFormProps) {
   const [key, setKey] = useState(editing?.key ?? "");
   const [keyTouched, setKeyTouched] = useState(false);
   const [displayName, setDisplayName] = useState(editing?.display_name ?? "");
+  const [accountInfoOpen, setAccountInfoOpen] = useState(false);
 
   const [credentialType, setCredentialType] = useState<CredentialType>(
     (editing?.credential_type as CredentialType) ?? "api_key",
@@ -184,43 +194,119 @@ function CredentialForm({ editing, onSaved, onCancel }: CredentialFormProps) {
             </FieldSelect>
           </div>
 
-          {/* Optional metadata */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <FieldLabel>Service URL (optional)</FieldLabel>
-            <FieldInput
-              mono
-              placeholder="https://github.com"
-              value={serviceUrl}
-              onChange={(e) => setServiceUrl(e.target.value)}
-            />
-          </div>
+          {/* Service account information accordion */}
+          <div style={{ gridColumn: "1 / -1" }}>
+            <button
+              type="button"
+              onClick={() => setAccountInfoOpen((v) => !v)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                background: "none",
+                border: "none",
+                padding: "6px 0",
+                cursor: "pointer",
+                color: "var(--text-secondary)",
+                fontFamily: "inherit",
+                fontSize: 12,
+                fontWeight: 600,
+                width: "100%",
+                textAlign: "left",
+              }}
+            >
+              {accountInfoOpen ? (
+                <ChevronDown size={13} />
+              ) : (
+                <ChevronRight size={13} />
+              )}
+              Service Account Information
+              <span
+                style={{
+                  marginLeft: 4,
+                  fontSize: 10,
+                  fontWeight: 400,
+                  color: "var(--text-tertiary)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                }}
+              >
+                optional
+              </span>
+            </button>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <FieldLabel>Username (optional)</FieldLabel>
-            <FieldInput
-              placeholder="johndoe"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-            />
-          </div>
+            {accountInfoOpen && (
+              <>
+                <p
+                  style={{
+                    margin: "4px 0 12px",
+                    fontSize: 12,
+                    color: "var(--text-tertiary)",
+                    lineHeight: 1.5,
+                  }}
+                >
+                  Attach context about the account this credential belongs to.
+                  This information is never encrypted — it's surfaced to agents
+                  so they know which account or identity a credential represents
+                  (e.g. "this token belongs to johndoe on github.com"). Useful
+                  when you have multiple credentials for the same service.
+                </p>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <FieldLabel>Email (optional)</FieldLabel>
-            <FieldInput
-              placeholder="john@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-          </div>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: 14,
+                  }}
+                >
+                  <div
+                    style={{ display: "flex", flexDirection: "column", gap: 6 }}
+                  >
+                    <FieldLabel>Service URL</FieldLabel>
+                    <FieldInput
+                      mono
+                      placeholder="https://github.com"
+                      value={serviceUrl}
+                      onChange={(e) => setServiceUrl(e.target.value)}
+                    />
+                  </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <FieldLabel>Password (optional)</FieldLabel>
-            <FieldInput
-              type="password"
-              placeholder="••••••••"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
+                  <div
+                    style={{ display: "flex", flexDirection: "column", gap: 6 }}
+                  >
+                    <FieldLabel>Username</FieldLabel>
+                    <FieldInput
+                      placeholder="johndoe"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                    />
+                  </div>
+
+                  <div
+                    style={{ display: "flex", flexDirection: "column", gap: 6 }}
+                  >
+                    <FieldLabel>Email</FieldLabel>
+                    <FieldInput
+                      placeholder="john@example.com"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                    />
+                  </div>
+
+                  <div
+                    style={{ display: "flex", flexDirection: "column", gap: 6 }}
+                  >
+                    <FieldLabel>Password</FieldLabel>
+                    <FieldInput
+                      type="password"
+                      placeholder="••••••••"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                    />
+                  </div>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Machine-readable key — only on create */}
