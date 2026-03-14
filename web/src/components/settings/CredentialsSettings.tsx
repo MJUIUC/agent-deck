@@ -119,6 +119,17 @@ function CredentialForm({
   // True when editing and the user has typed a new secret/password value
   const secretIsDirty = isEditing && (!!secret || !!password);
 
+  // Derive whether any field has changed from the original editing record.
+  // For create mode we consider the form always dirty (nothing to compare to).
+  const isDirty =
+    !isEditing ||
+    displayName.trim() !== (editing?.display_name ?? "") ||
+    credentialType !== (editing?.credential_type ?? "api_key") ||
+    (serviceUrl.trim() || "") !== (editing?.service_url ?? "") ||
+    (username.trim() || "") !== (editing?.username ?? "") ||
+    (email.trim() || "") !== (editing?.email ?? "") ||
+    secretIsDirty;
+
   const handleSave = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -557,17 +568,17 @@ function CredentialForm({
           {!showSecretWarning && (
             <button
               type="submit"
-              disabled={saving}
+              disabled={saving || !isDirty}
               style={{
                 padding: "8px 16px",
                 borderRadius: 7,
                 fontSize: 13,
                 fontWeight: 500,
-                cursor: saving ? "default" : "pointer",
+                cursor: saving || !isDirty ? "default" : "pointer",
                 border: "none",
                 background: "var(--accent-primary)",
                 color: "var(--text-inverse)",
-                opacity: saving ? 0.5 : 1,
+                opacity: saving || !isDirty ? 0.5 : 1,
                 fontFamily: "inherit",
               }}
             >
