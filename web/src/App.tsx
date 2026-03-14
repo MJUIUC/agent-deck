@@ -1,6 +1,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { useThreadStore } from "@/stores/useThreadStore";
+import { makeDraftThread } from "@/stores/useThreadStore";
 import { useSseStore } from "@/stores/useSseStore";
+import { useMessageStore } from "@/stores/useMessageStore";
 import { providersApi, setupApi } from "@/api/client";
 import { Sidebar } from "@/components/Sidebar";
 import { ChatView } from "@/components/ChatView";
@@ -29,11 +31,17 @@ export function App() {
   const threads = useThreadStore((s) => s.threads);
   const personas = useThreadStore((s) => s.personas);
   const activeThreadId = useThreadStore((s) => s.activeThreadId);
+  const pendingPersona = useThreadStore((s) => s.pendingPersona);
   const isLoading = useThreadStore((s) => s.isLoading);
   const isCreating = useThreadStore((s) => s.isCreating);
   const loadThreads = useThreadStore((s) => s.loadThreads);
   const setActiveThread = useThreadStore((s) => s.setActiveThread);
   const createThread = useThreadStore((s) => s.createThread);
+  const setPendingPersona = useThreadStore((s) => s.setPendingPersona);
+  const promotePendingThread = useThreadStore((s) => s.promotePendingThread);
+
+  // Message store — needed to send the first message in the draft flow
+  const sendMessage = useMessageStore((s) => s.sendMessage);
 
   // SSE store
   const connectGlobal = useSseStore((s) => s.connectGlobal);
@@ -41,6 +49,10 @@ export function App() {
 
   // Active thread object (derived)
   const activeThread = threads.find((t) => t.id === activeThreadId) ?? null;
+
+  // Draft thread object — only exists when the user clicked "+ New Chat" but
+  // hasn't sent a message yet. Never stored in the threads array.
+  const draftThread = pendingPersona ? makeDraftThread(pendingPersona) : null;
 
   // ── Bootstrap ─────────────────────────────────────────────────────────────
 
@@ -104,16 +116,46 @@ export function App() {
 
   // ── Thread creation ───────────────────────────────────────────────────────
 
+  // Clicking "+ New Chat" no longer creates a DB record immediately.
+  // Instead, we store the chosen persona as "pending" and render a draft
+  // ChatView. The real thread is only created when the user sends their
+  // first message (see handleFirstSend below).
   const handleCreateThread = useCallback(
-    async (personaId: string) => {
+    (personaId: string) => {
+      const persona = personas.find((p) => p.id === personaId);
+      if (!persona) return;
+      setPendingPersona(persona);
+    },
+    [personas, setPendingPersona],
+  );
+
+  // Called by the draft ChatView when the user sends their first message.
+  // Creates the real thread, sends the message, then promotes the thread as
+  // active. Title generation is driven server-side via the TitleUpdated SSE
+  // event — no client-side coordination needed here.
+  const handleFirstSend = useCallback(
+    async (content: string) => {
+      if (!pendingPersona) return;
       try {
-        const newThread = await createThread(personaId);
-        setActiveThread(newThread.id);
+        // 1. Create the real thread in the DB.
+        const newThread = await createThread(pendingPersona.id);
+
+        // 2. Send the user message so it's persisted and the agent starts
+        //    streaming before we promote. This way the SSE connection that
+        //    ChatView opens on mount will arrive while the stream is still
+        //    in flight — the falling-edge detector in ChatView is guaranteed
+        //    to see isStreaming go true → false.
+        await sendMessage(newThread.id, content);
+
+        // 3. Promote the thread — ChatView will mount and connect SSE.
+        //    Title generation is now driven server-side via TitleUpdated SSE.
+        promotePendingThread(newThread);
       } catch {
-        // Error is stored in the thread store — sidebar will show it
+        // createThread or sendMessage failure — keep pendingPersona so the
+        // user can retry.
       }
     },
-    [createThread, setActiveThread],
+    [pendingPersona, createThread, promotePendingThread, sendMessage],
   );
 
   // ── Mobile sidebar ────────────────────────────────────────────────────────
@@ -128,10 +170,13 @@ export function App() {
   // Close mobile sidebar automatically when a thread is selected
   const handleSelectThreadMobile = useCallback(
     (threadId: string) => {
+      // Navigating away from a draft discards it silently — no DB record was
+      // created so there is nothing to clean up.
+      setPendingPersona(null);
       setActiveThread(threadId);
       setMobileSidebarOpen(false);
     },
-    [setActiveThread],
+    [setActiveThread, setPendingPersona],
   );
 
   // ── Settings ──────────────────────────────────────────────────────────────
@@ -187,7 +232,9 @@ export function App() {
       <Sidebar
         threads={threads}
         personas={personas}
-        activeThreadId={activeThreadId}
+        // While a draft is open the sidebar shows no active thread highlight —
+        // the draft is not in the threads array.
+        activeThreadId={draftThread ? null : activeThreadId}
         isLoading={isLoading}
         isCreating={isCreating}
         isMobileOpen={mobileSidebarOpen}
@@ -206,7 +253,15 @@ export function App() {
       />
 
       {/* ── Main area ── */}
-      {activeThread ? (
+      {draftThread ? (
+        // Draft mode: thread is a synthetic object, never persisted.
+        // onFirstSend creates the real thread and transitions out of draft mode.
+        <ChatView
+          thread={draftThread}
+          onFirstSend={handleFirstSend}
+          onMobileMenuOpen={handleMobileMenuOpen}
+        />
+      ) : activeThread ? (
         <ChatView
           thread={activeThread}
           onMobileMenuOpen={handleMobileMenuOpen}

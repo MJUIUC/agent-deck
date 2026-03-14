@@ -122,6 +122,16 @@ export const threadsApi = {
     });
   },
 
+  generateTitle(threadId: string): Promise<{ data: { title: string } }> {
+    return apiFetch(`/api/threads/${threadId}/generate-title`, {
+      method: "POST",
+    });
+  },
+
+  deleteEmpty(threadId: string): Promise<{ data: { deleted: boolean } }> {
+    return apiFetch(`/api/threads/${threadId}`, { method: "DELETE" });
+  },
+
   archive(id: string): Promise<{ data: { id: string; status: string } }> {
     return apiFetch(`/api/threads/${id}/archive`, { method: "POST" });
   },

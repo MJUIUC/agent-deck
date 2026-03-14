@@ -222,6 +222,7 @@ pub async fn global_stream(State(state): State<AppState>) -> AppResult<impl Into
                     GlobalEvent::ProviderStatus { .. } => "provider_status",
                     GlobalEvent::ThreadUpdated { .. } => "thread_updated",
                     GlobalEvent::RoutineFired { .. } => "routine_fired",
+                    GlobalEvent::TitleUpdated { .. } => "title_updated",
                 };
                 let data =
                     serde_json::to_string(&global_event).unwrap_or_else(|_| "{}".to_string());

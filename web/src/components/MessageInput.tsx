@@ -5,7 +5,6 @@ import styles from "./MessageInput.module.css";
 interface MessageInputProps {
   threadId: string;
   personaName?: string;
-  modelName?: string;
   isSending: boolean;
   onSend: (content: string) => void;
 }
@@ -13,7 +12,6 @@ interface MessageInputProps {
 export function MessageInput({
   threadId,
   personaName = "Agent",
-  modelName,
   isSending,
   onSend,
 }: MessageInputProps) {
@@ -98,7 +96,6 @@ export function MessageInput({
       {/* Hints row */}
       <div className={styles.hints}>
         <span className={styles.hint}>↵ send · Shift+↵ newline</span>
-        {modelName && <span className={styles.hint}>{modelName}</span>}
       </div>
     </div>
   );

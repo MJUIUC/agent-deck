@@ -12,6 +12,7 @@ use crate::{
     error::{AppError, AppResult},
     models::thread::{AttachMcpServer, CreateThread, Thread, ThreadMcpServer, UpdateThread},
     routes::AppState,
+    services::agent,
 };
 
 /// Helper: get the single user id from the DB.
@@ -245,23 +246,70 @@ pub async fn update(
 }
 
 /// DELETE /api/threads/:id
+///
+/// Hard-deletes an empty thread. Returns 400 if the thread has any messages —
+/// this prevents accidental data loss and is the intended guard for the pending
+/// thread discard flow (which only calls this on zero-message threads).
 pub async fn delete(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
 
-    let result = sqlx::query("DELETE FROM threads WHERE id = ? AND user_id = ?")
+    // Verify ownership first so we give a 404 rather than a misleading 400
+    // when the thread simply doesn't exist.
+    let _thread = verify_thread_ownership(&state, &id, &user_id).await?;
+
+    // Refuse to delete threads that already have messages.
+    let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM messages WHERE thread_id = ?")
+        .bind(&id)
+        .fetch_one(&state.pool)
+        .await?;
+
+    if count > 0 {
+        return Err(AppError::BadRequest(format!(
+            "Thread '{}' has {} message(s) and cannot be deleted",
+            id, count
+        )));
+    }
+
+    sqlx::query("DELETE FROM threads WHERE id = ? AND user_id = ?")
         .bind(&id)
         .bind(&user_id)
         .execute(&state.pool)
         .await?;
 
-    if result.rows_affected() == 0 {
-        return Err(AppError::NotFound(format!("Thread '{}' not found", id)));
-    }
-
     Ok((StatusCode::OK, Json(json!({ "data": { "deleted": true } }))))
+}
+
+/// GET /api/threads/:id/generate-title
+///
+/// ⚠️  DEPRECATED — manual/debug use only.
+///
+/// Title generation is now driven entirely server-side by `agent::run_inner`
+/// immediately after the first assistant reply is persisted. A `TitleUpdated`
+/// SSE event is broadcast on the global stream so the client sidebar updates
+/// in real time without any HTTP call.
+///
+/// This endpoint is intentionally kept for development and manual testing but
+/// returns 503 Service Unavailable to discourage any future client-side callers
+/// from reintroducing the fragile client-side title-gen pattern.
+///
+/// The underlying logic still lives in `services/title.rs` and is called by
+/// `agent::run_inner`.
+pub async fn generate_title(
+    State(_state): State<AppState>,
+    Path(_id): Path<String>,
+) -> AppResult<impl IntoResponse> {
+    Ok((
+        StatusCode::SERVICE_UNAVAILABLE,
+        Json(json!({
+            "error": "Title generation is handled server-side by the agent run-loop. \
+                      This endpoint is reserved for manual/debug use only and is not \
+                      called automatically. See services/title.rs and agent::run_inner \
+                      step 6.5."
+        })),
+    ))
 }
 
 /// POST /api/threads/:id/archive
@@ -322,7 +370,7 @@ pub async fn list_mcp_servers(
     Path(thread_id): Path<String>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
-    verify_thread_ownership(&state, &thread_id, &user_id).await?;
+    let _thread = verify_thread_ownership(&state, &thread_id, &user_id).await?;
 
     let servers: Vec<ThreadMcpServer> = sqlx::query_as(
         "SELECT id, thread_id, mcp_server_id, enabled
@@ -343,7 +391,7 @@ pub async fn attach_mcp(
     Json(payload): Json<AttachMcpServer>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
-    verify_thread_ownership(&state, &thread_id, &user_id).await?;
+    let _thread = verify_thread_ownership(&state, &thread_id, &user_id).await?;
 
     // Verify the MCP server exists and belongs to this user
     let mcp_exists: Option<(String,)> =
@@ -382,7 +430,7 @@ pub async fn detach_mcp(
     Path((thread_id, mcp_id)): Path<(String, String)>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
-    verify_thread_ownership(&state, &thread_id, &user_id).await?;
+    let _thread = verify_thread_ownership(&state, &thread_id, &user_id).await?;
 
     let result =
         sqlx::query("DELETE FROM thread_mcp_servers WHERE thread_id = ? AND mcp_server_id = ?")
@@ -404,19 +452,22 @@ pub async fn detach_mcp(
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
 /// Verify that a thread exists and belongs to the given user.
-/// Returns the thread's ID on success.
+/// Returns the full `Thread` on success.
 async fn verify_thread_ownership(
     state: &AppState,
     thread_id: &str,
     user_id: &str,
-) -> AppResult<String> {
-    let row: Option<(String,)> =
-        sqlx::query_as("SELECT id FROM threads WHERE id = ? AND user_id = ?")
-            .bind(thread_id)
-            .bind(user_id)
-            .fetch_optional(&state.pool)
-            .await?;
+) -> AppResult<Thread> {
+    let thread: Option<Thread> = sqlx::query_as(
+        "SELECT id, user_id, persona_id, title, active_model, active_provider,
+                system_prompt_addendum, status, show_tool_activity, created_at, updated_at
+         FROM threads
+         WHERE id = ? AND user_id = ?",
+    )
+    .bind(thread_id)
+    .bind(user_id)
+    .fetch_optional(&state.pool)
+    .await?;
 
-    row.map(|(id,)| id)
-        .ok_or_else(|| AppError::NotFound(format!("Thread '{}' not found", thread_id)))
+    thread.ok_or_else(|| AppError::NotFound(format!("Thread '{}' not found", thread_id)))
 }

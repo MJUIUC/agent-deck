@@ -6,7 +6,8 @@ import styles from "./ChatHeader.module.css";
 
 interface ChatHeaderProps {
   thread: Thread;
-  onToggleConfig: () => void;
+  /** Optional — when undefined the settings button is rendered disabled (draft mode). */
+  onToggleConfig?: () => void;
   onMobileMenuOpen?: () => void;
 }
 
@@ -124,8 +125,13 @@ export function ChatHeader({
       <div className={styles.right}>
         <button
           onClick={onToggleConfig}
+          disabled={!onToggleConfig}
           aria-label="Thread settings"
-          title="Thread settings"
+          title={
+            onToggleConfig
+              ? "Thread settings"
+              : "Settings unavailable in draft mode"
+          }
           className={styles.iconBtn}
         >
           <Settings size={16} />

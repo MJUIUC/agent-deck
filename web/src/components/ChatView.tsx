@@ -15,10 +15,14 @@ import { MessageBubble, StreamingBubble } from "./MessageBubble";
 import { MessageInput } from "./MessageInput";
 import { ChatHeader } from "./ChatHeader";
 import { ConfigPane } from "./ConfigPane";
+
 import styles from "./ChatView.module.css";
 
 interface ChatViewProps {
   thread: Thread;
+  /** Provided only in draft mode (thread.id === "pending"). Called with the
+   *  user's message content; creates the real thread and sends the message. */
+  onFirstSend?: (content: string) => Promise<void>;
   onMobileMenuOpen?: () => void;
 }
 
@@ -27,7 +31,12 @@ interface ChatViewProps {
 const EMPTY_MESSAGES: Message[] = [];
 const EMPTY_STRING = "";
 
-export function ChatView({ thread, onMobileMenuOpen }: ChatViewProps) {
+export function ChatView({
+  thread,
+  onFirstSend,
+  onMobileMenuOpen,
+}: ChatViewProps) {
+  const isDraft = thread.id === "pending";
   const [configOpen, setConfigOpen] = useState(false);
 
   // Keep the thread id in a ref so selector closures don't go stale when the
@@ -55,6 +64,8 @@ export function ChatView({ thread, onMobileMenuOpen }: ChatViewProps) {
   const archiveThread = useThreadStore((s) => s.archiveThread);
 
   useEffect(() => {
+    // Draft threads have no real id — skip loading and SSE connection.
+    if (isDraft) return;
     loadMessages(thread.id);
     connectThread(thread.id);
     return () => {
@@ -85,11 +96,6 @@ export function ChatView({ thread, onMobileMenuOpen }: ChatViewProps) {
   const personaEmoji = persona?.emoji ?? "🤖";
   const personaName = persona?.name ?? "Agent";
 
-  const handleSend = useCallback(
-    (content: string) => sendMessage(thread.id, content),
-    [thread.id, sendMessage],
-  );
-
   const handleThreadUpdated = useCallback(
     (updated: Thread) => {
       upsertThread({ ...updated, persona: thread.persona });
@@ -97,14 +103,24 @@ export function ChatView({ thread, onMobileMenuOpen }: ChatViewProps) {
     [upsertThread, thread.persona],
   );
 
-  const modelName = thread.active_model ?? undefined;
+  const handleSend = useCallback(
+    (content: string) => {
+      if (isDraft && onFirstSend) {
+        // Draft mode: delegate to App.tsx which creates the real thread first
+        onFirstSend(content);
+      } else {
+        sendMessage(thread.id, content);
+      }
+    },
+    [isDraft, onFirstSend, thread.id, sendMessage],
+  );
 
   return (
     <div className={styles.chatView}>
       {/* ── Header ── */}
       <ChatHeader
         thread={thread}
-        onToggleConfig={() => setConfigOpen((o) => !o)}
+        onToggleConfig={isDraft ? undefined : () => setConfigOpen((o) => !o)}
         onMobileMenuOpen={onMobileMenuOpen}
       />
 
@@ -165,19 +181,20 @@ export function ChatView({ thread, onMobileMenuOpen }: ChatViewProps) {
       <MessageInput
         threadId={thread.id}
         personaName={personaName}
-        modelName={modelName}
         isSending={isSending || isStreaming}
         onSend={handleSend}
       />
 
-      {/* ── Config pane (slides in from right) ── */}
-      <ConfigPane
-        isOpen={configOpen}
-        thread={thread}
-        onClose={() => setConfigOpen(false)}
-        onThreadUpdated={handleThreadUpdated}
-        onArchiveThread={archiveThread}
-      />
+      {/* ── Config pane — hidden in draft mode ── */}
+      {!isDraft && (
+        <ConfigPane
+          isOpen={configOpen}
+          thread={thread}
+          onClose={() => setConfigOpen(false)}
+          onThreadUpdated={handleThreadUpdated}
+          onArchiveThread={archiveThread}
+        />
+      )}
     </div>
   );
 }

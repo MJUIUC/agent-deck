@@ -12,11 +12,7 @@
 use std::pin::Pin;
 
 use anyhow::{anyhow, Result};
-use async_openai::{
-    config::OpenAIConfig,
-    types::{ChatCompletionRequestMessage, ChatCompletionTool, CreateChatCompletionRequest},
-    Client as OpenAIClient,
-};
+use async_openai::types::{ChatCompletionRequestMessage, ChatCompletionTool};
 use futures::Stream;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
@@ -99,10 +95,7 @@ pub trait LlmProvider: Send + Sync {
 /// The same type handles both because they share the same wire format.
 pub struct OpenAiProvider {
     name: String,
-    client: OpenAIClient<OpenAIConfig>,
-    /// Raw base URL stored for the custom streaming implementation.
     base_url: String,
-    /// Optional API key stored for the custom streaming implementation.
     api_key: Option<String>,
 }
 
@@ -113,17 +106,10 @@ impl OpenAiProvider {
         base_url: impl Into<String>,
         api_key: Option<impl Into<String>>,
     ) -> Self {
-        let base_url_str: String = base_url.into();
-        let api_key_str: Option<String> = api_key.map(|k| k.into());
-        let mut config = OpenAIConfig::new().with_api_base(base_url_str.clone());
-        if let Some(ref key) = api_key_str {
-            config = config.with_api_key(key.clone());
-        }
         Self {
             name: name.into(),
-            client: OpenAIClient::with_config(config),
-            base_url: base_url_str,
-            api_key: api_key_str,
+            base_url: base_url.into(),
+            api_key: api_key.map(|k| k.into()),
         }
     }
 }
@@ -139,23 +125,7 @@ impl LlmProvider for OpenAiProvider {
     }
 
     async fn list_models(&self) -> Result<Vec<RemoteModel>> {
-        let response = self
-            .client
-            .models()
-            .list()
-            .await
-            .map_err(|e| anyhow!("Failed to list models from {}: {}", self.name, e))?;
-
-        let models = response
-            .data
-            .into_iter()
-            .map(|m| RemoteModel {
-                display_name: m.id.clone(),
-                id: m.id,
-            })
-            .collect();
-
-        Ok(models)
+        list_models_via_reqwest(&self.base_url, self.api_key.as_deref(), &self.name).await
     }
 
     async fn complete(
@@ -164,31 +134,15 @@ impl LlmProvider for OpenAiProvider {
         messages: Vec<ChatCompletionRequestMessage>,
         tools: Vec<ChatCompletionTool>,
     ) -> Result<String> {
-        let mut req = CreateChatCompletionRequest {
-            model: model.to_string(),
+        complete_via_reqwest(
+            &self.base_url,
+            self.api_key.as_deref(),
+            &self.name,
+            model,
             messages,
-            ..Default::default()
-        };
-
-        if !tools.is_empty() {
-            req.tools = Some(tools);
-        }
-
-        let response = self
-            .client
-            .chat()
-            .create(req)
-            .await
-            .map_err(|e| anyhow!("Chat completion failed ({}): {}", self.name, e))?;
-
-        let content = response
-            .choices
-            .into_iter()
-            .next()
-            .and_then(|c| c.message.content)
-            .unwrap_or_default();
-
-        Ok(content)
+            tools,
+        )
+        .await
     }
 
     async fn stream(
@@ -304,6 +258,73 @@ impl LlmProvider for CopilotProvider {
 //      result chunks, keep-alive `: ping` lines, `data: [DONE]`).
 //   5. Emits one `TokenChunk` per line that carries useful data.
 
+// ─── Raw reqwest helpers ──────────────────────────────────────────────────────
+
+/// Lean response types for `GET /models` — only the fields we actually need.
+#[derive(Debug, Deserialize)]
+struct ModelsResponse {
+    #[serde(default)]
+    data: Vec<ModelEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ModelEntry {
+    id: String,
+}
+
+/// List models from any OpenAI-compatible `/models` endpoint using a plain
+/// `reqwest` call. Avoids `async_openai`'s strict deserializer, which logs
+/// `ERROR` for responses that omit fields OpenAI includes but other providers
+/// (e.g. Anthropic via Vertex) do not.
+async fn list_models_via_reqwest(
+    base_url: &str,
+    api_key: Option<&str>,
+    provider_name: &str,
+) -> Result<Vec<RemoteModel>> {
+    let base = base_url.trim_end_matches('/');
+    let url = format!("{}/models", base);
+
+    let client = reqwest::Client::new();
+    let mut req = client.get(&url).header("Content-Type", "application/json");
+
+    if let Some(key) = api_key {
+        req = req.bearer_auth(key);
+    }
+
+    let response = req
+        .send()
+        .await
+        .map_err(|e| anyhow!("HTTP request to {} failed: {}", provider_name, e))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let body_text = response.text().await.unwrap_or_default();
+        return Err(anyhow!(
+            "Provider {} returned {} — {}",
+            provider_name,
+            status,
+            body_text
+        ));
+    }
+
+    let parsed: ModelsResponse = response.json().await.map_err(|e| {
+        anyhow!(
+            "List models failed ({}): failed to deserialize response: {}",
+            provider_name,
+            e
+        )
+    })?;
+
+    Ok(parsed
+        .data
+        .into_iter()
+        .map(|m| RemoteModel {
+            display_name: m.id.clone(),
+            id: m.id,
+        })
+        .collect())
+}
+
 /// Lenient per-chunk shapes — all fields optional so we don't fail on
 /// non-standard Azure / copilot-proxy response shapes.
 #[derive(Debug, Deserialize)]
@@ -339,6 +360,91 @@ struct StreamFunction {
 
 /// Build a `reqwest` client, POST a streaming chat-completion request to
 /// `<base_url>/chat/completions`, and return a `TokenStream`.
+/// Lenient non-streaming completion response shapes — all fields that vary
+/// across providers (like `index`) are optional so deserialization never fails
+/// on non-standard response shapes (e.g. Anthropic via Vertex AI omits `index`).
+#[derive(Debug, Deserialize)]
+struct CompletionResponse {
+    #[serde(default)]
+    choices: Vec<CompletionChoice>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CompletionChoice {
+    message: CompletionMessage,
+}
+
+#[derive(Debug, Deserialize)]
+struct CompletionMessage {
+    #[serde(default)]
+    content: Option<String>,
+}
+
+/// Non-streaming chat completion via raw `reqwest`, using lenient
+/// deserialization so providers that omit fields like `index` (e.g. Anthropic
+/// via Vertex AI) don't cause a hard failure.
+async fn complete_via_reqwest(
+    base_url: &str,
+    api_key: Option<&str>,
+    provider_name: &str,
+    model: &str,
+    messages: Vec<ChatCompletionRequestMessage>,
+    tools: Vec<ChatCompletionTool>,
+) -> Result<String> {
+    let mut body = serde_json::json!({
+        "model": model,
+        "messages": messages,
+    });
+
+    if !tools.is_empty() {
+        body["tools"] = serde_json::to_value(&tools)?;
+    }
+
+    let base = base_url.trim_end_matches('/');
+    let url = format!("{}/chat/completions", base);
+
+    let client = reqwest::Client::new();
+    let mut req = client.post(&url).header("Content-Type", "application/json");
+
+    if let Some(key) = api_key {
+        req = req.bearer_auth(key);
+    }
+
+    let response = req
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| anyhow!("HTTP request to {} failed: {}", provider_name, e))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let body_text = response.text().await.unwrap_or_default();
+        return Err(anyhow!(
+            "Provider {} returned {} — {}",
+            provider_name,
+            status,
+            body_text
+        ));
+    }
+
+    let parsed: CompletionResponse = response.json().await.map_err(|e| {
+        anyhow!(
+            "Chat completion failed ({}): failed to deserialize response: {}",
+            provider_name,
+            e
+        )
+    })?;
+
+    let content = parsed
+        .choices
+        .into_iter()
+        .next()
+        .and_then(|c| c.message.content)
+        .unwrap_or_default();
+
+    Ok(content)
+}
+
 async fn stream_via_reqwest(
     base_url: &str,
     api_key: Option<&str>,
