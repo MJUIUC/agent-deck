@@ -110,6 +110,14 @@ function CredentialForm({ editing, onSaved, onCancel }: CredentialFormProps) {
       return setError(
         "Display name is required to generate a key — please fill it in first.",
       );
+    if (
+      credentialType === "service_account" &&
+      !username.trim() &&
+      !email.trim()
+    )
+      return setError(
+        "A service account must have at least a username or email address.",
+      );
 
     setSaving(true);
     try {
