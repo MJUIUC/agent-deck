@@ -504,7 +504,10 @@ impl McpConnectionManager {
         tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                warn!("mcp[{}] stderr: {}", server_id, line);
+                // stderr is normal for stdio MCP servers — they use it for
+                // human-readable status output since stdout is reserved for
+                // JSON-RPC.  Log at debug so it doesn't pollute normal output.
+                tracing::debug!("mcp[{}] stderr: {}", server_id, line);
             }
         });
 
