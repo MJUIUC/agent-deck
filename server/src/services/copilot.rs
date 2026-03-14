@@ -1,12 +1,18 @@
 //! CopilotApiService — manages the copilot-api child process.
 //!
 //! Responsibilities:
-//! - Spawn `bun run start` (or the built dist) inside `vendor/copilot-api/` on server startup
+//! - Build `dist/main.js` inside `vendor/copilot-api/` when it is missing, using
+//!   two self-contained Node steps:
+//!     1. `npm install`                      — installs deps into node_modules/
+//!     2. `./node_modules/.bin/tsdown`       — bundles src/ → dist/main.js
+//! - Spawn `node dist/main.js start` to run the sidecar process.
 //! - Poll `http://localhost:4141/` until the process responds (health check)
 //! - Monitor the child and restart it on unexpected exit with exponential backoff
 //! - Expose `is_available()` and `base_url()` for other services
 //! - Emit `provider_status` events on the global SSE broadcast channel
 //! - Kill the child cleanly on server shutdown
+//!
+//! Requires Node.js 24+ and npm on PATH (or at well-known nvm/system locations).
 
 use std::process::Stdio;
 use std::sync::Arc;
@@ -291,43 +297,216 @@ impl CopilotApiService {
 
     /// Spawn the copilot-api process.
 
-    async fn spawn_child(&self) -> Result<Child> {
-        // Resolve the absolute path to vendor/copilot-api so this works regardless
-        // of the working directory the server binary is started from.
-        let copilot_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+    /// Resolve the `vendor/copilot-api` directory, returning an error if it is
+    /// missing (submodule not initialised).
+    fn copilot_dir() -> Result<std::path::PathBuf> {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent() // workspace root (agent-deck/)
             .ok_or_else(|| anyhow!("Cannot resolve workspace root"))?
             .join("vendor/copilot-api");
 
-        if !copilot_dir.exists() {
+        if !dir.exists() {
             return Err(anyhow!(
                 "vendor/copilot-api directory not found at {:?}. \
                  Run `git submodule update --init` to initialise the submodule.",
-                copilot_dir
+                dir
             ));
         }
 
-        // Try `bun run src/main.ts start` first; fall back to `bun dist/main.js start`
-        // if the TypeScript source is not available.
-        let entry = if copilot_dir.join("src/main.ts").exists() {
-            "src/main.ts"
-        } else {
-            "dist/main.js"
-        };
+        Ok(dir)
+    }
 
-        // Resolve the bun binary: prefer whatever is on PATH, then fall back to
-        // the default install location used by the official installer on macOS/Linux
-        // (~/.bun/bin/bun).  This handles the common case where the shell profile
-        // has added ~/.bun/bin to PATH but the server is launched outside of an
-        // interactive shell (e.g. from an IDE or a launchd service).
-        let bun_bin = Self::resolve_bun_binary();
+    /// Resolve the `node` binary.
+    ///
+    /// Checks (in order):
+    /// 1. `node` on the current `PATH` (covers most interactive shells and CI).
+    /// 2. Common nvm default installation paths (`~/.nvm/versions/node/*/bin/node`),
+    ///    picking the highest version directory available. This handles the common
+    ///    case where nvm is installed but the shell profile has not been sourced
+    ///    (e.g. launched from an IDE or a launchd service).
+    /// 3. `/usr/local/bin/node` and `/usr/bin/node` as last-resort system paths.
+    fn resolve_node_binary() -> Option<std::ffi::OsString> {
+        // 1. PATH fast path.
+        if Self::binary_on_path("node") {
+            return Some("node".into());
+        }
+
+        // 2. nvm install directory — pick the lexicographically highest version.
+        if let Some(home) = std::env::var_os("HOME") {
+            let nvm_versions = std::path::Path::new(&home)
+                .join(".nvm")
+                .join("versions")
+                .join("node");
+
+            if let Ok(entries) = std::fs::read_dir(&nvm_versions) {
+                let mut versions: Vec<std::path::PathBuf> = entries
+                    .flatten()
+                    .map(|e| e.path())
+                    .filter(|p| p.is_dir())
+                    .collect();
+                versions.sort();
+
+                // Highest version is last after sort (v24 > v22 > ...).
+                if let Some(latest) = versions.last() {
+                    let candidate = latest.join("bin").join("node");
+                    if candidate.exists() {
+                        return Some(candidate.into_os_string());
+                    }
+                }
+            }
+        }
+
+        // 3. Well-known system paths.
+        for path in &["/usr/local/bin/node", "/usr/bin/node"] {
+            let p = std::path::Path::new(path);
+            if p.exists() {
+                return Some(p.as_os_str().to_os_string());
+            }
+        }
+
+        None
+    }
+
+    /// Resolve the `npm` binary, using the same search strategy as `resolve_node_binary`.
+    fn resolve_npm_binary() -> Option<std::ffi::OsString> {
+        // 1. PATH fast path.
+        if Self::binary_on_path("npm") {
+            return Some("npm".into());
+        }
+
+        // 2. nvm — npm sits alongside node in the same bin/ directory.
+        if let Some(home) = std::env::var_os("HOME") {
+            let nvm_versions = std::path::Path::new(&home)
+                .join(".nvm")
+                .join("versions")
+                .join("node");
+
+            if let Ok(entries) = std::fs::read_dir(&nvm_versions) {
+                let mut versions: Vec<std::path::PathBuf> = entries
+                    .flatten()
+                    .map(|e| e.path())
+                    .filter(|p| p.is_dir())
+                    .collect();
+                versions.sort();
+
+                if let Some(latest) = versions.last() {
+                    let candidate = latest.join("bin").join("npm");
+                    if candidate.exists() {
+                        return Some(candidate.into_os_string());
+                    }
+                }
+            }
+        }
+
+        // 3. Well-known system paths.
+        for path in &["/usr/local/bin/npm", "/usr/bin/npm"] {
+            let p = std::path::Path::new(path);
+            if p.exists() {
+                return Some(p.as_os_str().to_os_string());
+            }
+        }
+
+        None
+    }
+
+    /// Returns `true` if `name` resolves to an executable on the current PATH.
+    fn binary_on_path(name: &str) -> bool {
+        if let Ok(path_var) = std::env::var("PATH") {
+            for dir in std::env::split_paths(&path_var) {
+                if dir.join(name).exists() {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Ensure `dist/main.js` exists inside `copilot_dir`, building it when missing.
+    ///
+    /// Build steps (all self-contained — no global tools beyond node/npm needed):
+    ///   1. `npm install`                    — installs deps incl. tsdown
+    ///   2. `./node_modules/.bin/tsdown`     — bundles src/ → dist/main.js
+    async fn ensure_dist_built(copilot_dir: &std::path::Path) -> Result<()> {
+        let dist_main = copilot_dir.join("dist").join("main.js");
+        if dist_main.exists() {
+            return Ok(());
+        }
+
+        info!("copilot-api: dist/main.js not found — building...");
+
+        let npm = Self::resolve_npm_binary().ok_or_else(|| {
+            anyhow!(
+                "`npm` not found on PATH or in nvm. \
+                 Install Node.js 24+ (https://nodejs.org) to use the GitHub Copilot provider."
+            )
+        })?;
+
+        // Step 1: npm install
+        info!("copilot-api: running npm install");
+        let install_status = Command::new(&npm)
+            .args(["install"])
+            .current_dir(copilot_dir)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await
+            .map_err(|e| anyhow!("Failed to run npm install: {}", e))?;
+
+        if !install_status.success() {
+            return Err(anyhow!(
+                "npm install failed (exit code {:?})",
+                install_status.code()
+            ));
+        }
+
+        // Step 2: ./node_modules/.bin/tsdown
+        let tsdown = copilot_dir.join("node_modules").join(".bin").join("tsdown");
+        if !tsdown.exists() {
+            return Err(anyhow!(
+                "tsdown not found at {:?} after npm install — something went wrong",
+                tsdown
+            ));
+        }
+
+        info!("copilot-api: running tsdown build");
+        let build_status = Command::new(&tsdown)
+            .current_dir(copilot_dir)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await
+            .map_err(|e| anyhow!("Failed to run tsdown: {}", e))?;
+
+        if !build_status.success() {
+            return Err(anyhow!(
+                "tsdown build failed (exit code {:?})",
+                build_status.code()
+            ));
+        }
+
+        info!("copilot-api: build complete — dist/main.js is ready");
+        Ok(())
+    }
+
+    async fn spawn_child(&self) -> Result<Child> {
+        let copilot_dir = Self::copilot_dir()?;
+
+        // Ensure dist/main.js exists, building it from source if necessary.
+        Self::ensure_dist_built(&copilot_dir).await?;
+
+        let node = Self::resolve_node_binary().ok_or_else(|| {
+            anyhow!(
+                "`node` not found on PATH or in nvm. \
+                 Install Node.js 24+ (https://nodejs.org) to use the GitHub Copilot provider."
+            )
+        })?;
 
         // Kill any stale orphan that may be holding the port from a previous
         // server run that was hard-killed before it could clean up its child.
         Self::kill_stale_port_holder().await;
 
-        let mut child = Command::new(&bun_bin)
-            .args(["run", entry, "start", "--port", &COPILOT_PORT.to_string()])
+        let child = Command::new(&node)
+            .args(["dist/main.js", "start", "--port", &COPILOT_PORT.to_string()])
             .current_dir(&copilot_dir)
             // Pipe stdout/stderr so we don't clutter the server's terminal by default.
             // Flip to `Stdio::inherit()` for debugging.
@@ -342,45 +521,15 @@ impl CopilotApiService {
             .map_err(|e| {
                 if e.kind() == std::io::ErrorKind::NotFound {
                     anyhow!(
-                        "`bun` not found on PATH or at ~/.bun/bin/bun. \
-                         Install Bun (https://bun.sh) to use the GitHub Copilot provider."
+                        "`node` not found. \
+                         Install Node.js 24+ (https://nodejs.org) to use the GitHub Copilot provider."
                     )
                 } else {
                     anyhow!("Failed to spawn copilot-api: {}", e)
                 }
             })?;
 
-        // Ensure the child handle stays alive in the caller's Arc<Mutex<Option<Child>>>
-        // slot — dropping it would immediately SIGKILL the process.
         Ok(child)
-    }
-
-    /// Resolve the path to the `bun` binary.
-    ///
-    /// Checks (in order):
-    /// 1. `bun` on the current `PATH` (fast path for most environments).
-    /// 2. `~/.bun/bin/bun` — the default location used by the official Bun
-    ///    installer on macOS and Linux, which may not be on PATH when the server
-    ///    is launched outside of an interactive shell.
-    fn resolve_bun_binary() -> std::ffi::OsString {
-        // Quick check: is `bun` already visible on PATH?
-        if which_bun_on_path() {
-            return "bun".into();
-        }
-
-        // Fall back to the well-known default install location.
-        if let Some(home) = std::env::var_os("HOME") {
-            let candidate = std::path::Path::new(&home)
-                .join(".bun")
-                .join("bin")
-                .join("bun");
-            if candidate.exists() {
-                return candidate.into_os_string();
-            }
-        }
-
-        // Give up and let the OS return NotFound so the caller can log a clear error.
-        "bun".into()
     }
 
     /// Poll `http://localhost:4141/` until it returns HTTP 200, or until
@@ -468,18 +617,6 @@ impl CopilotApiService {
 }
 
 // ─── Auth helpers ─────────────────────────────────────────────────────────────
-
-/// Returns `true` if `bun` can be found somewhere on the current `PATH`.
-fn which_bun_on_path() -> bool {
-    if let Ok(path_var) = std::env::var("PATH") {
-        for dir in std::env::split_paths(&path_var) {
-            if dir.join("bun").exists() {
-                return true;
-            }
-        }
-    }
-    false
-}
 
 /// Response from `GET /token` on the copilot-api proxy.
 #[derive(Debug, Serialize, Deserialize)]

@@ -21,8 +21,7 @@ Agent-Deck lets you run your own AI assistant on hardware you own. Everything st
 ## Requirements
 
 - **Rust** (latest stable via `rustup`)
-- **Node.js** 22+
-- **Bun** (for `copilot-api`)
+- **Node.js** 24+ (also provides `npm` — required to build and run `copilot-api`)
 - **SQLx CLI**: `cargo install sqlx-cli --features sqlite`
 - **Android Studio** + JDK 17 + Android SDK (only for mobile app)
 
@@ -88,11 +87,17 @@ Pair the mobile app with your server by scanning the QR code from the mobile pai
 
 ```bash
 git submodule update --init --recursive
-cd vendor/copilot-api
-bun install
 ```
 
-The Rust server manages the `copilot-api` process automatically. Configure a Copilot provider in Settings to trigger the GitHub device auth flow.
+The Rust server manages the `copilot-api` process automatically — no manual build step required. On first startup it will:
+
+1. Run `npm install` inside `vendor/copilot-api/` to install dependencies
+2. Run `./node_modules/.bin/tsdown` to bundle the TypeScript source into `dist/main.js`
+3. Spawn `node dist/main.js start` and keep it supervised
+
+Configure a Copilot provider in Settings to trigger the GitHub device auth flow.
+
+> **Note:** Node.js 24+ must be on your PATH (or installed via nvm). No other runtime is required.
 
 ---
 
