@@ -1,8 +1,17 @@
 # Agent-Deck — Project Plan
 
-**Version:** 1.4  
+**Version:** 1.5  
 **Project:** agent-deck  
 **Purpose:** A self-hosted, highly configurable personal AI agent platform designed to make working with LLMs accessible to non-engineers. Runs on a Mac mini, accessible privately over Tailscale, with a browser UI and Android mobile app.
+
+**v1.5 Changes:**
+- Closed Phase 3 — all configuration and management stories complete; app is fully usable for chat with no curl required
+- Removed credential store (3.x), OAuth (3.y, 3.z), and Story 3.3 Delta (persona default MCP servers) from Phase 3 — deferred to Phase 4
+- Restructured Phase 4: credentials and encryption first, then MCP integration (some MCP servers require credentials), then memory and routines
+- Renamed Phase 4 from "Memory and Routines" to "Credentials, MCP, Memory, and Routines"
+- Story 3.8 (pending thread + server-side title generation) complete and verified working
+- Fixed title generation trigger condition (== 2 messages, not <= 2)
+- Replaced async_openai HTTP client with raw reqwest in list_models to eliminate spurious ERROR logs from providers that omit non-standard fields
 
 **v1.4 Changes:**
 - Removed Skills system entirely (`skills` table, `thread_skills`, `/api/skills`, Phase 7 skills stories, all related UI)
@@ -2015,9 +2024,11 @@ Acceptance criteria:
 
 ---
 
-### Phase 3 — Configuration and Management
+### Phase 3 — Configuration and Management ✅ Complete
 
 **Goal:** The app is fully configurable through its own UI. Setup wizard, settings pages, thread config, slash commands. After this phase, you never need curl to manage the system.
+
+**Status:** All stories complete. The app supports end-to-end chat: setup wizard, provider and persona management, thread config, slash commands, archived threads, pending thread UX, and server-side title generation. Credential store, OAuth, and persona default MCP servers were deferred to Phase 4 where they belong alongside full MCP integration.
 
 ---
 
@@ -2075,47 +2086,7 @@ Acceptance criteria:
 
 ---
 
-**Story 3.x — Credential store and encryption**  
-Branch: `feature/phase3-credential-store`
 
-Implement the credential storage infrastructure. On first server run, generate a 256-bit master key and store it in `app_config` as `credential_master_key`. Implement AES-256-GCM encrypt/decrypt helpers. Implement `credentials` table CRUD with all data encrypted at rest. The `GET /api/credentials` endpoint returns metadata only — encrypted_data is never included in any API response.
-
-Acceptance criteria:
-- Master key is generated once and persists across restarts
-- Master key is never included in any log output or API response
-- Integration test: store a credential, retrieve it, confirm encrypted_data round-trips correctly
-- Credential metadata endpoint returns correct fields with no secrets
-
----
-
-**Story 3.y — OAuth framework + Google integration**  
-Branch: `feature/phase3-oauth-google`
-
-Implement the OAuth provider trait and provider registry. Implement the Google provider. Implement the OAuth flow endpoints: `GET /api/auth/oauth/:provider/start` (returns redirect URL with state) and `GET /api/auth/oauth/callback` (exchanges code, stores encrypted tokens). Add the `/settings/accounts` page and the Accounts tab in persona settings. Implement token refresh on credential resolution.
-
-Accepted scopes for Google (selectable in UI): Gmail read, Gmail send, Calendar read, Calendar write, Drive read, Drive write.
-
-Acceptance criteria:
-- OAuth flow completes end-to-end with a real Google account
-- Access token and refresh token stored encrypted
-- Token refresh works transparently when expired
-- `/settings/accounts` shows connected account with scopes as pills
-- Disconnect removes the credential row
-- Adding a second OAuth provider in future requires only: implement the trait, register in registry — no other changes
-
----
-
-**Story 3.z — GitHub OAuth provider**  
-Branch: `feature/phase3-oauth-github`
-
-Implement the GitHub OAuth provider using the existing trait and registry infrastructure from Story 3.y. Register it in the provider picker UI.
-
-Acceptance criteria:
-- GitHub OAuth flow completes end-to-end
-- Connected account shows GitHub handle and granted scopes
-- No changes to OAuth infrastructure were required beyond implementing the trait and registering it
-
----
 
 **Story 3.5 — Thread config pane**  
 Branch: `feature/phase3-thread-config`
@@ -2160,9 +2131,84 @@ Acceptance criteria:
 
 ---
 
-### Phase 4 — Memory and Routines
+### Phase 4 — Credentials, MCP, Memory, and Routines
 
-**Goal:** The agent remembers things across conversations and can act autonomously on a schedule. This is what differentiates agent-deck from a chat wrapper.
+**Goal:** Establish the credential store and encryption infrastructure, then wire up real MCP server integration (some MCP servers require credentials for auth), then add persistent memory and autonomous scheduled routines. This is what differentiates agent-deck from a chat wrapper.
+
+---
+
+**Story 4.x — Credential store and encryption**
+Branch: `feature/phase4-credential-store`
+
+Implement the credential storage infrastructure. On first server run, generate a 256-bit master key and store it in `app_config` as `credential_master_key`. Implement AES-256-GCM encrypt/decrypt helpers. Implement `credentials` table CRUD with all data encrypted at rest. The `GET /api/credentials` endpoint returns metadata only — `encrypted_data` is never included in any API response.
+
+Three ownership levels:
+- **System-level** — shared across all personas (e.g. a single Google account used by multiple agents)
+- **User-level** — belongs to the user, not tied to a specific persona
+- **Persona-level** — owned by a specific persona; `persona_id` is set; used when different agents should have separate identities or access scopes
+
+Credential binding happens at configuration time: when adding or editing an MCP server, the user selects which stored credential (by key name) the server should use. The agent never sees raw credential values — MCP servers resolve them at runtime by key name.
+
+Acceptance criteria:
+- Master key is generated once on first run and persists across restarts
+- Master key is never included in any log output or API response
+- AES-256-GCM encrypt/decrypt helpers are unit tested
+- `credentials` table CRUD works for all three ownership levels
+- `GET /api/credentials` returns metadata only — no `encrypted_data` in any response
+- Integration test: store a credential, retrieve it, confirm `encrypted_data` round-trips correctly through decrypt
+- Credential metadata endpoint returns correct fields with no secrets
+- `cargo build` passes, all tests pass
+
+---
+
+**Story 4.y — MCP server integration**
+Branch: `feature/phase4-mcp-integration`
+
+Wire MCP servers into the agent run-loop. This story covers the full lifecycle: connecting to a server, discovering its tools, injecting those tools into the agent context, executing tool calls, and returning results. Both local (subprocess) and remote (HTTP/SSE) server types must work.
+
+**Depends on:** Story 4.x (credential resolution needed for authenticated remote servers).
+
+What to build:
+- MCP connection manager in `services/mcp.rs`: maintains a pool of active connections keyed by `mcp_server_id`; handles connect, disconnect, reconnect on error
+- Local server type: spawn the configured executable as a subprocess, communicate over stdio using the MCP protocol
+- Remote server type: connect to the configured URL; resolve the `credential_key` from the credential store and attach as the configured auth header
+- Tool discovery: on connect, fetch the server's tool list and cache it; expose via `GET /api/mcp-servers/:id/tools`
+- Agent integration: in `agent::run_inner`, load the thread's attached MCP servers (`thread_mcp_servers`), fetch their cached tool lists, merge with built-in tools, inject into the generation loop
+- Tool call routing: when the model calls a tool whose name is prefixed with a server name (e.g. `filesystem__read_file`), route execution to that MCP server
+- Persona default MCP servers: when a new thread is created, auto-attach all servers listed in `persona_default_mcp_servers` for the thread's persona. Add a **Default MCP Servers** section to the persona edit view in `PersonaSettings.tsx` — same visual style as the MCP list in the thread config pane; "+ Add default server" picker; label: "These servers are attached automatically when a new thread is created with this persona."
+
+Acceptance criteria:
+- Local MCP server connects and its tools appear in the agent context
+- Remote MCP server connects, credential is resolved and attached as auth header
+- Tool calls are routed to the correct server and results returned to the model
+- Tools from different servers are namespaced by server name to avoid collisions
+- Thread config pane MCP section shows live connection status
+- Tool inspector (`GET /api/mcp-servers/:id/tools`) returns tool list for connected servers
+- Creating a thread with a persona auto-attaches its default MCP servers
+- Default MCP servers section works in persona settings (add/remove)
+- `cargo build` passes, all tests pass
+
+---
+
+**Story 4.z — OAuth framework + Google + GitHub**
+Branch: `feature/phase4-oauth`
+
+Implement the OAuth provider trait and provider registry. Implement Google and GitHub providers. Implement the OAuth flow endpoints: `GET /api/auth/oauth/:provider/start` (returns redirect URL with state) and `GET /api/auth/oauth/callback` (exchanges code, stores encrypted tokens via the credential store from Story 4.x). Add the `/settings/accounts` page and the Accounts tab in persona settings. Implement token refresh on credential resolution.
+
+**Depends on:** Story 4.x (credentials store is the persistence layer for OAuth tokens).
+
+Accepted scopes for Google (selectable in UI): Gmail read, Gmail send, Calendar read, Calendar write, Drive read, Drive write.
+
+Acceptance criteria:
+- OAuth flow completes end-to-end with a real Google account
+- OAuth flow completes end-to-end with a real GitHub account
+- Access token and refresh token stored encrypted via credential store
+- Token refresh works transparently when expired
+- `/settings/accounts` shows connected accounts with scopes as pills
+- Disconnect removes the credential row
+- Adding a third OAuth provider requires only: implement the trait, register in the registry — no other changes
+- `cargo build` passes, all tests pass
+
 
 ---
 
