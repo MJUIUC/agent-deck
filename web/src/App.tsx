@@ -140,14 +140,17 @@ export function App() {
         // 1. Create the real thread in the DB.
         const newThread = await createThread(pendingPersona.id);
 
-        // 2. Promote the thread first — ChatView mounts and connects SSE
-        //    before the message is sent, so the subscriber is in place when
-        //    the agent starts streaming. The server's wait_for_subscriber
-        //    guard provides an additional safety net.
+        // 2. Promote the thread — ChatView renders synchronously but its
+        //    useEffect (which calls connectThread) is scheduled for after
+        //    the current call stack clears. We yield with a Promise tick so
+        //    React can commit the effect and open the EventSource before the
+        //    message is sent. The server's wait_for_subscriber provides an
+        //    additional safety net for slower connections.
         promotePendingThread(newThread);
+        await Promise.resolve();
 
-        // 3. Send the user message. The agent is spawned server-side and
-        //    will wait for the SSE subscriber (now connected) before streaming.
+        // 3. Send the user message. The SSE connection is now open so the
+        //    agent's tokens will be received as they stream in.
         await sendMessage(newThread.id, content);
       } catch {
         // createThread or sendMessage failure — keep pendingPersona so the
