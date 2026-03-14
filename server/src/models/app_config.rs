@@ -35,6 +35,11 @@ pub mod keys {
 
     /// Expiry timestamp for the pairing token (ISO 8601).
     pub const PAIRING_TOKEN_EXPIRES_AT: &str = "pairing_token_expires_at";
+
+    /// The AES-256 master key used to encrypt/decrypt credential secrets.
+    /// Stored as a 64-character hex string (32 bytes). Generated once on first
+    /// server run and never included in any log output or API response.
+    pub const CREDENTIAL_MASTER_KEY: &str = "credential_master_key";
 }
 
 #[derive(Debug, Serialize)]

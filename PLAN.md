@@ -1,8 +1,19 @@
 # Agent-Deck — Project Plan
 
-**Version:** 1.5  
+**Version:** 1.6  
 **Project:** agent-deck  
 **Purpose:** A self-hosted, highly configurable personal AI agent platform designed to make working with LLMs accessible to non-engineers. Runs on a Mac mini, accessible privately over Tailscale, with a browser UI and Android mobile app.
+
+**v1.6 Changes:**
+- Split Phase 4 into two phases: Phase 4 (Credentials and MCP Integration) and Phase 5 (Memory and Routines)
+- Simplified credential store to static secrets only (API keys, PATs, bearer tokens, key/secret pairs) — OAuth browser flows, token refresh, and third-party app credentials deferred to future work
+- Removed `persona_default_mcp_servers` table — replaced with global default MCP servers configured via `app_config`
+- Added `tag` field to `mcp_servers` for tool call namespacing (defaults to server name, user-editable until loaded into a session)
+- Simplified `credentials` table: removed `oauth2` credential type, `scopes`, `expires_at`; removed `persona_id` ownership (persona-level credential binding deferred with OAuth)
+- Removed OAuth API endpoints from Phase 4 (`/api/auth/oauth/:provider/start`, `/api/auth/oauth/callback`)
+- Provider API keys to be migrated into the encrypted credential store in Story 4.1
+- Renumbered Phase 5 (React Native) → Phase 6, Phase 6 (Push Notifications) → Phase 7, Phase 7 (MCP Depth) → Phase 8, Phase 8 (Polish) → Phase 9
+- Added "OAuth and Third-Party App Credentials" to deferred/future work
 
 **v1.5 Changes:**
 - Closed Phase 3 — all configuration and management stories complete; app is fully usable for chat with no curl required
@@ -367,33 +378,25 @@ CREATE TABLE agent_personas (
 );
 ```
 
-#### `persona_default_mcp_servers`
-MCP servers that are automatically attached to every new thread created with a given persona.
+#### Global Default MCP Servers
 
-```sql
-CREATE TABLE persona_default_mcp_servers (
-  persona_id    TEXT NOT NULL,
-  mcp_server_id TEXT NOT NULL,
-  PRIMARY KEY (persona_id, mcp_server_id),
-  FOREIGN KEY (persona_id) REFERENCES agent_personas(id) ON DELETE CASCADE,
-  FOREIGN KEY (mcp_server_id) REFERENCES mcp_servers(id) ON DELETE CASCADE
-);
-```
+Instead of per-persona MCP server defaults, a global list of default MCP servers is stored in `app_config` under the key `default_mcp_servers` as a JSON array of `mcp_server_id` values. When a new thread is created, all servers in this list are automatically attached via `thread_mcp_servers`. The list is managed in `/settings/mcp-servers` with a simple toggle per server ("Auto-attach to new threads").
 
 #### `mcp_servers`
-MCP server configurations. Supports two server types: `local` (process managed by the Rust server) and `remote` (externally hosted HTTP/SSE endpoint).
+MCP server configurations. Supports two server types: `local` (process managed by the Rust server) and `remote` (externally hosted HTTP/SSE endpoint). The `tag` field is used as the tool call namespace prefix (e.g. tools from a server tagged `github` appear as `github__create_issue`). Defaults to the server name. Editable in settings, but changing the tag requires reloading the server in any active sessions.
 
 ```sql
 CREATE TABLE mcp_servers (
   id           TEXT PRIMARY KEY,          -- UUID v4
   user_id      TEXT NOT NULL,
-  name         TEXT NOT NULL,
+  name         TEXT NOT NULL,             -- official MCP server name, e.g. "github", "filesystem"
+  tag          TEXT NOT NULL,             -- tool namespace prefix, defaults to name; user-editable
   description  TEXT,                      -- short description shown in UI
   source_url   TEXT,                      -- GitHub repo or docs link, informational only
   server_type  TEXT NOT NULL CHECK (server_type IN ('local', 'remote')),
   config       TEXT NOT NULL,             -- JSON, shape varies by server_type:
                                           --   local:  { "executable": "path", "args": [], "env": {} }
-                                          --   remote: { "url": "https://...", "auth_header": "Authorization", "credential_key": "google_oauth" }
+                                          --   remote: { "url": "https://...", "auth_header": "Authorization", "credential_key": "github_pat" }
   status       TEXT NOT NULL DEFAULT 'inactive', -- 'inactive' | 'connecting' | 'connected' | 'error'
   enabled      INTEGER NOT NULL DEFAULT 1,
   created_at   TEXT NOT NULL DEFAULT (datetime('now')),
@@ -525,25 +528,33 @@ CREATE VIRTUAL TABLE memory_fts USING fts5(
 ```
 
 #### `credentials`
-Encrypted credential store for OAuth tokens and API keys. Credentials are never exposed to the agent directly — MCP servers resolve them at runtime by key name.
+Encrypted credential store for API keys, personal access tokens, bearer tokens, and key/secret pairs. Credentials are never exposed to the agent directly — MCP servers resolve them at runtime by key name. OAuth tokens and refresh flows are deferred to future work. The `username`, `email`, and `service_url` fields are stored as plaintext for agent context and UI display (e.g. knowing which account a credential belongs to, linking to the service). All actual secrets are encrypted.
 
 ```sql
 CREATE TABLE credentials (
   id              TEXT PRIMARY KEY,       -- UUID v4
-  key             TEXT NOT NULL UNIQUE,   -- referenced by MCP server configs, e.g. "google_oauth"
-  display_name    TEXT NOT NULL,          -- shown in settings UI
-  provider        TEXT NOT NULL,          -- 'google' | 'github' | 'custom'
-  credential_type TEXT NOT NULL CHECK (credential_type IN ('oauth2', 'api_key', 'custom')),
-  owner_type      TEXT NOT NULL CHECK (owner_type IN ('user', 'persona')),
-  persona_id      TEXT,                   -- null if owner_type = 'user'; references agent_personas(id)
-  encrypted_data  TEXT NOT NULL,          -- AES-256-GCM encrypted JSON blob
-  scopes          TEXT,                   -- JSON array of granted OAuth scopes
-  expires_at      TEXT,                   -- for OAuth access tokens; null for API keys
+  key             TEXT NOT NULL UNIQUE,   -- referenced by MCP server configs and provider configs, e.g. "github_pat"
+  display_name    TEXT NOT NULL,          -- shown in settings UI, e.g. "GitHub Personal Access Token"
+  service         TEXT NOT NULL,          -- what service this is for, e.g. "github", "openai", "anthropic", "custom"
+  credential_type TEXT NOT NULL CHECK (credential_type IN ('api_key', 'pat', 'bearer_token', 'key_secret_pair')),
+  service_url     TEXT,                   -- optional; human-facing URL, e.g. "https://github.com"
+  username        TEXT,                   -- optional; plaintext, safe for agent context
+  email           TEXT,                   -- optional; plaintext, safe for agent context
+  encrypted_data  TEXT NOT NULL,          -- AES-256-GCM encrypted JSON blob (see schema below)
   created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
-  FOREIGN KEY (persona_id) REFERENCES agent_personas(id)
+  updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 ```
+
+**`encrypted_data` JSON schema:**
+```json
+{
+  "secret": "ghp_abc123...",
+  "password": "some-password"
+}
+```
+
+Only `secret` is required. `password` is optional — omit when not applicable.
 
 Encryption key: a 256-bit master key is generated on first server run, stored in `app_config` as `credential_master_key`. All credential blobs are encrypted with AES-256-GCM. The key never leaves the server process and is never exposed via API.
 
@@ -681,39 +692,40 @@ Responses follow the shape:
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/credentials` | List all credentials (metadata only, never encrypted_data) |
+| `POST` | `/api/credentials` | Store a new credential |
+| `PUT` | `/api/credentials/:id` | Update a credential |
 | `DELETE` | `/api/credentials/:id` | Delete a credential |
-| `GET` | `/api/auth/oauth/:provider/start` | Begin OAuth flow — returns redirect URL |
-| `GET` | `/api/auth/oauth/callback` | OAuth callback endpoint (provider, code, state params) |
-| `POST` | `/api/credentials/api-key` | Store an API key credential |
 
-OAuth flow providers: `google`, `github`. Additional providers are registered in the provider registry without API changes.
-
-**POST /api/credentials/api-key body:**
+**POST /api/credentials body:**
 ```json
 {
-  "key": "openai_key",
-  "display_name": "OpenAI API Key",
-  "provider": "custom",
-  "owner_type": "user",
-  "persona_id": null,
-  "secret": "sk-..."
+  "key": "github_pat",
+  "display_name": "GitHub Personal Access Token",
+  "service": "github",
+  "credential_type": "pat",
+  "service_url": "https://github.com",
+  "username": "johndoe",
+  "email": "john@example.com",
+  "secret": "ghp_...",
+  "password": null
 }
 ```
 
-**GET /api/credentials response** (never returns raw tokens):
+`secret` is required. `service_url`, `username`, and `email` are optional plaintext fields (available for agent context and UI display). `password` is optional and encrypted alongside `secret`. No encrypted values are ever returned in any API response.
+
+**GET /api/credentials response** (never returns secrets):
 ```json
 {
   "data": [
     {
       "id": "<id>",
-      "key": "google_oauth",
-      "display_name": "Your Google Account",
-      "provider": "google",
-      "credential_type": "oauth2",
-      "owner_type": "user",
-      "persona_id": null,
-      "scopes": ["gmail.readonly", "calendar.readonly"],
-      "expires_at": "2026-04-01T00:00:00Z",
+      "key": "github_pat",
+      "display_name": "GitHub Personal Access Token",
+      "service": "github",
+      "credential_type": "pat",
+      "service_url": "https://github.com",
+      "username": "johndoe",
+      "email": "john@example.com",
       "created_at": "2026-03-01T00:00:00Z"
     }
   ]
@@ -2131,110 +2143,128 @@ Acceptance criteria:
 
 ---
 
-### Phase 4 — Credentials, MCP, Memory, and Routines
+### Phase 4 — Credentials and MCP Integration
 
-**Goal:** Establish the credential store and encryption infrastructure, then wire up real MCP server integration (some MCP servers require credentials for auth), then add persistent memory and autonomous scheduled routines. This is what differentiates agent-deck from a chat wrapper.
+**Goal:** Establish encrypted credential storage for static secrets (API keys, PATs, bearer tokens), then wire up real MCP server integration with credential resolution, tool discovery, and agent integration. After this phase, agents can use external tools in chat.
 
 ---
 
-**Story 4.x — Credential store and encryption**
+**Story 4.1 — Credential store and encryption**
 Branch: `feature/phase4-credential-store`
 
 Implement the credential storage infrastructure. On first server run, generate a 256-bit master key and store it in `app_config` as `credential_master_key`. Implement AES-256-GCM encrypt/decrypt helpers. Implement `credentials` table CRUD with all data encrypted at rest. The `GET /api/credentials` endpoint returns metadata only — `encrypted_data` is never included in any API response.
 
-Three ownership levels:
-- **System-level** — shared across all personas (e.g. a single Google account used by multiple agents)
-- **User-level** — belongs to the user, not tied to a specific persona
-- **Persona-level** — owned by a specific persona; `persona_id` is set; used when different agents should have separate identities or access scopes
+Supported credential types: `api_key`, `pat`, `bearer_token`, `key_secret_pair`. No OAuth or refresh token support in this story — static secrets only.
 
-Credential binding happens at configuration time: when adding or editing an MCP server, the user selects which stored credential (by key name) the server should use. The agent never sees raw credential values — MCP servers resolve them at runtime by key name.
+Migrate existing provider API keys: the `providers.api_key` column currently stores keys as plaintext in SQLite. Add a migration that moves each non-null `providers.api_key` value into the `credentials` table as an encrypted entry, updates the provider record to reference the credential by key name, and nulls out the original `api_key` column. After migration, provider key resolution goes through the credential store.
 
 Acceptance criteria:
 - Master key is generated once on first run and persists across restarts
 - Master key is never included in any log output or API response
 - AES-256-GCM encrypt/decrypt helpers are unit tested
-- `credentials` table CRUD works for all three ownership levels
+- `credentials` table CRUD works for all supported credential types
 - `GET /api/credentials` returns metadata only — no `encrypted_data` in any response
 - Integration test: store a credential, retrieve it, confirm `encrypted_data` round-trips correctly through decrypt
-- Credential metadata endpoint returns correct fields with no secrets
+- Existing provider API keys are migrated into the credential store
+- Provider model list and chat still work after migration (key resolution goes through credential store)
 - `cargo build` passes, all tests pass
 
 ---
 
-**Story 4.y — MCP server integration**
-Branch: `feature/phase4-mcp-integration`
+**Story 4.2 — Credentials settings UI**
+Branch: `feature/phase4-credentials-ui`
 
-Wire MCP servers into the agent run-loop. This story covers the full lifecycle: connecting to a server, discovering its tools, injecting those tools into the agent context, executing tool calls, and returning results. Both local (subprocess) and remote (HTTP/SSE) server types must work.
+Implement `/settings/credentials` page for managing MCP and service credentials. This is separate from the existing provider settings page (which continues to own the provider key entry UX, but now reads/writes through the credential store under the hood).
 
-**Depends on:** Story 4.x (credential resolution needed for authenticated remote servers).
-
-What to build:
-- MCP connection manager in `services/mcp.rs`: maintains a pool of active connections keyed by `mcp_server_id`; handles connect, disconnect, reconnect on error
-- Local server type: spawn the configured executable as a subprocess, communicate over stdio using the MCP protocol
-- Remote server type: connect to the configured URL; resolve the `credential_key` from the credential store and attach as the configured auth header
-- Tool discovery: on connect, fetch the server's tool list and cache it; expose via `GET /api/mcp-servers/:id/tools`
-- Agent integration: in `agent::run_inner`, load the thread's attached MCP servers (`thread_mcp_servers`), fetch their cached tool lists, merge with built-in tools, inject into the generation loop
-- Tool call routing: when the model calls a tool whose name is prefixed with a server name (e.g. `filesystem__read_file`), route execution to that MCP server
-- Persona default MCP servers: when a new thread is created, auto-attach all servers listed in `persona_default_mcp_servers` for the thread's persona. Add a **Default MCP Servers** section to the persona edit view in `PersonaSettings.tsx` — same visual style as the MCP list in the thread config pane; "+ Add default server" picker; label: "These servers are attached automatically when a new thread is created with this persona."
+The credentials page shows a list of all stored credentials with: display name, service label, credential type, and created date. Secret values are never shown — only a masked indicator (e.g. `••••••••`). Add/edit form fields: name, service, credential type, the secret value. Delete with confirmation.
 
 Acceptance criteria:
-- Local MCP server connects and its tools appear in the agent context
-- Remote MCP server connects, credential is resolved and attached as auth header
-- Tool calls are routed to the correct server and results returned to the model
-- Tools from different servers are namespaced by server name to avoid collisions
-- Thread config pane MCP section shows live connection status
-- Tool inspector (`GET /api/mcp-servers/:id/tools`) returns tool list for connected servers
-- Creating a thread with a persona auto-attaches its default MCP servers
-- Default MCP servers section works in persona settings (add/remove)
+- Credentials list shows all stored credentials with metadata only
+- Add credential form stores encrypted data correctly
+- Edit credential allows updating the secret value
+- Delete with confirmation removes the credential
+- Provider settings page reads/writes API keys through the credential store
+- No secret values are ever displayed in the UI or returned by the API
+
+---
+
+**Story 4.3 — MCP connection manager**
+Branch: `feature/phase4-mcp-connection-manager`
+
+Implement the server-side MCP connection manager in `services/mcp.rs`. This maintains a pool of active connections keyed by `mcp_server_id` and handles connect, disconnect, and reconnect on error.
+
+Two transport types:
+- **Local servers** — spawn the configured executable as a subprocess, communicate over stdio using the MCP protocol. Manage the child process lifecycle (start, monitor, restart on crash with backoff).
+- **Remote servers** — connect to the configured URL via HTTP/SSE. Resolve the `credential_key` from the credential store, decrypt, and attach as the configured auth header.
+
+No agent integration yet — this story is purely "can we connect to an MCP server and stay connected."
+
+Acceptance criteria:
+- Local MCP server starts as a subprocess and communicates over stdio
+- Remote MCP server connects via HTTP/SSE with credential resolution
+- Connection pool tracks active connections by server ID
+- Reconnect with exponential backoff on connection loss
+- Graceful shutdown kills all child processes when the Rust server exits
+- `GET /api/mcp-servers` reflects live connection status
+- Integration test: connect to a local MCP server, verify connection state
 - `cargo build` passes, all tests pass
 
 ---
 
-**Story 4.z — OAuth framework + Google + GitHub**
-Branch: `feature/phase4-oauth`
+**Story 4.4 — MCP tool discovery and agent integration**
+Branch: `feature/phase4-mcp-agent-integration`
 
-Implement the OAuth provider trait and provider registry. Implement Google and GitHub providers. Implement the OAuth flow endpoints: `GET /api/auth/oauth/:provider/start` (returns redirect URL with state) and `GET /api/auth/oauth/callback` (exchanges code, stores encrypted tokens via the credential store from Story 4.x). Add the `/settings/accounts` page and the Accounts tab in persona settings. Implement token refresh on credential resolution.
+Wire MCP servers into the agent run-loop. On connect, enumerate the server's tools and cache the list (name, description, input schema). Expose via `GET /api/mcp-servers/:id/tools`.
 
-**Depends on:** Story 4.x (credentials store is the persistence layer for OAuth tokens).
-
-Accepted scopes for Google (selectable in UI): Gmail read, Gmail send, Calendar read, Calendar write, Drive read, Drive write.
+In `agent::run_inner`, load the thread's attached MCP servers (`thread_mcp_servers`), fetch their cached tool lists, merge with built-in tools, and inject into the generation loop. Tools are namespaced using the server's `tag` field (e.g. a server with tag `github` exposes tools as `github__create_issue`, `github__search_repos`). When the model calls a namespaced tool, route execution to the corresponding MCP server.
 
 Acceptance criteria:
-- OAuth flow completes end-to-end with a real Google account
-- OAuth flow completes end-to-end with a real GitHub account
-- Access token and refresh token stored encrypted via credential store
-- Token refresh works transparently when expired
-- `/settings/accounts` shows connected accounts with scopes as pills
-- Disconnect removes the credential row
-- Adding a third OAuth provider requires only: implement the trait, register in the registry — no other changes
+- Tool list is fetched on connect and cached in memory
+- `GET /api/mcp-servers/:id/tools` returns the cached tool list
+- Tools are injected into the agent context with `{tag}__{tool_name}` namespacing
+- Tool calls from the model are routed to the correct MCP server
+- Tool results are returned to the model and the conversation continues
+- Tools from multiple servers coexist without name collisions
+- Integration test: attach an MCP server to a thread, send a message that triggers a tool call, verify the round-trip
 - `cargo build` passes, all tests pass
 
-
 ---
 
-**Story 4.1 — Memory tools**  
-Branch: `feature/phase4-memory-tools`
+**Story 4.5 — MCP UI integration**
+Branch: `feature/phase4-mcp-ui`
 
-Implement the `save_memory` and `recall_memory` tool definitions per section 7.6.2. Wire them into the agent run-loop so they are always available as callable tools. Append the memory system prompt instructions (section 7.6.3) after the persona's system prompt in every request. `save_memory` inserts a new memory row with `user_id`, `persona_id` (from the thread's persona), and `thread_id` (provenance), enforcing the 500-character content limit, and updates the FTS index. `recall_memory` queries `memory_fts` filtered by the current user and persona, capped at 10 results, formatted per section 7.6.5.
+Polish the MCP experience across the UI:
+
+**Global default servers:** In `/settings/mcp-servers`, add an "Auto-attach to new threads" toggle per server. Toggled servers are stored as a JSON array in `app_config` under key `default_mcp_servers`. When a new thread is created, all servers in this list are automatically attached via `thread_mcp_servers`.
+
+**Tool inspector:** In the thread config pane and MCP settings page, render an expandable tool list per server showing tool name, description, and input schema summary. Source URL renders as a clickable link when present.
+
+**Tag management:** The server add/edit form includes a `tag` field that defaults to the server `name`. Editable by the user. Displayed in the thread config pane next to each attached server.
+
+**Connection status:** Live status badges (inactive/connecting/connected/error) in both the thread config pane and settings page, updated via SSE.
 
 Acceptance criteria:
-- Unit tests for FTS search returning correct results
-- Unit tests for memory insertion with correct persona scoping
-- Unit tests for the 500-character truncation
-- Memories saved in one thread are recallable from another thread with the same persona
-- Memories are NOT recalled when querying from a different persona
-- Recall results are capped at 10 and include date prefix and thread provenance
-- Empty recall returns the "no memories found" message
-- The memory system prompt is appended to every request (after persona prompt, before thread addendum)
-- The tools are included in LLM requests as function definitions
-- Integration test: save a memory, send a follow-up message in a different thread (same persona) that should trigger recall, verify the tool is called
+- Auto-attach toggle works and persists in `app_config`
+- New threads automatically get default MCP servers attached
+- Tool inspector shows tools per server in thread config and settings
+- Tag field is editable in server add/edit form, defaults to name
+- Connection status badges reflect live state
+- `cargo build` passes, all tests pass
 
 ---
 
-**Story 4.0 — System Notification Channel + Agent Run Lock**
-Branch: `feature/phase4-notify-endpoint`
+### Phase 5 — Memory and Routines
 
-This story is a prerequisite for all other Phase 4 stories. Routines, memory tools, and any future server-initiated agent trigger depend on both the notify endpoint and the concurrency lock.
+**Goal:** Add persistent memory and autonomous scheduled routines. This is what differentiates agent-deck from a chat wrapper — agents remember things across conversations and can act on their own schedule.
+
+**Depends on:** Phase 4 (credential store and MCP integration complete).
+
+---
+
+**Story 5.1 — Per-thread agent run lock and notify endpoint**
+Branch: `feature/phase5-notify-endpoint`
+
+This story is a prerequisite for all other Phase 5 stories. Routines, memory tools, and any future server-initiated agent trigger depend on both the notify endpoint and the concurrency lock.
 
 **Part A — Per-thread agent run lock:**
 Add a `DashMap<String, Arc<Semaphore>>` to `AppState` keyed by thread ID. Every code path that invokes `agent::run` — `POST /api/threads/:id/messages`, slash command model switch, and the new notify endpoint — must acquire a per-thread permit before running and release it on completion. Reject with `429` if queue depth exceeds 3.
@@ -2267,36 +2297,45 @@ Acceptance criteria:
 
 ---
 
-**Story 4.2 — Routines CRUD endpoints**
-Branch: `feature/phase4-routines-crud`
+**Story 5.2 — Memory tools**
+Branch: `feature/phase5-memory-tools`
 
-Implement all routine endpoints from section 6.10.
+Implement the `save_memory` and `recall_memory` tool definitions per section 7.6.2. Wire them into the agent run-loop so they are always available as callable tools. Append the memory system prompt instructions (section 7.6.3) after the persona's system prompt in every request. `save_memory` inserts a new memory row with `user_id`, `persona_id` (from the thread's persona), and `thread_id` (provenance), enforcing the 500-character content limit, and updates the FTS index. `recall_memory` queries `memory_fts` filtered by the current user and persona, capped at 10 results, formatted per section 7.6.5.
+
+Acceptance criteria:
+- Unit tests for FTS search returning correct results
+- Unit tests for memory insertion with correct persona scoping
+- Unit tests for the 500-character truncation
+- Memories saved in one thread are recallable from another thread with the same persona
+- Memories are NOT recalled when querying from a different persona
+- Recall results are capped at 10 and include date prefix and thread provenance
+- Empty recall returns the "no memories found" message
+- The memory system prompt is appended to every request (after persona prompt, before thread addendum)
+- The tools are included in LLM requests as function definitions
+- Integration test: save a memory, send a follow-up message in a different thread (same persona) that should trigger recall, verify the tool is called
+
+---
+
+**Story 5.3 — Routines CRUD and cron scheduler**
+Branch: `feature/phase5-routines`
+
+Implement all routine endpoints from section 6.10. Implement the routine scheduler service using `tokio-cron-scheduler`. On server startup, load all enabled routines from the DB and register them. When a routine is created, updated, or toggled via the API, update the scheduler accordingly. When a thread is archived, pause its routines. When unarchived, resume them.
 
 Acceptance criteria:
 - Full CRUD works
 - Toggle endpoint correctly flips the enabled flag
 - Integration tests for all endpoints
-
----
-
-**Story 4.3 — Cron scheduler**  
-Branch: `feature/phase4-cron-scheduler`
-
-Implement the routine scheduler service using `tokio-cron-scheduler`. On server startup, load all enabled routines from the DB and register them. When a routine is created, updated, or toggled via the API, update the scheduler accordingly. When a thread is archived, pause its routines. When unarchived, resume them.
-
-Acceptance criteria:
-- Unit tests for scheduler registration and deregistration
 - Routines fire at the correct time (test with a short interval like every minute)
 - Pausing and resuming works correctly
 - Server restart re-registers all active routines from DB
 
 ---
 
-**Story 4.4 — Routine execution**
+**Story 5.4 — Routine execution**
 
-> **Depends on Story 4.0** — the routine scheduler uses the notify endpoint with `event_type: routine_fired` (`persist: false, trigger: true`) to invoke the agent. The bespoke routine invocation JSON described in section 7.4 is the payload for this event type. The two-phase execution model remains the same — Story 4.0 provides the infrastructure, Story 4.4 wires the scheduler into it.
+> **Depends on Story 5.1** — the routine scheduler uses the notify endpoint with `event_type: routine_fired` (`persist: false, trigger: true`) to invoke the agent.
 
-Branch: `feature/phase4-routine-execution`
+Branch: `feature/phase5-routine-execution`
 
 Implement the two-phase routine execution model per section 7.4. When a routine fires:
 
@@ -2324,10 +2363,10 @@ Acceptance criteria:
 
 ---
 
-**Story 4.5 — Routine and memory UI integration**  
-Branch: `feature/phase4-routine-memory-ui`
+**Story 5.5 — Routine and memory UI integration**
+Branch: `feature/phase5-routine-memory-ui`
 
-Wire routines into the thread config pane (the shell from Story 3.5 — now with full add/edit/delete/toggle functionality). Routine-generated messages in the chat view should be visually distinct (subtle different background using `bubble_routine` color, small "routine" label). 
+Wire routines into the thread config pane (the shell from Story 3.5 — now with full add/edit/delete/toggle functionality). Routine-generated messages in the chat view should be visually distinct (subtle different background using `bubble_routine` color, small "routine" label).
 
 Add memory viewer per section 7.6.7:
 - In the thread config pane: a "Memory" section showing recent memories saved from the current thread (filtered by provenance `thread_id`)
@@ -2346,16 +2385,16 @@ Acceptance criteria:
 
 ---
 
-### Phase 5 — React Native Mobile App
+### Phase 6 — React Native Mobile App
 
 **Goal:** A new React Native app is scaffolded from scratch and built to work with the agent-deck server API. Full chat experience on Android.
 
-> ⚠️ **Note:** The original `mobile/BotRelayApp/` scaffold was permanently deleted (`rm -rf`) before it was committed remotely. There is no recoverable version. Story 5.1 must initialize a fresh React Native project rather than cleaning up the old one. The dependency list and rename instructions below still apply — treat them as the target state for the new scaffold.
+> ⚠️ **Note:** The original `mobile/BotRelayApp/` scaffold was permanently deleted (`rm -rf`) before it was committed remotely. There is no recoverable version. Story 6.1 must initialize a fresh React Native project rather than cleaning up the old one. The dependency list and rename instructions below still apply — treat them as the target state for the new scaffold.
 
 ---
 
-**Story 5.1 — App scaffold and setup**  
-Branch: `feature/phase5-mobile-cleanup`
+**Story 6.1 — App scaffold and setup**  
+Branch: `feature/phase6-mobile-cleanup`
 
 Initialize a new React Native project named `AgentDeck` at `mobile/AgentDeck/`. Install required dependencies: `react-native-gifted-chat`, `@react-navigation/native`, `@react-navigation/native-stack`, `react-native-mmkv`, `react-native-safe-area-context`, `axios`, `@notifee/react-native`, `@react-native-firebase/app`, `@react-native-firebase/messaging`. Do **not** install `socket.io-client`, `tweetnacl`, `tweetnacl-util`, or `react-native-video`. Apply the shared color theme from section 4.1 to `src/theme/colors.ts`.
 
@@ -2367,8 +2406,8 @@ Acceptance criteria:
 
 ---
 
-**Story 5.2 — API service and auth**  
-Branch: `feature/phase5-mobile-api-service`
+**Story 6.2 — API service and auth**  
+Branch: `feature/phase6-mobile-api-service`
 
 Rewrite `ApiService.ts` to match the new server API. Store server URL and auth token in `react-native-mmkv`. Implement SSE client using `EventSource` polyfill or `fetch` with streaming. Handle reconnection.
 
@@ -2379,8 +2418,8 @@ Acceptance criteria:
 
 ---
 
-**Story 5.3 — QR pairing screen**  
-Branch: `feature/phase5-mobile-pairing`
+**Story 6.3 — QR pairing screen**  
+Branch: `feature/phase6-mobile-pairing`
 
 Implement the first-launch pairing screen. Show a QR code scanner. On scan, parse the server URL and token, store in MMKV, navigate to thread list. On subsequent launches, skip directly to thread list if already paired.
 
@@ -2392,8 +2431,8 @@ Acceptance criteria:
 
 ---
 
-**Story 5.4 — Thread list screen**  
-Branch: `feature/phase5-mobile-thread-list`
+**Story 6.4 — Thread list screen**  
+Branch: `feature/phase6-mobile-thread-list`
 
 Implement the thread list screen matching `mockups/mobile-thread-list.html`. Show agent emoji + avatar, thread title, last message preview, timestamp. Connect to global SSE for real-time updates. New thread button (persona picker).
 
@@ -2405,8 +2444,8 @@ Acceptance criteria:
 
 ---
 
-**Story 5.5 — Chat screen**  
-Branch: `feature/phase5-mobile-chat`
+**Story 6.5 — Chat screen**  
+Branch: `feature/phase6-mobile-chat`
 
 Implement the chat screen matching `mockups/mobile-chat.html`, using `react-native-gifted-chat`. Show agent avatar on every agent message. Stream tokens in real time via SSE. Send messages. Routine messages visually distinct.
 
@@ -2418,8 +2457,8 @@ Acceptance criteria:
 
 ---
 
-**Story 5.6 — Thread config screen**  
-Branch: `feature/phase5-mobile-thread-config`
+**Story 6.6 — Thread config screen**  
+Branch: `feature/phase6-mobile-thread-config`
 
 Implement a simplified thread config screen (accessible from a header button in the chat screen). Show current model, option to switch model, list of active routines (view only on mobile).
 
@@ -2430,16 +2469,16 @@ Acceptance criteria:
 
 ---
 
-### Phase 6 — Push Notifications (Android/FCM)
+### Phase 7 — Push Notifications (Android/FCM)
 
 **Goal:** The Android app receives push notifications when routines fire and no SSE client is connected.
 
-**Prerequisite:** Before starting any stories in this phase, create a Firebase project and complete the manual setup: add the Android app, download `google-services.json`, generate a service account key. This is external configuration that blocks all four stories — do it first, not as part of Story 6.1.
+**Prerequisite:** Before starting any stories in this phase, create a Firebase project and complete the manual setup: add the Android app, download `google-services.json`, generate a service account key. This is external configuration that blocks all four stories — do it first, not as part of Story 7.1.
 
 ---
 
-**Story 6.1 — Firebase project setup**  
-Branch: `feature/phase6-firebase-setup`
+**Story 7.1 — Firebase project setup**  
+Branch: `feature/phase7-firebase-setup`
 
 Create a Firebase project. Add the Android app to it. Download `google-services.json` and place it in `mobile/BotRelayApp/android/app/`. Download the Firebase service account JSON and place it in `server/config/`. Document the setup steps in the README.
 
@@ -2450,8 +2489,8 @@ Acceptance criteria:
 
 ---
 
-**Story 6.2 — Device token registration**  
-Branch: `feature/phase6-device-token-registration`
+**Story 7.2 — Device token registration**  
+Branch: `feature/phase7-device-token-registration`
 
 In the mobile app, request notification permission on first launch. Get the FCM token via `@react-native-firebase/messaging`. Register it with the server via `POST /api/device-tokens` on every app launch (token can change). Handle token refresh events.
 
@@ -2462,8 +2501,8 @@ Acceptance criteria:
 
 ---
 
-**Story 6.3 — FCM dispatch from server**  
-Branch: `feature/phase6-fcm-dispatch`
+**Story 7.3 — FCM dispatch from server**  
+Branch: `feature/phase7-fcm-dispatch`
 
 In the routine execution service, after persisting the routine response, check whether any SSE client is currently connected for the thread. If not, send an FCM push notification to all registered device tokens for the user. Notification title: agent emoji + name. Body: first 100 chars of response. Data: `thread_id`.
 
@@ -2475,8 +2514,8 @@ Acceptance criteria:
 
 ---
 
-**Story 6.4 — Notification handling in mobile app**  
-Branch: `feature/phase6-mobile-notification-handling`
+**Story 7.4 — Notification handling in mobile app**  
+Branch: `feature/phase7-mobile-notification-handling`
 
 Handle incoming FCM notifications in the mobile app. Foreground: show an in-app banner using `@notifee/react-native`. Background/quit: tapping the notification deep-links to the correct thread using `thread_id` from the notification data.
 
@@ -2487,14 +2526,14 @@ Acceptance criteria:
 
 ---
 
-### Phase 7 — MCP Depth
+### Phase 8 — MCP Depth
 
 **Goal:** MCP servers are fully first-class. Tool inspector works, local server process management is robust, and the platform is ready for any MCP integration.
 
 ---
 
-**Story 7.1 — MCP tool inspector**  
-Branch: `feature/phase7-mcp-tool-inspector`
+**Story 8.1 — MCP tool inspector**  
+Branch: `feature/phase8-mcp-tool-inspector`
 
 When an MCP server connects, enumerate its exposed tools and cache the list (name, description, input schema) in memory. Expose this via `GET /api/mcp-servers/:id/tools`. In the Thread Config pane and MCP settings page, render the tool list as an expandable section per server. Include the source URL as a clickable link when set.
 
@@ -2507,8 +2546,8 @@ Acceptance criteria:
 
 ---
 
-**Story 7.2 — Local MCP process management**  
-Branch: `feature/phase7-local-mcp-processes`
+**Story 8.2 — Local MCP process management**  
+Branch: `feature/phase8-local-mcp-processes`
 
 Implement full lifecycle management for local MCP servers. The Rust server starts local servers as child processes on demand (when a thread with that server is opened or on server startup if the server has active threads). Health-check loop monitors the process. On crash, attempt restart with exponential backoff. Status is kept live in the `mcp_servers.status` field and broadcast via global SSE event. Graceful shutdown on server exit.
 
@@ -2521,41 +2560,41 @@ Acceptance criteria:
 
 ---
 
-### Phase 8 — Polish and Hardening
+### Phase 9 — Polish and Hardening
 
 **Goal:** The system is reliable, handles errors gracefully, and provides a good experience end-to-end.
 
 ---
 
-**Story 8.1 — Error handling and user feedback**  
-Branch: `feature/phase8-error-handling`
+**Story 9.1 — Error handling and user feedback**  
+Branch: `feature/phase9-error-handling`
 
 Audit all error paths in the Rust server and ensure they return consistent, meaningful error responses. Audit the React SPA and add toast notifications for API errors. Ensure SSE errors are surfaced to the user. Add retry logic for transient provider errors.
 
 ---
 
-**Story 8.2 — SSE reconnection and resilience**  
-Branch: `feature/phase8-sse-resilience`
+**Story 9.2 — SSE reconnection and resilience**  
+Branch: `feature/phase9-sse-resilience`
 
 Implement robust SSE reconnection in both the web and mobile clients. Use the `Last-Event-ID` header to resume from the last received event. Ensure no messages are lost during a brief disconnect.
 
 ---
 
-**Story 8.3 — Message pagination**  
-Branch: `feature/phase8-message-pagination`
+**Story 9.3 — Message pagination**  
+Branch: `feature/phase9-message-pagination`
 
 Implement cursor-based pagination on `GET /api/threads/:id/messages`. In the web and mobile apps, implement "load more" by scrolling to the top of the message list.
 
 ---
 
-**Story 8.4 — Setup and README**  
-Branch: `feature/phase8-docs`
+**Story 9.4 — Setup and README**  
+Branch: `feature/phase9-docs`
 
 Write a comprehensive README covering: what agent-deck is, prerequisites, installation steps (including `git submodule init` for copilot-api), first-run setup, mobile pairing, and how to add providers. Document the Firebase setup steps. Document the Tailscale setup.
 
 ---
 
-### Phase 9 — Status Bar App (Deferred)
+### Phase 10 — Status Bar App (Deferred)
 
 Deferred until all other phases are complete. See section 11 for notes.
 
@@ -2565,8 +2604,11 @@ Deferred until all other phases are complete. See section 11 for notes.
 
 The following items are explicitly out of scope for v1. They are documented here so future contributors have context.
 
-### Status Bar App (Phase 9)
+### Status Bar App (Phase 10)
 A native macOS Swift/SwiftUI app that lives in the menu bar. It manages the Rust server process and optionally the `copilot-api` process. Shows server status (running/stopped), active thread count, and allows starting/stopping the server. Registers as a Login Item so it starts on boot. The `.app` bundle allows it to appear in Launchpad and Spotlight. Planned for after all other phases are complete.
+
+### OAuth and Third-Party App Credentials
+Browser-based OAuth flows (Google, GitHub, etc.) with token refresh, consent screens, and callback handling. Required to unlock Gmail, Google Calendar, Google Drive, and any MCP server that authenticates via OAuth rather than static tokens. Includes: OAuth provider trait and registry, token refresh on credential resolution, `/settings/accounts` page for connected accounts, and the Google app verification process for consumer distribution. This is a significant UX and infrastructure investment — deferred until the core platform is stable and the credential store, MCP integration, and agent runtime are proven out. When ready, the credential store already supports the encrypted storage layer; the work is in adding the browser flow, refresh logic, and new credential types (`oauth2` with `scopes`, `expires_at`, `refresh_token`).
 
 ### iOS App
 No iOS app in v1. Building for iOS requires an Apple Developer account ($99/year). The Android app serves as the mobile client. iOS can be added in a future version once the Android app is stable.
@@ -2580,7 +2622,7 @@ Threads can be archived in v1. Hard delete (with full cascade through messages, 
 
 
 ### Additional OAuth Providers
-The OAuth provider framework (Phase 3) is designed to be modular — adding a new provider (Notion, Linear, Slack, etc.) requires only implementing the `OAuthProvider` trait and registering in the provider registry. Future providers follow the same pattern with no infrastructure changes.
+The OAuth provider framework (deferred — see "OAuth and Third-Party App Credentials" above) is designed to be modular — adding a new provider (Notion, Linear, Slack, etc.) requires only implementing the `OAuthProvider` trait and registering in the provider registry. Future providers follow the same pattern with no infrastructure changes.
 
 ### Memory as MCP
 The current memory system is a baked-in tool-calling implementation. A future version should expose it as a local MCP server instead, making it swappable. This would allow plugging in a different memory backend (e.g., a vector database) without touching the core agent run-loop. Deferred to avoid scope expansion in v1.

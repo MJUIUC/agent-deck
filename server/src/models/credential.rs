@@ -1,69 +1,122 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Public-facing credential record. Never includes `encrypted_data`.
+/// Credential types supported by the store.
+pub const CREDENTIAL_TYPES: &[&str] = &["api_key", "pat", "bearer_token", "key_secret_pair"];
+
+/// Public-facing credential record returned by the API.
+/// `encrypted_data` is intentionally absent — it must never appear in responses.
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Credential {
     pub id: String,
     pub key: String,
     pub display_name: String,
-    pub provider: String,
-    pub credential_type: String, // "oauth2" | "api_key" | "custom"
-    pub owner_type: String,      // "user" | "persona"
-    pub persona_id: Option<String>,
-    // NOTE: encrypted_data is intentionally NOT included here.
-    // It must never appear in API responses.
-    pub scopes: Option<String>,
-    pub expires_at: Option<String>,
+    pub service: String,
+    pub credential_type: String,
+    pub service_url: Option<String>,
+    pub username: Option<String>,
+    pub email: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
 
-/// Used internally when reading from DB — never serialized to API responses.
+/// Internal struct used when the encrypted payload is needed (e.g. decryption).
+/// Never serialized to API responses.
 #[derive(Debug, sqlx::FromRow)]
 pub struct CredentialWithData {
     pub id: String,
     pub key: String,
+    pub display_name: String,
+    pub service: String,
+    pub credential_type: String,
+    pub service_url: Option<String>,
+    pub username: Option<String>,
+    pub email: Option<String>,
     pub encrypted_data: String,
-    pub expires_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
+/// Payload for creating a new credential.
+/// The `secret` (and optional `password`) fields are raw — the service layer
+/// encrypts them before writing to the database.
 #[derive(Debug, Deserialize)]
 pub struct CreateCredential {
+    /// Unique machine-readable key used to reference this credential
+    /// from other records (e.g. MCP server config, provider `credential_key`).
     pub key: String,
     pub display_name: String,
-    pub provider: String,
+    pub service: String,
+    /// Must be one of: "api_key", "pat", "bearer_token", "key_secret_pair".
     pub credential_type: String,
-    pub owner_type: String,
-    pub persona_id: Option<String>,
-    pub secret: String, // raw secret — will be encrypted before storage
-    pub scopes: Option<String>,
-    pub expires_at: Option<String>,
+    pub service_url: Option<String>,
+    pub username: Option<String>,
+    pub email: Option<String>,
+    /// The primary secret value (API key, token, etc.).
+    pub secret: String,
+    /// Optional secondary secret — only used for `key_secret_pair` type.
+    pub password: Option<String>,
 }
 
+/// Payload for updating an existing credential.
+/// All fields are optional; only supplied fields are updated.
 #[derive(Debug, Deserialize)]
 pub struct UpdateCredential {
     pub display_name: Option<String>,
-    pub secret: Option<String>, // raw secret — will be encrypted before storage
-    pub scopes: Option<String>,
-    pub expires_at: Option<String>,
+    pub service: Option<String>,
+    pub credential_type: Option<String>,
+    pub service_url: Option<String>,
+    pub username: Option<String>,
+    pub email: Option<String>,
+    /// If provided, the secret is re-encrypted and stored.
+    pub secret: Option<String>,
+    /// If provided alongside `secret`, stored in the encrypted blob.
+    pub password: Option<String>,
+}
+
+/// The JSON blob that gets AES-256-GCM encrypted and stored in `encrypted_data`.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CredentialSecret {
+    pub secret: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
 }
 
 impl Credential {
-    pub fn new(req: &CreateCredential, encrypted_data: &str) -> Self {
+    /// Construct a new `Credential` from a `CreateCredential` request.
+    /// The caller is responsible for supplying the `encrypted_data` string
+    /// (result of encrypting a `CredentialSecret` JSON blob).
+    pub fn new_record(req: &CreateCredential) -> Self {
         let now = chrono::Utc::now().to_rfc3339();
         Self {
             id: Uuid::new_v4().to_string(),
             key: req.key.clone(),
             display_name: req.display_name.clone(),
-            provider: req.provider.clone(),
+            service: req.service.clone(),
             credential_type: req.credential_type.clone(),
-            owner_type: req.owner_type.clone(),
-            persona_id: req.persona_id.clone(),
-            scopes: req.scopes.clone(),
-            expires_at: req.expires_at.clone(),
+            service_url: req.service_url.clone(),
+            username: req.username.clone(),
+            email: req.email.clone(),
             created_at: now.clone(),
             updated_at: now,
+        }
+    }
+}
+
+impl CredentialWithData {
+    /// Convert to the public-facing `Credential` (strips `encrypted_data`).
+    pub fn into_public(self) -> Credential {
+        Credential {
+            id: self.id,
+            key: self.key,
+            display_name: self.display_name,
+            service: self.service,
+            credential_type: self.credential_type,
+            service_url: self.service_url,
+            username: self.username,
+            email: self.email,
+            created_at: self.created_at,
+            updated_at: self.updated_at,
         }
     }
 }

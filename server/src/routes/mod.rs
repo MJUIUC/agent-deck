@@ -21,6 +21,7 @@ use crate::services::copilot::{CopilotApiService, GlobalEvent};
 
 pub mod auth;
 pub mod config;
+pub mod credentials;
 pub mod health;
 pub mod memory;
 pub mod messages;
@@ -139,6 +140,17 @@ pub async fn build_router(pool: SqlitePool, config: Config) -> anyhow::Result<Ro
         .route(
             "/api/personas/:id/avatar",
             axum::routing::post(personas::upload_avatar),
+        )
+        // Credentials
+        .route(
+            "/api/credentials",
+            get(credentials::list).post(credentials::create),
+        )
+        .route(
+            "/api/credentials/:id",
+            get(credentials::get)
+                .put(credentials::update)
+                .delete(credentials::delete),
         )
         // MCP Servers
         .route(
