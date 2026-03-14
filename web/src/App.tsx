@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useThreadStore } from "@/stores/useThreadStore";
 import { makeDraftThread } from "@/stores/useThreadStore";
 import { useSseStore } from "@/stores/useSseStore";
@@ -42,10 +42,6 @@ export function App() {
 
   // Message store — needed to send the first message in the draft flow
   const sendMessage = useMessageStore((s) => s.sendMessage);
-
-  // Tracks whether the real ChatView that replaces the draft should treat its
-  // first stream completion as the title-generation trigger.
-  const pendingFirstSend = useRef<boolean>(false);
 
   // SSE store
   const connectGlobal = useSseStore((s) => s.connectGlobal);
@@ -134,25 +130,29 @@ export function App() {
   );
 
   // Called by the draft ChatView when the user sends their first message.
-  // Creates the real thread, promotes it as active, then sends the message.
-  // The real ChatView that mounts after the promotion receives isFirstSend=true
-  // so it knows to trigger title generation after the first agent response.
+  // Creates the real thread, sends the message, then promotes the thread as
+  // active. Title generation is driven server-side via the TitleUpdated SSE
+  // event — no client-side coordination needed here.
   const handleFirstSend = useCallback(
     async (content: string) => {
       if (!pendingPersona) return;
       try {
+        // 1. Create the real thread in the DB.
         const newThread = await createThread(pendingPersona.id);
-        pendingFirstSend.current = true;
-        promotePendingThread(newThread);
-        // Send the message into the now-real thread.
-        // connectThread hasn't fired yet for this thread — sendMessage itself
-        // sets isStreaming which is enough for the UI; the SSE connection is
-        // established in ChatView's useEffect on mount with the real thread.id.
+
+        // 2. Send the user message so it's persisted and the agent starts
+        //    streaming before we promote. This way the SSE connection that
+        //    ChatView opens on mount will arrive while the stream is still
+        //    in flight — the falling-edge detector in ChatView is guaranteed
+        //    to see isStreaming go true → false.
         await sendMessage(newThread.id, content);
+
+        // 3. Promote the thread — ChatView will mount and connect SSE.
+        //    Title generation is now driven server-side via TitleUpdated SSE.
+        promotePendingThread(newThread);
       } catch {
-        // createThread failure: pendingPersona stays set so the user can retry.
-        // sendMessage failure: handled inside useMessageStore (sets error state).
-        pendingFirstSend.current = false;
+        // createThread or sendMessage failure — keep pendingPersona so the
+        // user can retry.
       }
     },
     [pendingPersona, createThread, promotePendingThread, sendMessage],
@@ -264,7 +264,6 @@ export function App() {
       ) : activeThread ? (
         <ChatView
           thread={activeThread}
-          isFirstSend={pendingFirstSend.current}
           onMobileMenuOpen={handleMobileMenuOpen}
         />
       ) : isCheckingProviders ? (

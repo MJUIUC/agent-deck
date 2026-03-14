@@ -279,6 +279,24 @@ export const useSseStore = create<SseStore>((set, get) => ({
         }
       };
 
+      const handleTitleUpdated = (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data) as {
+            thread_id: string;
+            title: string;
+          };
+          if (data.thread_id && data.title) {
+            const store = useThreadStore.getState();
+            const existing = store.threads.find((t) => t.id === data.thread_id);
+            if (existing) {
+              store.upsertThread({ ...existing, title: data.title });
+            }
+          }
+        } catch {
+          // ignore
+        }
+      };
+
       const handleConnError = () => {
         set({
           globalConnected: false,
@@ -302,6 +320,7 @@ export const useSseStore = create<SseStore>((set, get) => ({
       };
 
       es.addEventListener("thread_updated", handleThreadUpdated);
+      es.addEventListener("title_updated", handleTitleUpdated);
 
       es.addEventListener("open", () => {
         set({
@@ -315,6 +334,7 @@ export const useSseStore = create<SseStore>((set, get) => ({
 
       const cleanup = () => {
         es.removeEventListener("thread_updated", handleThreadUpdated);
+        es.removeEventListener("title_updated", handleTitleUpdated);
         es.close();
       };
 

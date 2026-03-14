@@ -282,203 +282,34 @@ pub async fn delete(
     Ok((StatusCode::OK, Json(json!({ "data": { "deleted": true } }))))
 }
 
-/// POST /api/threads/:id/generate-title
+/// GET /api/threads/:id/generate-title
 ///
-/// Called by the client after the first agent response streams in.
-/// Fetches the first user message and first assistant message, asks the
-/// thread's active LLM to produce a concise title (≤ 8 words / 60 chars),
-/// persists it, and returns `{ "data": { "title": "..." } }`.
+/// ⚠️  DEPRECATED — manual/debug use only.
 ///
-/// Falls back to the simple truncation heuristic if the LLM call fails for
-/// any reason — the title is never left as "New Chat".
+/// Title generation is now driven entirely server-side by `agent::run_inner`
+/// immediately after the first assistant reply is persisted. A `TitleUpdated`
+/// SSE event is broadcast on the global stream so the client sidebar updates
+/// in real time without any HTTP call.
+///
+/// This endpoint is intentionally kept for development and manual testing but
+/// returns 503 Service Unavailable to discourage any future client-side callers
+/// from reintroducing the fragile client-side title-gen pattern.
+///
+/// The underlying logic still lives in `services/title.rs` and is called by
+/// `agent::run_inner`.
 pub async fn generate_title(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
+    State(_state): State<AppState>,
+    Path(_id): Path<String>,
 ) -> AppResult<impl IntoResponse> {
-    let user_id = get_user_id(&state).await?;
-    let thread = verify_thread_ownership(&state, &id, &user_id).await?;
-
-    // Fetch first user message
-    let first_user: Option<(String,)> = sqlx::query_as(
-        "SELECT content FROM messages
-         WHERE thread_id = ? AND role = 'user'
-         ORDER BY created_at ASC LIMIT 1",
-    )
-    .bind(&id)
-    .fetch_optional(&state.pool)
-    .await?;
-
-    let user_content = match first_user {
-        Some((c,)) => c,
-        None => {
-            // No messages yet — nothing to title, return current title unchanged
-            return Ok((
-                StatusCode::OK,
-                Json(json!({ "data": { "title": thread.title } })),
-            ));
-        }
-    };
-
-    // Fetch first assistant message
-    let first_assistant: Option<(String,)> = sqlx::query_as(
-        "SELECT content FROM messages
-         WHERE thread_id = ? AND role = 'assistant'
-         ORDER BY created_at ASC LIMIT 1",
-    )
-    .bind(&id)
-    .fetch_optional(&state.pool)
-    .await?;
-
-    let assistant_content = first_assistant.map(|(c,)| c).unwrap_or_default();
-
-    // ── Attempt LLM title generation ──────────────────────────────────────────
-
-    let generated_title = try_llm_title(&state, &thread, &user_content, &assistant_content).await;
-
-    // ── Persist and return ────────────────────────────────────────────────────
-
-    let now = chrono::Utc::now()
-        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-        .to_string();
-
-    sqlx::query("UPDATE threads SET title = ?, updated_at = ? WHERE id = ?")
-        .bind(&generated_title)
-        .bind(&now)
-        .bind(&id)
-        .execute(&state.pool)
-        .await?;
-
     Ok((
-        StatusCode::OK,
-        Json(json!({ "data": { "title": generated_title } })),
+        StatusCode::SERVICE_UNAVAILABLE,
+        Json(json!({
+            "error": "Title generation is handled server-side by the agent run-loop. \
+                      This endpoint is reserved for manual/debug use only and is not \
+                      called automatically. See services/title.rs and agent::run_inner \
+                      step 6.5."
+        })),
     ))
-}
-
-/// Try to generate a title via the thread's active LLM.
-/// Returns a fallback truncation title on any error.
-async fn try_llm_title(
-    state: &AppState,
-    thread: &Thread,
-    user_content: &str,
-    assistant_content: &str,
-) -> String {
-    let fallback = agent::generate_title_from_message(user_content);
-
-    // Resolve provider: prefer thread's active_provider, fall back to persona default
-    let provider_id = match thread.active_provider.as_deref() {
-        Some(p) if !p.is_empty() => p.to_string(),
-        _ => {
-            // Look up persona default_provider
-            let row: Option<(String,)> =
-                sqlx::query_as("SELECT default_provider FROM agent_personas WHERE id = ?")
-                    .bind(&thread.persona_id)
-                    .fetch_optional(&state.pool)
-                    .await
-                    .ok()
-                    .flatten();
-
-            match row {
-                Some((p,)) if !p.is_empty() => p,
-                _ => return fallback,
-            }
-        }
-    };
-
-    // Load the provider row
-    let provider_row: Option<crate::models::provider::Provider> = sqlx::query_as(
-        "SELECT id, user_id, name, kind, base_url, api_key, enabled, created_at, updated_at
-         FROM providers WHERE id = ?",
-    )
-    .bind(&provider_id)
-    .fetch_optional(&state.pool)
-    .await
-    .ok()
-    .flatten();
-
-    let provider_row = match provider_row {
-        Some(r) => r,
-        None => return fallback,
-    };
-
-    // Resolve model: prefer thread's active_model, fall back to persona default
-    let model_id = match thread.active_model.as_deref() {
-        Some(m) if !m.is_empty() => {
-            // active_model is a models table UUID — resolve to the actual model_id string
-            let row: Option<(String,)> = sqlx::query_as("SELECT model_id FROM models WHERE id = ?")
-                .bind(m)
-                .fetch_optional(&state.pool)
-                .await
-                .ok()
-                .flatten();
-            match row {
-                Some((mid,)) => mid,
-                None => return fallback,
-            }
-        }
-        _ => {
-            // Fall back to persona default_model UUID → model_id
-            let row: Option<(String,)> = sqlx::query_as(
-                "SELECT m.model_id FROM models m
-                 JOIN agent_personas p ON p.default_model = m.id
-                 WHERE p.id = ?",
-            )
-            .bind(&thread.persona_id)
-            .fetch_optional(&state.pool)
-            .await
-            .ok()
-            .flatten();
-            match row {
-                Some((mid,)) => mid,
-                None => return fallback,
-            }
-        }
-    };
-
-    // Build provider and call the LLM
-    let provider = match agent::build_provider(state, &provider_row) {
-        Ok(p) => p,
-        Err(_) => return fallback,
-    };
-
-    let prompt = format!(
-        "Generate a concise thread title (max 8 words) from this exchange:\nUser: {}\nAssistant: {}\nTitle:",
-        user_content.chars().take(500).collect::<String>(),
-        assistant_content.chars().take(500).collect::<String>(),
-    );
-
-    let messages = vec![async_openai::types::ChatCompletionRequestMessage::User(
-        async_openai::types::ChatCompletionRequestUserMessageArgs::default()
-            .content(prompt.as_str())
-            .build()
-            .unwrap(),
-    )];
-
-    match provider.complete(&model_id, messages, vec![]).await {
-        Ok(raw) => {
-            let cleaned = raw.trim().trim_matches('"').trim_matches('\'').trim();
-            truncate_title(cleaned)
-        }
-        Err(_) => fallback,
-    }
-}
-
-/// Truncate a title to at most 60 characters at a word boundary.
-fn truncate_title(s: &str) -> String {
-    const MAX_LEN: usize = 60;
-    let s = s.trim();
-    if s.is_empty() {
-        return "New Chat".to_string();
-    }
-    if s.chars().count() <= MAX_LEN {
-        return s.to_string();
-    }
-    // Walk back from char 60 to the last space
-    let truncated: String = s.chars().take(MAX_LEN).collect();
-    let at_word = truncated
-        .rfind(' ')
-        .map(|i| truncated[..i].trim_end().to_string())
-        .unwrap_or_else(|| truncated.trim_end().to_string());
-    format!("{}…", at_word)
 }
 
 /// POST /api/threads/:id/archive

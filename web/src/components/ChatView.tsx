@@ -15,14 +15,11 @@ import { MessageBubble, StreamingBubble } from "./MessageBubble";
 import { MessageInput } from "./MessageInput";
 import { ChatHeader } from "./ChatHeader";
 import { ConfigPane } from "./ConfigPane";
-import { threadsApi } from "@/api/client";
+
 import styles from "./ChatView.module.css";
 
 interface ChatViewProps {
   thread: Thread;
-  /** When true, this ChatView was just promoted from a draft — the first
-   *  stream completion should trigger LLM title generation. */
-  isFirstSend?: boolean;
   /** Provided only in draft mode (thread.id === "pending"). Called with the
    *  user's message content; creates the real thread and sends the message. */
   onFirstSend?: (content: string) => Promise<void>;
@@ -36,7 +33,6 @@ const EMPTY_STRING = "";
 
 export function ChatView({
   thread,
-  isFirstSend = false,
   onFirstSend,
   onMobileMenuOpen,
 }: ChatViewProps) {
@@ -67,17 +63,6 @@ export function ChatView({
   const upsertThread = useThreadStore((s) => s.upsertThread);
   const archiveThread = useThreadStore((s) => s.archiveThread);
 
-  // Seed the first-send ref on mount when we've been promoted from a draft.
-  // This must run before any messages arrive, hence the empty dep array.
-  // The ref tracks whether the NEXT stream completion should fire title-gen.
-  const titleGenPendingRef = useRef<boolean>(false);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    if (isFirstSend) {
-      titleGenPendingRef.current = true;
-    }
-  }, []);
-
   useEffect(() => {
     // Draft threads have no real id — skip loading and SSE connection.
     if (isDraft) return;
@@ -88,32 +73,6 @@ export function ChatView({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [thread.id]);
-
-  // ── Title generation after first agent response ───────────────────────────
-  // Fires once: when isStreaming transitions to false while titleGenPendingRef
-  // is set.  Uses a prev-value ref to detect the falling edge.
-  const prevIsStreaming = useRef<boolean>(false);
-  useEffect(() => {
-    const wasStreaming = prevIsStreaming.current;
-    prevIsStreaming.current = isStreaming;
-
-    if (
-      wasStreaming &&
-      !isStreaming &&
-      titleGenPendingRef.current &&
-      !isDraft
-    ) {
-      titleGenPendingRef.current = false;
-      threadsApi
-        .generateTitle(thread.id)
-        .then(({ data }) => {
-          upsertThread({ ...thread, title: data.title });
-        })
-        .catch(() => {
-          // Title generation failed — leave as-is, not a fatal error
-        });
-    }
-  }, [isStreaming]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { containerRef } = useAutoScroll([messages.length, streamingContent]);
 
@@ -137,6 +96,13 @@ export function ChatView({
   const personaEmoji = persona?.emoji ?? "🤖";
   const personaName = persona?.name ?? "Agent";
 
+  const handleThreadUpdated = useCallback(
+    (updated: Thread) => {
+      upsertThread({ ...updated, persona: thread.persona });
+    },
+    [upsertThread, thread.persona],
+  );
+
   const handleSend = useCallback(
     (content: string) => {
       if (isDraft && onFirstSend) {
@@ -147,13 +113,6 @@ export function ChatView({
       }
     },
     [isDraft, onFirstSend, thread.id, sendMessage],
-  );
-
-  const handleThreadUpdated = useCallback(
-    (updated: Thread) => {
-      upsertThread({ ...updated, persona: thread.persona });
-    },
-    [upsertThread, thread.persona],
   );
 
   return (

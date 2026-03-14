@@ -73,6 +73,10 @@ pub enum GlobalEvent {
         routine_id: String,
         routine_name: String,
     },
+    /// Title was generated (or updated) for a thread after the first assistant
+    /// reply. Emitted by `agent::run_inner` so the client sidebar updates
+    /// without a page reload or a second HTTP call.
+    TitleUpdated { thread_id: String, title: String },
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
