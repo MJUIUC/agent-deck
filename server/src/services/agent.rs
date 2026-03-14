@@ -23,6 +23,7 @@ use crate::{
         context::{self, AssemblyInput, HistoryMessage},
         encryption, memory as memory_service,
         provider::{CopilotProvider, LlmProvider, OpenAiProvider},
+        title as title_service,
     },
 };
 
@@ -270,6 +271,59 @@ async fn run_inner(state: &AppState, thread_id: &str, user_message: &str) -> Res
         .execute(&state.pool)
         .await?;
 
+    // ── 6.5 First-message post-processing ─────────────────────────────────────
+    // Count total messages in this thread. If this is the first assistant reply
+    // (i.e. exactly 2 messages: 1 user + 1 assistant), run title generation
+    // using the first user message and first assistant reply, persist the result,
+    // and broadcast TitleUpdated so the client sidebar updates in real time
+    // without a page reload or a second HTTP call from the client.
+    let message_count: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM messages
+         WHERE thread_id = ? AND role IN ('user', 'assistant') AND visibility = 'visible'",
+    )
+    .bind(thread_id)
+    .fetch_one(&state.pool)
+    .await?;
+
+    if message_count.0 == 2 {
+        // Fetch the first user message to use as the title gen input.
+        let first_user: Option<(String,)> = sqlx::query_as(
+            "SELECT content FROM messages
+             WHERE thread_id = ? AND role = 'user'
+             ORDER BY created_at ASC LIMIT 1",
+        )
+        .bind(thread_id)
+        .fetch_optional(&state.pool)
+        .await?;
+
+        if let Some((user_content,)) = first_user {
+            let generated_title =
+                title_service::try_llm_title(state, &thread, &user_content, &assistant_msg.content)
+                    .await;
+
+            let now = chrono::Utc::now()
+                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+                .to_string();
+
+            sqlx::query("UPDATE threads SET title = ?, updated_at = ? WHERE id = ?")
+                .bind(&generated_title)
+                .bind(&now)
+                .bind(thread_id)
+                .execute(&state.pool)
+                .await?;
+
+            let _ = state.send_global_event(GlobalEvent::TitleUpdated {
+                thread_id: thread_id.to_string(),
+                title: generated_title,
+            });
+
+            info!(
+                thread_id = %thread_id,
+                "Title generated and broadcast after first assistant reply"
+            );
+        }
+    }
+
     // ── 7. Emit SSE events ─────────────────────────────────────────────────────
     state.send_thread_event(
         thread_id,
@@ -408,6 +462,12 @@ async fn generation_loop(
             // Do not persist a partial message on mid-stream failure.
             return Err(anyhow!("Mid-stream error — response not persisted"));
         }
+
+        // Drop any malformed tool-call slots that arrived without a name or id.
+        // This can happen with some providers (e.g. Copilot) that emit index
+        // fragments before the name/id chunks, leaving default-constructed slots
+        // in the accumulator. Passing them downstream causes a 400 error.
+        tool_calls.retain(|tc| !tc.name.is_empty() && !tc.id.is_empty());
 
         // If there were no tool calls, this turn is done.
         if tool_calls.is_empty() {
