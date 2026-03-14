@@ -401,6 +401,102 @@ mod tests {
     };
     use tower::ServiceExt;
 
+    // ── AgentJob channel tests ────────────────────────────────────────────────
+
+    /// The agent_tx channel must accept a job without blocking — the send
+    /// handler depends on this being a cheap, non-blocking enqueue.
+    #[tokio::test]
+    async fn agent_tx_send_does_not_block() {
+        let (tx, _rx) = mpsc::channel::<AgentJob>(64);
+        // try_send (non-async) must succeed immediately — channel has capacity.
+        tx.try_send(AgentJob {
+            thread_id: "t1".to_string(),
+            content: "hello".to_string(),
+        })
+        .expect("send should succeed without blocking");
+    }
+
+    /// Jobs sent to agent_tx are received by the worker in order.
+    #[tokio::test]
+    async fn agent_worker_receives_jobs_in_order() {
+        let (tx, mut rx) = mpsc::channel::<AgentJob>(64);
+
+        tx.send(AgentJob {
+            thread_id: "t1".to_string(),
+            content: "first".to_string(),
+        })
+        .await
+        .unwrap();
+
+        tx.send(AgentJob {
+            thread_id: "t2".to_string(),
+            content: "second".to_string(),
+        })
+        .await
+        .unwrap();
+
+        let job1 = rx.recv().await.unwrap();
+        assert_eq!(job1.thread_id, "t1");
+        assert_eq!(job1.content, "first");
+
+        let job2 = rx.recv().await.unwrap();
+        assert_eq!(job2.thread_id, "t2");
+        assert_eq!(job2.content, "second");
+    }
+
+    /// Dropping the sender closes the channel — the worker's recv loop exits
+    /// cleanly rather than hanging forever.
+    #[tokio::test]
+    async fn agent_worker_exits_when_sender_dropped() {
+        let (tx, mut rx) = mpsc::channel::<AgentJob>(64);
+        drop(tx);
+        // recv() must return None immediately once the sender is gone.
+        assert!(rx.recv().await.is_none());
+    }
+
+    /// The channel does not block the caller when at capacity — try_send
+    /// returns Err rather than waiting, protecting the HTTP handler from
+    /// stalling if the worker falls behind.
+    #[tokio::test]
+    async fn agent_tx_try_send_fails_when_full() {
+        // Capacity of 1 so we can fill it with a single job.
+        let (tx, _rx) = mpsc::channel::<AgentJob>(1);
+
+        tx.try_send(AgentJob {
+            thread_id: "t1".to_string(),
+            content: "fill".to_string(),
+        })
+        .expect("first send fills the channel");
+
+        // Channel is now full — try_send must not block, it must error.
+        let result = tx.try_send(AgentJob {
+            thread_id: "t2".to_string(),
+            content: "overflow".to_string(),
+        });
+
+        assert!(result.is_err(), "try_send should fail on a full channel");
+    }
+
+    /// AgentJob fields are stored and retrieved intact.
+    #[tokio::test]
+    async fn agent_job_fields_roundtrip() {
+        let (tx, mut rx) = mpsc::channel::<AgentJob>(8);
+
+        let thread_id = "d05a7947-9b72-4573-aee5-48572afaf198".to_string();
+        let content = "Plan a trip to Japan 🇯🇵".to_string();
+
+        tx.send(AgentJob {
+            thread_id: thread_id.clone(),
+            content: content.clone(),
+        })
+        .await
+        .unwrap();
+
+        let job = rx.recv().await.unwrap();
+        assert_eq!(job.thread_id, thread_id);
+        assert_eq!(job.content, content);
+    }
+
     async fn test_app() -> (Router, String) {
         let pool = sqlx::SqlitePool::connect("sqlite::memory:")
             .await

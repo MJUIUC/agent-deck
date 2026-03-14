@@ -11,8 +11,14 @@ vi.mock("@/api/client", () => ({
   },
 }));
 
+vi.mock("./tokenBuffer", () => ({
+  cancelTokenBuffer: vi.fn(),
+  bufferToken: vi.fn(),
+}));
+
 import { useMessageStore } from "./useMessageStore";
 import { messagesApi } from "@/api/client";
+import { cancelTokenBuffer } from "./tokenBuffer";
 
 const mockMessagesApi = messagesApi as {
   list: ReturnType<typeof vi.fn>;
@@ -678,6 +684,169 @@ describe("concurrency", () => {
     expect(getThread("t2").phase).toEqual({
       status: "streaming",
       content: "live",
+    });
+  });
+
+  // ── sendMessage phase isolation ───────────────────────────────────────────────
+
+  describe("sendMessage phase isolation", () => {
+    it("POST success while phase is sending leaves phase as sending", async () => {
+      // sendMessage sets sending at the start, then POST-success only touches
+      // messages — not phase. So after a successful POST with no SSE, the
+      // phase must remain sending (not be silently overwritten to idle).
+      const realMsg = makeMessage("real-1", "t1", "user", "Hello");
+      mockMessagesApi.send.mockResolvedValue({ data: realMsg });
+
+      await useMessageStore.getState().sendMessage("t1", "Hello");
+
+      // Phase is still sending — the POST-success set does not touch phase.
+      expect(getThread("t1").phase.status).toBe("sending");
+    });
+
+    it("POST success while phase is streaming leaves phase as streaming", async () => {
+      const realMsg = makeMessage("real-1", "t1", "user", "Hello");
+      mockMessagesApi.send.mockResolvedValue({ data: realMsg });
+
+      // Start sendMessage but do not await yet — grab the promise
+      const sendPromise = useMessageStore.getState().sendMessage("t1", "Hello");
+
+      // Simulate SSE tokens arriving before POST resolves: transition to streaming
+      useMessageStore.setState({
+        threads: {
+          t1: {
+            messages: getThread("t1").messages,
+            phase: { status: "streaming", content: "partial" },
+          },
+        },
+      });
+
+      // Now let POST resolve
+      await sendPromise;
+
+      // POST success must NOT have clobbered the streaming phase
+      expect(getThread("t1").phase).toEqual({
+        status: "streaming",
+        content: "partial",
+      });
+    });
+
+    it("POST success while phase is idle leaves phase as idle", async () => {
+      const realMsg = makeMessage("real-1", "t1", "user", "Hello");
+      mockMessagesApi.send.mockResolvedValue({ data: realMsg });
+
+      const sendPromise = useMessageStore.getState().sendMessage("t1", "Hello");
+
+      // Simulate finalizeStream already ran (SSE completed before POST resolved)
+      useMessageStore.setState({
+        threads: {
+          t1: {
+            messages: getThread("t1").messages,
+            phase: { status: "idle" },
+          },
+        },
+      });
+
+      await sendPromise;
+
+      // POST success must NOT have changed the idle phase
+      expect(getThread("t1").phase).toEqual({ status: "idle" });
+    });
+  });
+
+  // ── finalizeStream cancels token buffer ───────────────────────────────────────
+
+  describe("finalizeStream cancels token buffer", () => {
+    it("calls cancelTokenBuffer with the correct threadId", () => {
+      vi.mocked(cancelTokenBuffer).mockClear();
+
+      useMessageStore.setState({
+        threads: {
+          t1: { messages: [], phase: { status: "streaming", content: "hi" } },
+        },
+      });
+
+      const msg = makeMessage("m1", "t1", "assistant", "hi");
+      useMessageStore.getState().finalizeStream("t1", msg);
+
+      expect(cancelTokenBuffer).toHaveBeenCalledWith("t1");
+    });
+
+    it("does not call cancelTokenBuffer for a different threadId", () => {
+      vi.mocked(cancelTokenBuffer).mockClear();
+
+      useMessageStore.setState({
+        threads: {
+          t1: { messages: [], phase: { status: "streaming", content: "hi" } },
+        },
+      });
+
+      const msg = makeMessage("m1", "t1", "assistant", "hi");
+      useMessageStore.getState().finalizeStream("t1", msg);
+
+      expect(cancelTokenBuffer).not.toHaveBeenCalledWith("t2");
+    });
+  });
+
+  // ── appendToken phase transitions ─────────────────────────────────────────────
+
+  describe("appendToken phase transitions", () => {
+    it("appendToken while phase is sending transitions to streaming", () => {
+      useMessageStore.setState({
+        threads: {
+          t1: {
+            messages: [],
+            phase: { status: "sending", optimisticId: "optimistic-1" },
+          },
+        },
+      });
+
+      useMessageStore.getState().appendToken("t1", "Hello");
+
+      const phase = getThread("t1").phase;
+      expect(phase.status).toBe("streaming");
+      if (phase.status === "streaming") {
+        expect(phase.content).toBe("Hello");
+      }
+    });
+
+    it("appendToken while phase is error transitions to streaming with content starting from empty", () => {
+      useMessageStore.setState({
+        threads: {
+          t1: {
+            messages: [],
+            phase: {
+              status: "error",
+              message: "Something went wrong",
+              recoverable: true,
+            },
+          },
+        },
+      });
+
+      useMessageStore.getState().appendToken("t1", "Recovery token");
+
+      const phase = getThread("t1").phase;
+      expect(phase.status).toBe("streaming");
+      if (phase.status === "streaming") {
+        // Content starts from empty — error content is not carried over
+        expect(phase.content).toBe("Recovery token");
+      }
+    });
+
+    it("appendToken while phase is idle transitions to streaming", () => {
+      useMessageStore.setState({
+        threads: {
+          t1: { messages: [], phase: { status: "idle" } },
+        },
+      });
+
+      useMessageStore.getState().appendToken("t1", "First token");
+
+      const phase = getThread("t1").phase;
+      expect(phase.status).toBe("streaming");
+      if (phase.status === "streaming") {
+        expect(phase.content).toBe("First token");
+      }
     });
   });
 });
