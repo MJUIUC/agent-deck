@@ -8,7 +8,7 @@ interface MessageStore {
   streamingContent: Record<string, string>; // threadId -> accumulated tokens
   isStreaming: Record<string, boolean>;
   isSending: Record<string, boolean>;
-  isLoadingMessages: boolean;
+  isLoadingMessages: Record<string, boolean>;
   error: string | null;
 
   // Actions
@@ -32,13 +32,16 @@ export const useMessageStore = create<MessageStore>((set) => ({
   streamingContent: {},
   isStreaming: {},
   isSending: {},
-  isLoadingMessages: false,
+  isLoadingMessages: {},
   error: null,
 
   // ── Actions ─────────────────────────────────────────────────────────────────
 
   loadMessages: async (threadId) => {
-    set({ isLoadingMessages: true, error: null });
+    set((state) => ({
+      isLoadingMessages: { ...state.isLoadingMessages, [threadId]: true },
+      error: null,
+    }));
     try {
       const res = await messagesApi.list(threadId, { limit: 100 });
       set((state) => ({
@@ -46,13 +49,13 @@ export const useMessageStore = create<MessageStore>((set) => ({
           ...state.messagesByThread,
           [threadId]: res.data,
         },
-        isLoadingMessages: false,
+        isLoadingMessages: { ...state.isLoadingMessages, [threadId]: false },
       }));
     } catch (err) {
-      set({
-        isLoadingMessages: false,
+      set((state) => ({
+        isLoadingMessages: { ...state.isLoadingMessages, [threadId]: false },
         error: err instanceof Error ? err.message : "Failed to load messages",
-      });
+      }));
     }
   },
 
