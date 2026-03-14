@@ -36,12 +36,41 @@ function sanitizeKey(value: string): string {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const CREDENTIAL_TYPE_LABELS: Record<CredentialType, string> = {
-  api_key: "API Key",
-  pat: "Personal Access Token",
-  bearer_token: "Bearer Token",
-  key_secret_pair: "Key / Secret Pair",
-  service_account: "Service Account",
+interface CredentialTypeConfig {
+  /** Shown in the type dropdown and table badge. */
+  label: string;
+  /** Label for the primary secret field. */
+  keyLabel: string;
+  /** Placeholder for the primary secret field. */
+  keyPlaceholder: string;
+}
+
+const CREDENTIAL_TYPE_CONFIG: Record<CredentialType, CredentialTypeConfig> = {
+  api_key: {
+    label: "API Key",
+    keyLabel: "API Key",
+    keyPlaceholder: "Paste API key…",
+  },
+  pat: {
+    label: "Personal Access Token",
+    keyLabel: "API Key",
+    keyPlaceholder: "Paste token…",
+  },
+  bearer_token: {
+    label: "Bearer Token",
+    keyLabel: "API Key",
+    keyPlaceholder: "Paste token…",
+  },
+  key_secret_pair: {
+    label: "Key / Secret Pair",
+    keyLabel: "API Key",
+    keyPlaceholder: "Paste API key…",
+  },
+  service_account: {
+    label: "Service Account",
+    keyLabel: "Password",
+    keyPlaceholder: "Paste password…",
+  },
 };
 
 // ─── CredentialForm ───────────────────────────────────────────────────────────
@@ -174,13 +203,13 @@ function CredentialForm({ editing, onSaved, onCancel }: CredentialFormProps) {
               }
             >
               {(
-                Object.entries(CREDENTIAL_TYPE_LABELS) as [
+                Object.entries(CREDENTIAL_TYPE_CONFIG) as [
                   CredentialType,
-                  string,
+                  CredentialTypeConfig,
                 ][]
-              ).map(([val, label]) => (
+              ).map(([val, cfg]) => (
                 <option key={val} value={val}>
-                  {label}
+                  {cfg.label}
                 </option>
               ))}
             </FieldSelect>
@@ -266,7 +295,9 @@ function CredentialForm({ editing, onSaved, onCancel }: CredentialFormProps) {
                 gap: 6,
               }}
             >
-              <FieldLabel>API Key</FieldLabel>
+              <FieldLabel>
+                {CREDENTIAL_TYPE_CONFIG[credentialType].keyLabel}
+              </FieldLabel>
               <div style={{ position: "relative" }}>
                 <FieldInput
                   mono
@@ -274,7 +305,7 @@ function CredentialForm({ editing, onSaved, onCancel }: CredentialFormProps) {
                   placeholder={
                     isEditing
                       ? "Leave blank to keep existing"
-                      : "Paste API key…"
+                      : CREDENTIAL_TYPE_CONFIG[credentialType].keyPlaceholder
                   }
                   value={secret}
                   onChange={(e) => setSecret(e.target.value)}
@@ -631,9 +662,8 @@ function CredentialRow({ credential, onEdit, onDelete }: CredentialRowProps) {
             color: "var(--text-secondary)",
           }}
         >
-          {CREDENTIAL_TYPE_LABELS[
-            credential.credential_type as CredentialType
-          ] ?? credential.credential_type}
+          {CREDENTIAL_TYPE_CONFIG[credential.credential_type as CredentialType]
+            ?.label ?? credential.credential_type}
         </span>
       </div>
 
