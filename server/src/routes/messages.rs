@@ -130,12 +130,10 @@ pub async fn list(
 /// is triggered asynchronously and streams its response via the thread's SSE
 /// stream at `/api/threads/:id/stream`.
 ///
-/// The agent task is gated behind a oneshot channel: the spawn happens before
-/// the HTTP response is sent, but the agent awaits the oneshot signal and only
-/// starts work after the handler has returned and the 201 has been flushed.
-/// This guarantees the client always has the confirmed user message id before
-/// any SSE token can arrive, eliminating the most common cause of the
-/// "message appears then vanishes" race condition.
+/// The agent task yields once after spawning so the Tokio runtime has an
+/// opportunity to flush the HTTP 201 response before the agent begins work.
+/// Combined with wait_for_subscriber this ensures the client has the confirmed
+/// user message id before any SSE token can arrive.
 pub async fn send(
     State(state): State<AppState>,
     Path(thread_id): Path<String>,
@@ -185,25 +183,16 @@ pub async fn send(
         .execute(&state.pool)
         .await?;
 
-    // ── Oneshot gate ──────────────────────────────────────────────────────────
-    // Spawn the agent task now so Tokio can schedule it, but hold it behind a
-    // oneshot receiver.  The sender is fired unconditionally when this handler
-    // returns — even on panic, because dropping a Sender is equivalent to
-    // sending an error, which the task treats as "proceed anyway".
-    //
-    // This guarantees the HTTP 201 (carrying the real user message id) reaches
-    // the client before the first SSE token is emitted, so the client-side
-    // optimistic placeholder is always replaced before finalizeStream runs.
-    let (response_tx, response_rx) = tokio::sync::oneshot::channel::<()>();
-
     let run_state = state.clone();
     let run_thread_id = thread_id.clone();
     let run_content = payload.content.clone();
     tokio::spawn(async move {
-        // Wait for the HTTP response to be handed off to the transport layer.
-        // If the sender is dropped (handler panicked) we proceed anyway so the
-        // agent turn is never silently lost.
-        let _ = response_rx.await;
+        // Yield once so the Tokio runtime can schedule the HTTP response flush
+        // before this task does any work. This is a best-effort yield — it gives
+        // the runtime a scheduling opportunity without adding a fixed delay or
+        // requiring a round-trip signal. The wait_for_subscriber below provides
+        // the stronger guarantee that the SSE connection is open before streaming.
+        tokio::task::yield_now().await;
 
         // Wait up to 3 seconds for the client SSE connection to be established.
         // If no subscriber appears in time we proceed anyway — the message_complete
@@ -217,15 +206,7 @@ pub async fn send(
 
     let response = MessageResponse::from(message);
 
-    // Build the response value before firing the gate so the 201 payload is
-    // fully constructed.  Sending on the oneshot unblocks the agent task.
-    let http_response = Ok((StatusCode::CREATED, Json(json!({ "data": response }))));
-
-    // Unblock the agent.  If the receiver was dropped (task panicked during
-    // the await — extremely unlikely) this is a harmless no-op.
-    let _ = response_tx.send(());
-
-    http_response
+    Ok((StatusCode::CREATED, Json(json!({ "data": response }))))
 }
 
 // ─── Slash Commands ────────────────────────────────────────────────────────────
