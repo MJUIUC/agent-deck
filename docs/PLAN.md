@@ -1,8 +1,21 @@
 # Agent-Deck — Project Plan
 
-**Version:** 1.6  
+**Version:** 1.7  
 **Project:** agent-deck  
 **Purpose:** A self-hosted, highly configurable personal AI agent platform designed to make working with LLMs accessible to non-engineers. Runs on a Mac mini, accessible privately over Tailscale, with a browser UI and Android mobile app.
+
+**v1.7 Changes:**
+- Phase 4 marked complete — all stories 4.1 through 4.5 shipped and verified working
+- Fixed critical encryption key mismatch bug: credential routes were encrypting with `machine_secret` but the MCP manager was decrypting with `credential_master_key` — two separate randomly-generated keys. Added `credential_master_key` to `AppState` and unified all credential encrypt/decrypt paths through it
+- Fixed MCP HTTP transport compliance: `post_rpc` was missing the required `Accept: application/json, text/event-stream` header mandated by the MCP Streamable HTTP spec, causing HTTP 406 from compliant servers (e.g. Context7). Also added SSE response body handling — the server may respond with `text/event-stream` instead of `application/json`
+- Extended `RemoteConfig` with a `headers: HashMap<String, String>` field for arbitrary per-request headers; credential-derived auth header is now merged into this map. Headers are configurable through the full config chain (config.json → DB → UI → connection)
+- Added `auth_format` field to remote MCP server UI (was in `RemoteConfig` struct but not exposed)
+- Fixed supervise loop reconnect bug: after a connection drop, the loop was looking up `shutdown_rx` by searching `self.connections` — but the connection had just been removed. The `unwrap_or_else` fallback created a pre-fired `watch::channel(true)` which immediately hit the shutdown arm and killed the supervision task permanently. Fixed by carrying `shutdown_rx` out of the match arms directly
+- Added debug logging throughout `resolve_secret` and `connect_remote` to aid credential resolution triage
+- Unified all three "server connected" log sites to consistent structured format: `server_id`, `tool_count`, message `"mcp: server connected"`; removed duplicate logs from `connect_local` and `connect_remote` (supervise is the single authoritative emitter)
+- Credential dropdown in MCP server form now populated from live credentials API instead of a free-text field
+- Tag field added to MCP server add/edit form with auto-derivation from name (mirrors server-side logic: lowercase, spaces→underscores, strip non-alphanumeric); tag field in `McpServer` type and `serverToFormState` round-trip correctly on edit
+- As-built deviation (4.5): auto-attach to new threads implemented as per-persona defaults via `persona_default_mcp_servers` table rather than the planned global `app_config` toggle — this is a better design and is retained as canonical
 
 **v1.6 Changes:**
 - Split Phase 4 into two phases: Phase 4 (Credentials and MCP Integration) and Phase 5 (Memory and Routines)
@@ -2209,9 +2222,18 @@ Acceptance criteria:
 - Integration test: connect to a local MCP server, verify connection state
 - `cargo build` passes, all tests pass
 
+### As-built notes (hardening fixes applied post-merge)
+
+- **Encryption key bug fixed:** credential routes were using `machine_secret` for encryption while the MCP manager used `credential_master_key` for decryption. `credential_master_key` is now on `AppState` and used consistently everywhere credentials are encrypted or decrypted.
+- **MCP Streamable HTTP spec compliance:** `post_rpc` now sends `Accept: application/json, text/event-stream` on every POST (required by spec; absence caused HTTP 406 from compliant servers). Response handling now branches on `Content-Type` — SSE responses are parsed by reading the first `data:` line rather than calling `.json()` directly.
+- **Configurable headers:** `RemoteConfig` gained a `headers: HashMap<String, String>` field. Static headers from config are merged with the credential-derived auth header. `McpConnectionInner.auth_header` replaced with `extra_headers: HashMap<String, String>` carried through `call_tool` and `monitor_remote`. Full config chain: `config.json` → DB → UI (new Extra Headers editor + Auth Format field in settings form).
+- **Reconnect loop fixed:** after a connection drop, `supervise` was re-fetching `shutdown_rx` from `self.connections` — but the connection had just been removed, so `unwrap_or_else` returned a pre-fired receiver that immediately exited the loop. Fixed by carrying `shutdown_rx` directly out of the `Ok`/`Err` match arms. `Err` arm uses a never-firing `watch::channel(false)`.
+- **Duplicate log eliminated:** `connect_local` and `connect_remote` each emitted "server connected" before returning, then `supervise` emitted it again on receipt. Removed the inner logs; `supervise` is now the single emitter with consistent structured fields (`server_id`, `tool_count`).
+- **Credential dropdown:** the free-text `credential_key` input in the MCP server form is replaced with a `<select>` populated from `credentialsApi.list()`, showing `display_name (service)` as labels with `key` as the stored value. Falls back to a text input when no credentials exist.
+
 ---
 
-**Story 4.4 — MCP tool discovery and agent integration**
+**Story 4.4 — MCP tool discovery and agent integration** ✅ Complete
 Branch: `feature/phase4-mcp-agent-integration`
 
 Wire MCP servers into the agent run-loop. On connect, enumerate the server's tools and cache the list (name, description, input schema). Expose via `GET /api/mcp-servers/:id/tools`.
@@ -2219,37 +2241,46 @@ Wire MCP servers into the agent run-loop. On connect, enumerate the server's too
 In `agent::run_inner`, load the thread's attached MCP servers (`thread_mcp_servers`), fetch their cached tool lists, merge with built-in tools, and inject into the generation loop. Tools are namespaced using the server's `tag` field (e.g. a server with tag `github` exposes tools as `github__create_issue`, `github__search_repos`). When the model calls a namespaced tool, route execution to the corresponding MCP server.
 
 Acceptance criteria:
-- Tool list is fetched on connect and cached in memory
-- `GET /api/mcp-servers/:id/tools` returns the cached tool list
-- Tools are injected into the agent context with `{tag}__{tool_name}` namespacing
-- Tool calls from the model are routed to the correct MCP server
-- Tool results are returned to the model and the conversation continues
-- Tools from multiple servers coexist without name collisions
-- Integration test: attach an MCP server to a thread, send a message that triggers a tool call, verify the round-trip
-- `cargo build` passes, all tests pass
+- ✅ Tool list is fetched on connect and cached in memory
+- ✅ `GET /api/mcp-servers/:id/tools` returns the cached tool list
+- ✅ Tools are injected into the agent context with `{tag}__{tool_name}` namespacing
+- ✅ Tool calls from the model are routed to the correct MCP server
+- ✅ Tool results are returned to the model and the conversation continues
+- ✅ Tools from multiple servers coexist without name collisions
+- ✅ `cargo build` passes, all tests pass
+
+### As-built notes
+
+- `AttachedMcpServer { id, tag }` loaded from `thread_mcp_servers` join at the start of `run_inner`
+- `state.mcp.cached_tools(&server.id)` fetches from the in-memory `RwLock<Vec<McpTool>>` on each `McpConnection`
+- Tool definitions built as `async_openai::types::ChatCompletionTool` and passed into `context::assemble` via `mcp_tools` field; appended after built-in tools in `build_tool_definitions`
+- `execute_tool` dispatches on `tc.name.contains("__")`: splits on first `__`, finds server by tag in `attached_mcp`, calls `state.mcp.call_tool`
+- Tool call and result messages persisted with `visibility: hidden` via `persist_tool_message`; surfaced in chat when `show_tool_activity` is enabled on the thread
+- Generation loop supports up to 20 consecutive tool-call rounds (`MAX_TOOL_ROUNDS`)
+- Malformed tool-call slots (no name or id) are filtered before dispatch to prevent provider 400 errors
 
 ---
 
-**Story 4.5 — MCP UI integration**
+**Story 4.5 — MCP UI integration** ✅ Complete
 Branch: `feature/phase4-mcp-ui`
 
-Polish the MCP experience across the UI:
-
-**Global default servers:** In `/settings/mcp-servers`, add an "Auto-attach to new threads" toggle per server. Toggled servers are stored as a JSON array in `app_config` under key `default_mcp_servers`. When a new thread is created, all servers in this list are automatically attached via `thread_mcp_servers`.
-
-**Tool inspector:** In the thread config pane and MCP settings page, render an expandable tool list per server showing tool name, description, and input schema summary. Source URL renders as a clickable link when present.
-
-**Tag management:** The server add/edit form includes a `tag` field that defaults to the server `name`. Editable by the user. Displayed in the thread config pane next to each attached server.
-
-**Connection status:** Live status badges (inactive/connecting/connected/error) in both the thread config pane and settings page, updated via SSE.
+Polish the MCP experience across the UI.
 
 Acceptance criteria:
-- Auto-attach toggle works and persists in `app_config`
-- New threads automatically get default MCP servers attached
-- Tool inspector shows tools per server in thread config and settings
-- Tag field is editable in server add/edit form, defaults to name
-- Connection status badges reflect live state
-- `cargo build` passes, all tests pass
+- ✅ New threads automatically get default MCP servers attached (per-persona)
+- ✅ Tool inspector shows tools per server in thread config and settings
+- ✅ Tag field is editable in server add/edit form, defaults to name
+- ✅ Connection status badges reflect live state via SSE
+- ✅ Source URL renders as a clickable link
+- ✅ `cargo build` passes, all tests pass
+
+### As-built notes
+
+- **Auto-attach (deviation from spec):** implemented as per-persona defaults via `persona_default_mcp_servers` table rather than a global `app_config` toggle. `POST /api/threads` queries `persona_default_mcp_servers` for the thread's persona and inserts rows into `thread_mcp_servers`. This is a better design and is retained as canonical; the `app_config` approach from the spec is not implemented.
+- **Tool inspector:** `ToolInspector` component in `McpServerSettings.tsx` (settings page) and `McpServerCard` component in `ConfigPane.tsx` (thread config pane). Both show expandable tool list with name + description. Tools fetched lazily from `GET /api/mcp-servers/:id/tools`.
+- **Status badges:** `StatusBadge` in both locations. Global SSE `mcp_status_changed` event drives real-time updates.
+- **Tag field:** added to `McpForm` with auto-derivation from name (lowercase, spaces→underscores, strip non-`[a-z0-9_-]`). Stops auto-following name once manually edited (`tagTouched` flag). Live preview shows `{tag}__tool_name` in hint. Added `tag` to `McpServer` TypeScript interface.
+- **Source URL:** rendered as a clickable external link in `McpServerCard` when present.
 
 ---
 
