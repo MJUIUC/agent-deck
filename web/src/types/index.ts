@@ -67,6 +67,7 @@ export interface McpServer {
   id: string;
   user_id: string;
   name: string;
+  tag: string;
   description: string | null;
   source_url: string | null;
   server_type: "local" | "remote";

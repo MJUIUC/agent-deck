@@ -1,4 +1,4 @@
-//! Agent run-loop service — Story 2.5
+//! Agent run-loop service — Story 2.5 / 4.4
 //!
 //! Responsible for:
 //! - Assembling the context (system prompt + message history + memory recall)
@@ -26,6 +26,16 @@ use crate::{
         title as title_service,
     },
 };
+
+// ─── Attached MCP server descriptor ───────────────────────────────────────────
+
+/// Lightweight descriptor for an MCP server that is attached to the current
+/// thread.  Passed through the generation loop so that tool calls can be
+/// routed to the correct server by tag.
+struct AttachedMcpServer {
+    id: String,
+    tag: String,
+}
 
 // ─── Memory tool names ─────────────────────────────────────────────────────────
 
@@ -223,6 +233,44 @@ async fn run_inner(state: &AppState, thread_id: &str, user_message: &str) -> Res
     // ── 4. Assemble context ────────────────────────────────────────────────────
     // The provider abstraction only exposes OpenAI-compatible endpoints for now,
     // so we always support tools.
+
+    // ── 4.5. Load attached MCP servers and build namespaced tool list ─────────
+    let attached: Vec<AttachedMcpServer> = {
+        let rows: Vec<(String, String)> = sqlx::query_as(
+            "SELECT ms.id, ms.tag
+             FROM thread_mcp_servers tms
+             JOIN mcp_servers ms ON ms.id = tms.mcp_server_id
+             WHERE tms.thread_id = ? AND tms.enabled = 1 AND ms.enabled = 1",
+        )
+        .bind(thread_id)
+        .fetch_all(&state.pool)
+        .await
+        .unwrap_or_default();
+
+        rows.into_iter()
+            .map(|(id, tag)| AttachedMcpServer { id, tag })
+            .collect()
+    };
+
+    // Build namespaced tool list for the LLM request.
+    let mut mcp_tool_defs: Vec<async_openai::types::ChatCompletionTool> = Vec::new();
+    for server in &attached {
+        let tools = state.mcp.cached_tools(&server.id).await;
+        for tool in tools {
+            let namespaced_name = format!("{}__{}", server.tag, tool.name);
+            let tool_def = async_openai::types::ChatCompletionTool {
+                r#type: async_openai::types::ChatCompletionToolType::Function,
+                function: async_openai::types::FunctionObject {
+                    name: namespaced_name,
+                    description: tool.description,
+                    parameters: tool.input_schema,
+                    strict: None,
+                },
+            };
+            mcp_tool_defs.push(tool_def);
+        }
+    }
+
     let assembled = context::assemble(AssemblyInput {
         persona_system_prompt: persona.system_prompt.clone(),
         thread_addendum: thread.system_prompt_addendum.clone(),
@@ -230,6 +278,7 @@ async fn run_inner(state: &AppState, thread_id: &str, user_message: &str) -> Res
         history_limit: None,
         user_message: user_message.to_string(),
         supports_tools: true,
+        mcp_tools: mcp_tool_defs,
     });
 
     // ── 5. Run the generation loop (handles tool calls inline) ─────────────────
@@ -242,6 +291,7 @@ async fn run_inner(state: &AppState, thread_id: &str, user_message: &str) -> Res
         &model_id,
         assembled.messages,
         assembled.tools,
+        &attached,
     )
     .await?;
 
@@ -365,17 +415,28 @@ async fn generation_loop(
     model_id: &str,
     mut messages: Vec<ChatCompletionRequestMessage>,
     tools: Vec<async_openai::types::ChatCompletionTool>,
+    attached_mcp: &[AttachedMcpServer],
 ) -> Result<String> {
     // We accumulate the final visible text across all tool-call rounds.
     let mut final_content = String::new();
 
-    // We permit at most a small number of consecutive tool-call rounds to avoid
-    // infinite loops if the model keeps requesting tools.
-    const MAX_TOOL_ROUNDS: usize = 5;
+    // We permit a generous number of consecutive tool-call rounds so multi-step
+    // tasks (directory traversal, multi-file reads, etc.) can complete without
+    // hitting the cap.  20 rounds is high enough for complex agentic workflows
+    // while still guarding against infinite loops.
+    const MAX_TOOL_ROUNDS: usize = 20;
     let mut tool_rounds = 0;
 
     loop {
         // ── Stream one generation turn ─────────────────────────────────────────
+        info!(
+            thread_id = %thread_id,
+            tool_round = tool_rounds,
+            message_count = messages.len(),
+            tool_count = tools.len(),
+            "generation_loop: starting stream turn"
+        );
+
         let stream_result = provider
             .stream(model_id, messages.clone(), tools.clone())
             .await;
@@ -469,8 +530,17 @@ async fn generation_loop(
         // in the accumulator. Passing them downstream causes a 400 error.
         tool_calls.retain(|tc| !tc.name.is_empty() && !tc.id.is_empty());
 
+        info!(
+            thread_id = %thread_id,
+            tool_round = tool_rounds,
+            turn_text_len = turn_text.len(),
+            tool_call_count = tool_calls.len(),
+            "generation_loop: stream turn finished"
+        );
+
         // If there were no tool calls, this turn is done.
         if tool_calls.is_empty() {
+            info!(thread_id = %thread_id, "generation_loop: no tool calls — done");
             final_content.push_str(&turn_text);
             break;
         }
@@ -487,6 +557,13 @@ async fn generation_loop(
         }
         tool_rounds += 1;
 
+        info!(
+            thread_id = %thread_id,
+            tool_round = tool_rounds,
+            tools = ?tool_calls.iter().map(|tc| tc.name.as_str()).collect::<Vec<_>>(),
+            "generation_loop: executing tool calls"
+        );
+
         // Append the assistant's tool-call turn to the message history so the
         // provider knows what it asked for when we feed back results.
         let assistant_turn = build_assistant_tool_call_message(&turn_text, &tool_calls);
@@ -494,11 +571,35 @@ async fn generation_loop(
 
         // Execute each tool call and append the results.
         for tc in &tool_calls {
-            let tool_result =
-                execute_tool(state, &state.pool, user_id, persona_id, thread_id, tc).await;
+            info!(
+                thread_id = %thread_id,
+                tool = %tc.name,
+                tool_call_id = %tc.id,
+                args_len = tc.args.len(),
+                "generation_loop: dispatching tool call"
+            );
+
+            let tool_result = execute_tool(
+                state,
+                &state.pool,
+                user_id,
+                persona_id,
+                thread_id,
+                tc,
+                attached_mcp,
+            )
+            .await;
 
             let result_content = match tool_result {
-                Ok(r) => r,
+                Ok(r) => {
+                    info!(
+                        thread_id = %thread_id,
+                        tool = %tc.name,
+                        result_len = r.len(),
+                        "generation_loop: tool call returned result"
+                    );
+                    r
+                }
                 Err(e) => {
                     warn!(
                         tool = %tc.name,
@@ -520,6 +621,12 @@ async fn generation_loop(
         }
 
         // Loop: the model will now generate a response incorporating the tool results.
+        info!(
+            thread_id = %thread_id,
+            tool_round = tool_rounds,
+            message_count = messages.len(),
+            "generation_loop: all tool calls complete, re-entering loop"
+        );
     }
 
     Ok(final_content)
@@ -529,12 +636,13 @@ async fn generation_loop(
 
 /// Execute a single tool call, returning the result text to feed back to the LLM.
 async fn execute_tool(
-    _state: &AppState,
+    state: &AppState,
     pool: &SqlitePool,
     user_id: &str,
     persona_id: &str,
     thread_id: &str,
     tc: &PendingToolCall,
+    attached_mcp: &[AttachedMcpServer],
 ) -> Result<String> {
     match tc.name.as_str() {
         TOOL_SAVE_MEMORY => {
@@ -640,10 +748,136 @@ async fn execute_tool(
             Ok(lines.join("\n"))
         }
 
+        // ── MCP tool call — route by tag prefix ───────────────────────────────
+        name if name.contains("__") => {
+            if let Some((tag, tool_name)) = tc.name.split_once("__") {
+                info!(
+                    thread_id = %thread_id,
+                    tag = %tag,
+                    tool_name = %tool_name,
+                    "execute_tool: routing MCP tool call"
+                );
+
+                let server = attached_mcp.iter().find(|s| s.tag == tag);
+                match server {
+                    Some(s) => {
+                        let args: serde_json::Value = serde_json::from_str(&tc.args)
+                            .unwrap_or(serde_json::Value::Object(Default::default()));
+
+                        info!(
+                            thread_id = %thread_id,
+                            server_id = %s.id,
+                            tag = %tag,
+                            tool_name = %tool_name,
+                            args = %tc.args,
+                            "execute_tool: calling mcp.call_tool"
+                        );
+
+                        // Persist hidden tool-call record.
+                        persist_tool_message(
+                            pool,
+                            thread_id,
+                            "assistant",
+                            &format!("**Tool call:** `{}`\n```json\n{}\n```", tc.name, tc.args),
+                        )
+                        .await;
+
+                        let result = state.mcp.call_tool(&s.id, tool_name, args).await;
+                        info!(
+                            thread_id = %thread_id,
+                            server_id = %s.id,
+                            tool_name = %tool_name,
+                            success = result.is_ok(),
+                            "execute_tool: mcp.call_tool returned"
+                        );
+                        match result {
+                            Ok(text) => {
+                                info!(
+                                    thread_id = %thread_id,
+                                    tool = %tc.name,
+                                    result_preview = %text.chars().take(120).collect::<String>(),
+                                    "execute_tool: MCP tool success"
+                                );
+                                // Persist hidden tool-result record.
+                                persist_tool_message(
+                                    pool,
+                                    thread_id,
+                                    "tool",
+                                    &format!("**Tool result** (`{}`):\n{}", tc.name, text),
+                                )
+                                .await;
+                                Ok(text)
+                            }
+                            Err(e) => {
+                                let msg = format!("MCP tool '{}' error: {}", tc.name, e);
+                                warn!(tool = %tc.name, error = %e, "MCP tool call failed");
+                                Ok(msg)
+                            }
+                        }
+                    }
+                    None => {
+                        let msg = format!(
+                            "No attached MCP server with tag '{}'. Cannot call tool '{}'.",
+                            tag, tc.name
+                        );
+                        warn!(
+                            thread_id = %thread_id,
+                            tag = %tag,
+                            attached = ?attached_mcp.iter().map(|s| s.tag.as_str()).collect::<Vec<_>>(),
+                            "execute_tool: no server matched tag"
+                        );
+                        Ok(msg)
+                    }
+                }
+            } else {
+                Ok(format!("Unknown tool '{}'.", tc.name))
+            }
+        }
+
         unknown => {
             warn!(tool = %unknown, "Unknown tool call requested by model");
             Ok(format!("Unknown tool '{}'. No action was taken.", unknown))
         }
+    }
+}
+
+// ─── Tool message persistence ─────────────────────────────────────────────────
+
+/// Persist a hidden tool-call or tool-result message to the thread history.
+/// These are stored with `visibility = 'hidden'` and are only surfaced in the
+/// UI when `show_tool_activity` is enabled on the thread.
+async fn persist_tool_message(pool: &SqlitePool, thread_id: &str, role: &str, content: &str) {
+    let msg = Message {
+        id: uuid::Uuid::new_v4().to_string(),
+        thread_id: thread_id.to_string(),
+        role: role.to_string(),
+        content: content.to_string(),
+        source: "tool".to_string(),
+        routine_id: None,
+        visibility: "hidden".to_string(),
+        execution_id: None,
+        created_at: chrono::Utc::now()
+            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+            .to_string(),
+    };
+
+    if let Err(e) = sqlx::query(
+        "INSERT INTO messages (id, thread_id, role, content, source, routine_id, visibility, execution_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(&msg.id)
+    .bind(&msg.thread_id)
+    .bind(&msg.role)
+    .bind(&msg.content)
+    .bind(&msg.source)
+    .bind(&msg.routine_id)
+    .bind(&msg.visibility)
+    .bind(&msg.execution_id)
+    .bind(&msg.created_at)
+    .execute(pool)
+    .await
+    {
+        warn!(thread_id = %thread_id, error = %e, "Failed to persist tool message");
     }
 }
 

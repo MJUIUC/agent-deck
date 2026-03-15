@@ -81,7 +81,7 @@ impl AppState {
         &self,
         thread_id: &str,
     ) -> (mpsc::Sender<ThreadEvent>, mpsc::Receiver<ThreadEvent>) {
-        let (tx, rx) = mpsc::channel::<ThreadEvent>(64);
+        let (tx, rx) = mpsc::channel::<ThreadEvent>(4096);
         let mut map = self.thread_senders.lock().unwrap();
         map.entry(thread_id.to_string())
             .or_default()
@@ -104,11 +104,20 @@ impl AppState {
 
     /// Broadcast a `ThreadEvent` to all clients currently connected to the given thread.
     ///
-    /// Senders whose receivers have been dropped are silently removed.
+    /// Senders whose receivers have been dropped (i.e. the client disconnected) are
+    /// silently removed.  Senders whose channels are temporarily full are kept — a
+    /// full channel means the client is briefly behind, not gone.  Evicting on Full
+    /// would permanently lose the sender (and all subsequent events, including
+    /// `message_complete`) whenever a tool call causes a brief pause in draining.
     pub fn send_thread_event(&self, thread_id: &str, event: ThreadEvent) {
+        use tokio::sync::mpsc::error::TrySendError;
         let mut map = self.thread_senders.lock().unwrap();
         if let Some(senders) = map.get_mut(thread_id) {
-            senders.retain(|tx| tx.try_send(event.clone()).is_ok());
+            senders.retain(|tx| match tx.try_send(event.clone()) {
+                Ok(_) => true,
+                Err(TrySendError::Full(_)) => true, // keep — receiver is just slow
+                Err(TrySendError::Closed(_)) => false, // drop — receiver is gone
+            });
             if senders.is_empty() {
                 map.remove(thread_id);
             }

@@ -39,7 +39,8 @@ pub async fn create(
     Json(req): Json<CreateCredential>,
 ) -> Result<impl IntoResponse, AppError> {
     let credential =
-        credential_service::create_credential(&state.pool, &state.machine_secret, &req).await?;
+        credential_service::create_credential(&state.pool, &state.credential_master_key, &req)
+            .await?;
     Ok((StatusCode::CREATED, Json(credential)))
 }
 
@@ -52,7 +53,7 @@ pub async fn update(
     Json(req): Json<UpdateCredential>,
 ) -> Result<impl IntoResponse, AppError> {
     let credential =
-        credential_service::update_credential(&state.pool, &state.machine_secret, &id, &req)
+        credential_service::update_credential(&state.pool, &state.credential_master_key, &id, &req)
             .await?
             .ok_or_else(|| AppError::NotFound("Credential not found".to_string()))?;
     Ok(Json(credential))

@@ -73,6 +73,9 @@ pub struct AssemblyInput {
     /// Whether the active provider supports function calling.
     /// When `false`, the tool array is returned empty.
     pub supports_tools: bool,
+    /// MCP tools already namespaced (tag__tool_name).
+    /// Pass an empty vec when none are attached.
+    pub mcp_tools: Vec<async_openai::types::ChatCompletionTool>,
 }
 
 // ─── Output type ──────────────────────────────────────────────────────────────
@@ -192,7 +195,7 @@ pub fn assemble(input: AssemblyInput) -> AssembledContext {
 
     // ── Tool definitions ──────────────────────────────────────────────────────
     let tools = if input.supports_tools {
-        build_tool_definitions()
+        build_tool_definitions(input.mcp_tools)
     } else {
         vec![]
     };
@@ -205,8 +208,8 @@ pub fn assemble(input: AssemblyInput) -> AssembledContext {
 /// Build the standard tool definitions array.
 ///
 /// Always includes `save_memory` and `recall_memory` (PLAN.md §7.6.2).
-/// MCP tools are stubbed — returns an empty list with a TODO marker.
-fn build_tool_definitions() -> Vec<ChatCompletionTool> {
+/// Any MCP tools passed in are appended after the built-in tools.
+fn build_tool_definitions(mcp_tools: Vec<ChatCompletionTool>) -> Vec<ChatCompletionTool> {
     let mut tools = vec![
         // ── save_memory ───────────────────────────────────────────────────────
         ChatCompletionTool {
@@ -269,10 +272,7 @@ fn build_tool_definitions() -> Vec<ChatCompletionTool> {
         },
     ];
 
-    // TODO: Phase 7 — load tools from attached MCP servers and append here.
-    let _mcp_tools: Vec<ChatCompletionTool> = vec![];
-
-    tools.extend(_mcp_tools);
+    tools.extend(mcp_tools);
     tools
 }
 
@@ -359,6 +359,7 @@ mod tests {
             history_limit: None,
             user_message: user_message.to_string(),
             supports_tools: true,
+            mcp_tools: vec![],
         }
     }
 
@@ -649,9 +650,9 @@ mod tests {
 
     #[test]
     fn exactly_two_memory_tools_defined() {
-        let ctx = assemble(basic_input("hi"));
+        let tools = build_tool_definitions(vec![]);
         assert_eq!(
-            ctx.tools.len(),
+            tools.len(),
             2,
             "expected exactly save_memory and recall_memory"
         );
@@ -700,6 +701,7 @@ mod tests {
             history_limit: None,
             user_message: "Show me an example.".to_string(),
             supports_tools: true,
+            mcp_tools: vec![],
         };
 
         let ctx = assemble(input);

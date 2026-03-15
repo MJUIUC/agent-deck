@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use rand::Rng;
 use sqlx::SqlitePool;
-use tracing::info;
+use tracing::{debug, info, warn};
 
 use crate::models::app_config::keys;
 use crate::models::credential::{
@@ -138,14 +138,53 @@ pub async fn resolve_secret(
     master_key: &str,
     credential_key: &str,
 ) -> Result<String> {
-    let row = get_credential_with_data_by_key(pool, credential_key)
-        .await?
-        .ok_or_else(|| anyhow!("Credential '{}' not found", credential_key))?;
+    debug!(credential_key = %credential_key, "resolve_secret: looking up credential");
 
-    let secret = decrypt_secret(&row.encrypted_data, master_key)?;
-    secret
-        .secret
-        .ok_or_else(|| anyhow!("Credential '{}' has no primary secret", credential_key))
+    let row = match get_credential_with_data_by_key(pool, credential_key).await? {
+        Some(r) => {
+            debug!(
+                credential_key = %credential_key,
+                found_key = %r.key,
+                credential_type = %r.credential_type,
+                encrypted_data_len = r.encrypted_data.len(),
+                "resolve_secret: credential row found"
+            );
+            r
+        }
+        None => {
+            warn!(credential_key = %credential_key, "resolve_secret: no credential found with this key");
+            return Err(anyhow!("Credential '{}' not found", credential_key));
+        }
+    };
+
+    debug!(credential_key = %credential_key, "resolve_secret: attempting decryption");
+    let secret = match decrypt_secret(&row.encrypted_data, master_key) {
+        Ok(s) => {
+            debug!(credential_key = %credential_key, "resolve_secret: decryption succeeded");
+            s
+        }
+        Err(e) => {
+            warn!(
+                credential_key = %credential_key,
+                master_key_len = master_key.len(),
+                encrypted_data_len = row.encrypted_data.len(),
+                error = %e,
+                "resolve_secret: decryption failed"
+            );
+            return Err(e);
+        }
+    };
+
+    match secret.secret {
+        Some(s) => Ok(s),
+        None => {
+            warn!(credential_key = %credential_key, "resolve_secret: credential has no primary secret (secret field is null)");
+            Err(anyhow!(
+                "Credential '{}' has no primary secret",
+                credential_key
+            ))
+        }
+    }
 }
 
 /// Create a new credential, encrypting the secret before storage.

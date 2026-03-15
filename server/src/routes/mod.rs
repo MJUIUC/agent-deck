@@ -52,6 +52,7 @@ pub struct AppState {
     pub pool: SqlitePool,
     pub config: Config,
     pub machine_secret: String,
+    pub credential_master_key: String,
     pub auth_token: String,
     /// Global SSE broadcast channel.  All connected global-stream clients
     /// subscribe via `global_tx.subscribe()`.
@@ -130,7 +131,7 @@ pub async fn build_router(
     let master_key = credentials_service::get_or_create_master_key(&pool).await?;
     let mcp = McpConnectionManager::new(
         pool.clone(),
-        master_key,
+        master_key.clone(),
         global_tx.clone(),
         config.mcp_dir.clone(),
     );
@@ -143,6 +144,7 @@ pub async fn build_router(
         pool,
         config: config.clone(),
         machine_secret,
+        credential_master_key: master_key.clone(),
         auth_token,
         global_tx,
         thread_senders: Arc::new(Mutex::new(HashMap::new())),

@@ -30,7 +30,7 @@ use serde_json::{json, Value};
 use sqlx::SqlitePool;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
-use tokio::sync::{broadcast, Mutex, RwLock};
+use tokio::sync::{broadcast, watch, Mutex, RwLock};
 use tokio::time::sleep;
 use tracing::{error, info, warn};
 
@@ -127,8 +127,10 @@ struct McpConnectionInner {
     stdin: Option<ChildStdin>,
     /// For remote servers: the reqwest client (kept alive across requests).
     http_client: Option<reqwest::Client>,
-    /// Decrypted auth header value, e.g. `"Bearer <token>"`.
-    auth_header: Option<String>,
+    /// All resolved headers to send on every request to this remote server.
+    /// Includes the credential-derived auth header plus any extra headers
+    /// defined in the config.  Empty for local servers.
+    extra_headers: HashMap<String, String>,
     /// The URL for remote servers.
     remote_url: Option<String>,
     /// Whether the shutdown signal has been sent (prevents reconnect loops).
@@ -142,19 +144,19 @@ impl McpConnectionInner {
             child: Some(child),
             stdin: Some(stdin),
             http_client: None,
-            auth_header: None,
+            extra_headers: HashMap::new(),
             remote_url: None,
             shutting_down: false,
         }
     }
 
-    fn new_remote(client: reqwest::Client, url: String, auth_header: Option<String>) -> Self {
+    fn new_remote(client: reqwest::Client, url: String, headers: HashMap<String, String>) -> Self {
         Self {
             next_id: 1,
             child: None,
             stdin: None,
             http_client: Some(client),
-            auth_header,
+            extra_headers: headers,
             remote_url: Some(url),
             shutting_down: false,
         }
@@ -180,6 +182,16 @@ struct McpConnection {
     /// contexts without blocking.  Written once after `tools/list` succeeds,
     /// then refreshed on every reconnect.
     tools: RwLock<Vec<McpTool>>,
+    /// For local (stdio) servers: a shared reader over the child's stdout.
+    /// Kept here so `call_tool` can send requests and read responses after
+    /// the initial handshake is complete.  `None` for remote servers.
+    stdout_reader: Option<Arc<Mutex<BufReader<tokio::process::ChildStdout>>>>,
+    /// Shutdown signal.  `disconnect_server` sends `true`; `supervise` and
+    /// `monitor_local` select on the receiver so they wake immediately instead
+    /// of waiting out a sleep or spinning on a flag check.
+    shutdown_tx: watch::Sender<bool>,
+    /// Receiver cloned by every task that needs to react to shutdown.
+    shutdown_rx: watch::Receiver<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -231,6 +243,12 @@ struct RemoteConfig {
     auth_header: Option<String>,
     /// Header value template, defaults to `Bearer {value}`.
     auth_format: Option<String>,
+    /// Arbitrary extra headers sent on every request to this server.
+    /// These are merged with (and may override) any auth header derived
+    /// from `credential_key`.  Stored verbatim in the config JSON so the
+    /// filesystem config.json is always the source of truth.
+    #[serde(default)]
+    headers: HashMap<String, String>,
 }
 
 /// A minimal DB projection of the `mcp_servers` row — only what the manager needs.
@@ -575,6 +593,11 @@ impl McpConnectionManager {
     /// cancels remote SSE streams.
     pub async fn disconnect_server(&self, server_id: &str) {
         if let Some((_, conn)) = self.connections.remove(server_id) {
+            // Signal shutdown to supervise/monitor_local before touching the
+            // inner lock — this lets those tasks wake from their select! and
+            // exit cleanly rather than racing with us for the lock.
+            let _ = conn.shutdown_tx.send(true);
+
             let mut inner = conn.inner.lock().await;
             inner.shutting_down = true;
             kill_child_if_any(&mut inner).await;
@@ -588,7 +611,184 @@ impl McpConnectionManager {
     pub async fn cached_tools(&self, server_id: &str) -> Vec<McpTool> {
         match self.connections.get(server_id) {
             Some(conn) => conn.tools.read().await.clone(),
-            None => Vec::new(),
+            None => vec![],
+        }
+    }
+
+    // ─── Tool invocation ──────────────────────────────────────────────────────
+
+    /// Invoke a tool on the named MCP server and return the raw result text.
+    ///
+    /// `server_id` — DB id of the MCP server
+    /// `tool_name` — un-namespaced tool name (e.g. `"create_issue"`)
+    /// `arguments`  — parsed JSON arguments object from the model
+    pub async fn call_tool(
+        &self,
+        server_id: &str,
+        tool_name: &str,
+        arguments: serde_json::Value,
+    ) -> Result<String> {
+        info!(
+            server_id = %server_id,
+            tool_name = %tool_name,
+            "call_tool: invoked"
+        );
+
+        let conn = match self.connections.get(server_id) {
+            Some(c) => c,
+            None => {
+                warn!(
+                    server_id = %server_id,
+                    tool_name = %tool_name,
+                    "call_tool: server not found in connection pool"
+                );
+                return Err(anyhow!("MCP server '{}' not connected", server_id));
+            }
+        };
+
+        // Determine transport type and gather what we need while holding the lock.
+        let (is_local, req_id) = {
+            let mut inner = conn.inner.lock().await;
+            let id = inner.next_id();
+            let is_local = inner.child.is_some();
+            (is_local, id)
+        };
+
+        let req = JsonRpcRequest::request(
+            req_id,
+            "tools/call",
+            Some(json!({ "name": tool_name, "arguments": arguments })),
+        );
+
+        if is_local {
+            // ── Stdio transport ───────────────────────────────────────────────
+            // Write the request to stdin, then read the response from the shared
+            // stdout reader.  We lock stdin briefly for the write, then release
+            // it before locking stdout for the read to avoid deadlock.
+            info!(
+                server_id = %server_id,
+                tool_name = %tool_name,
+                req_id = %req_id,
+                "call_tool: writing tools/call to stdin"
+            );
+            {
+                let mut inner = conn.inner.lock().await;
+                write_line_to_stdin(inner.stdin.as_mut().unwrap(), &req).await?;
+            }
+            info!(
+                server_id = %server_id,
+                tool_name = %tool_name,
+                "call_tool: stdin write complete, waiting for stdout response"
+            );
+
+            let stdout_reader = conn
+                .stdout_reader
+                .as_ref()
+                .ok_or_else(|| anyhow!("MCP server '{}' has no stdout reader", server_id))?;
+
+            info!(
+                server_id = %server_id,
+                tool_name = %tool_name,
+                "call_tool: acquiring stdout_reader lock"
+            );
+            let resp = {
+                let mut reader = stdout_reader.lock().await;
+                info!(
+                    server_id = %server_id,
+                    tool_name = %tool_name,
+                    "call_tool: stdout_reader lock acquired, reading JSON-RPC response"
+                );
+                read_json_rpc_response(&mut *reader).await?
+            };
+            info!(
+                server_id = %server_id,
+                tool_name = %tool_name,
+                has_error = resp.error.is_some(),
+                has_result = resp.result.is_some(),
+                "call_tool: received JSON-RPC response from stdio"
+            );
+
+            if let Some(err) = resp.error {
+                warn!(
+                    server_id = %server_id,
+                    tool_name = %tool_name,
+                    error = %err,
+                    "call_tool: server returned JSON-RPC error"
+                );
+                return Err(anyhow!("MCP tools/call error: {}", err));
+            }
+
+            let result = resp.result.unwrap_or(serde_json::Value::Null);
+            let text = result["content"][0]["text"]
+                .as_str()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| result.to_string());
+
+            info!(
+                server_id = %server_id,
+                tool_name = %tool_name,
+                result_len = text.len(),
+                "call_tool: stdio transport success"
+            );
+            Ok(text)
+        } else {
+            // ── HTTP transport ────────────────────────────────────────────────
+            // Extract what we need from the inner lock, then release it before
+            // the async HTTP call so we don't hold the lock across an await.
+            let (client, url, headers) = {
+                let inner = conn.inner.lock().await;
+                let client = inner
+                    .http_client
+                    .clone()
+                    .ok_or_else(|| anyhow!("MCP server '{}' has no HTTP client", server_id))?;
+                let url = inner
+                    .remote_url
+                    .clone()
+                    .ok_or_else(|| anyhow!("MCP server '{}' has no remote URL", server_id))?;
+                let headers = inner.extra_headers.clone();
+                (client, url, headers)
+            };
+
+            info!(
+                server_id = %server_id,
+                tool_name = %tool_name,
+                url = %url,
+                "call_tool: posting tools/call over HTTP"
+            );
+
+            let resp = self.post_rpc(&client, &url, &req, &headers).await?;
+
+            info!(
+                server_id = %server_id,
+                tool_name = %tool_name,
+                has_error = resp.error.is_some(),
+                has_result = resp.result.is_some(),
+                "call_tool: received HTTP response"
+            );
+
+            if let Some(err) = resp.error {
+                warn!(
+                    server_id = %server_id,
+                    tool_name = %tool_name,
+                    error = %err,
+                    "call_tool: server returned JSON-RPC error"
+                );
+                return Err(anyhow!("MCP tools/call error: {}", err));
+            }
+
+            let result = resp.result.unwrap_or(serde_json::Value::Null);
+            let text = result["content"][0]["text"]
+                .as_str()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| result.to_string());
+
+            info!(
+                server_id = %server_id,
+                tool_name = %tool_name,
+                result_len = text.len(),
+                "call_tool: HTTP transport success"
+            );
+            Ok(text)
         }
     }
 
@@ -633,6 +833,13 @@ impl McpConnectionManager {
 
             self.set_status(server_id, McpStatus::Connecting).await;
 
+            // `shutdown_rx` for the backoff wait below.  We carry it out of
+            // the match so both arms can set it — the Ok arm takes it from
+            // the live conn (which fires when disconnect_server is called),
+            // the Err arm creates a never-firing receiver so the backoff runs
+            // normally and we always retry on a plain connect failure.
+            let mut backoff_shutdown_rx: watch::Receiver<bool>;
+
             match self.connect_and_handshake(&row).await {
                 Ok(conn) => {
                     let conn = Arc::new(conn);
@@ -642,13 +849,22 @@ impl McpConnectionManager {
                     // a sustained stable period.
                     connected_at = Some(tokio::time::Instant::now());
                     self.set_status(server_id, McpStatus::Connected).await;
-                    info!("mcp server {} connected", server_id);
+                    let tool_count = conn.tools.read().await.len();
+                    info!(
+                        server_id = %server_id,
+                        tool_count,
+                        "mcp: server connected"
+                    );
 
                     // Monitor until the connection drops (or shutdown requested).
                     self.monitor_connection(server_id, &conn).await;
 
+                    // Carry the shutdown receiver so the backoff select below
+                    // can react to an intentional disconnect_server call.
+                    backoff_shutdown_rx = conn.shutdown_rx.clone();
+
                     // If we were asked to shut down, exit the loop.
-                    if conn.inner.lock().await.shutting_down {
+                    if *backoff_shutdown_rx.borrow() {
                         return;
                     }
 
@@ -662,9 +878,9 @@ impl McpConnectionManager {
                     connected_at = None;
 
                     warn!(
-                        "mcp server {} connection lost, will retry in {}s",
-                        server_id,
-                        backoff.as_secs()
+                        server_id = %server_id,
+                        retry_in_secs = backoff.as_secs(),
+                        "mcp: server connection lost, will retry"
                     );
                     self.set_status(server_id, McpStatus::Error("Connection lost".to_string()))
                         .await;
@@ -672,30 +888,36 @@ impl McpConnectionManager {
                 }
                 Err(e) => {
                     let msg = format!("{:#}", e);
-                    error!("mcp server {} failed to connect: {}", server_id, msg);
+                    error!(server_id = %server_id, error = %msg, "mcp: server failed to connect");
                     self.set_status(server_id, McpStatus::Error(msg)).await;
+
+                    // No live conn — use a never-firing receiver so the
+                    // backoff wait below runs to completion and we retry.
+                    let (_tx, rx) = watch::channel(false);
+                    backoff_shutdown_rx = rx;
                 }
             }
 
-            // Wait with backoff before next attempt, but exit early if the
-            // entry disappears from the map (disconnect_server was called).
+            // Wait with backoff before next attempt.  We select on two
+            // conditions so shutdown and disable are both immediate:
+            //   1. The backoff timer expires      → retry
+            //   2. shutdown_rx fires true         → intentional disconnect, stop
+            //   3. Every 500 ms: check DB enabled → server was disabled, stop
             let sleep_fut = sleep(backoff);
             tokio::pin!(sleep_fut);
             loop {
                 tokio::select! {
                     _ = &mut sleep_fut => break,
-                    _ = tokio::time::sleep(Duration::from_millis(500)) => {
-                        if !self.connections.contains_key(server_id) {
-                            // disconnect_server removed us — stop supervision.
+                    _ = backoff_shutdown_rx.changed() => {
+                        if *backoff_shutdown_rx.borrow() {
                             return;
                         }
-                        // Also stop if the server was disabled.
-                        if let Some(row) = self.fetch_server_row(server_id).await {
-                            if !row.enabled {
-                                return;
-                            }
-                        } else {
-                            return;
+                    }
+                    _ = tokio::time::sleep(Duration::from_millis(500)) => {
+                        match self.fetch_server_row(server_id).await {
+                            Some(row) if !row.enabled => return,
+                            None => return,
+                            _ => {}
                         }
                     }
                 }
@@ -821,48 +1043,29 @@ impl McpConnectionManager {
                 Vec::new()
             });
 
-        info!(
-            server_id = %server_id,
-            tool_count = tools.len(),
-            "local mcp server detected"
-        );
-
-        // Put stdout back onto the child for monitoring (via a shared Arc).
-        // We wrap the reader in a background task that watches for EOF (process exit).
+        // Wrap the stdout reader in an Arc<Mutex<…>> so it can be shared between
+        // the connection struct (for `call_tool` requests) and the monitor task
+        // (which watches for EOF to detect process exit).
         let stdout_reader: Arc<Mutex<BufReader<tokio::process::ChildStdout>>> =
             Arc::new(Mutex::new(reader));
+
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
         let mcp_conn = McpConnection {
             server_id: row.id.clone(),
             inner: Mutex::new(conn),
             status: RwLock::new(McpStatus::Connected),
             tools: RwLock::new(tools),
+            stdout_reader: Some(Arc::clone(&stdout_reader)),
+            shutdown_tx,
+            shutdown_rx,
         };
 
-        // Stash the stdout reader into a task-local slot so `monitor_connection`
-        // can wait on it.  We use a channel as a one-shot signal.
-        let (exit_tx, exit_rx) = tokio::sync::oneshot::channel::<()>();
-        tokio::spawn(async move {
-            // Block until the child's stdout yields EOF (process exited).
-            let mut reader = stdout_reader.lock().await;
-            let mut line = String::new();
-            loop {
-                line.clear();
-                match reader.read_line(&mut line).await {
-                    Ok(0) | Err(_) => break, // EOF or error → process exited
-                    Ok(_) => {}              // discard stdout lines (not needed post-handshake)
-                }
-            }
-            let _ = exit_tx.send(());
-        });
-
-        // Store the exit receiver so `monitor_connection` can await it.
-        // We use a Mutex<Option<…>> stored alongside the connection.  For
-        // simplicity we tuck it away in a task-local via a second DashMap slot.
-        //
-        // In practice: the local connection's `monitor_connection` path polls
-        // the child's `wait()` directly, so we just let it drop here.
-        drop(exit_rx);
+        // No EOF monitor task here — monitor_local() already detects process
+        // exit via child.try_wait() every 2 seconds without touching stdout.
+        // Spawning a task that holds stdout_reader.lock() permanently would
+        // deadlock call_tool, which also needs to acquire that lock to read
+        // tool call responses.
 
         Ok(mcp_conn)
     }
@@ -896,8 +1099,26 @@ impl McpConnectionManager {
         let cfg: RemoteConfig = serde_json::from_str(&row.config)
             .map_err(|e| anyhow!("invalid remote config: {}", e))?;
 
-        // Resolve credential if specified.
-        let auth_header_value = if let Some(ref cred_key) = cfg.credential_key {
+        info!(
+            server_id = %row.id,
+            url = %cfg.url,
+            credential_key = ?cfg.credential_key,
+            extra_headers = ?cfg.headers.keys().collect::<Vec<_>>(),
+            "connect_remote: resolved config"
+        );
+
+        // Build the merged header map.  Start with any static headers from the
+        // config, then layer the credential-derived auth header on top so that
+        // an explicit `headers` entry can override the default auth behaviour.
+        let mut resolved_headers: HashMap<String, String> = cfg.headers.clone();
+
+        // Resolve credential if specified (treat empty string same as absent).
+        if let Some(ref cred_key) = cfg.credential_key.filter(|k| !k.is_empty()) {
+            info!(
+                server_id = %row.id,
+                credential_key = %cred_key,
+                "connect_remote: resolving credential"
+            );
             let secret = credentials::resolve_secret(&self.pool, &self.master_key, cred_key)
                 .await
                 .map_err(|e| anyhow!("credential resolution failed: {}", e))?;
@@ -905,10 +1126,8 @@ impl McpConnectionManager {
             let header_name = cfg.auth_header.as_deref().unwrap_or("Authorization");
             let format = cfg.auth_format.as_deref().unwrap_or("Bearer {value}");
             let value = format.replace("{value}", &secret);
-            Some(format!("{}: {}", header_name, value))
-        } else {
-            None
-        };
+            resolved_headers.insert(header_name.to_string(), value);
+        }
 
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(30))
@@ -930,7 +1149,7 @@ impl McpConnectionManager {
         );
 
         let resp = self
-            .post_rpc(&client, &cfg.url, &init_req, auth_header_value.as_deref())
+            .post_rpc(&client, &cfg.url, &init_req, &resolved_headers)
             .await?;
 
         if let Some(err) = resp.error {
@@ -940,13 +1159,13 @@ impl McpConnectionManager {
         // Send `initialized` notification.
         let notif = JsonRpcRequest::notification("notifications/initialized", None);
         let _ = self
-            .post_rpc(&client, &cfg.url, &notif, auth_header_value.as_deref())
+            .post_rpc(&client, &cfg.url, &notif, &resolved_headers)
             .await;
 
         // Discover tools via HTTP.
         let tools_req = JsonRpcRequest::request(2, "tools/list", None);
         let tools = match self
-            .post_rpc(&client, &cfg.url, &tools_req, auth_header_value.as_deref())
+            .post_rpc(&client, &cfg.url, &tools_req, &resolved_headers)
             .await
         {
             Ok(resp) => resp
@@ -961,20 +1180,19 @@ impl McpConnectionManager {
             }
         };
 
-        info!(
-            "mcp: remote server {} connected, {} tool(s) discovered",
-            cfg.url,
-            tools.len()
-        );
-
-        let mut inner = McpConnectionInner::new_remote(client, cfg.url, auth_header_value);
+        let mut inner = McpConnectionInner::new_remote(client, cfg.url, resolved_headers);
         inner.next_id = 3; // 1 and 2 used during handshake above
+
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
         Ok(McpConnection {
             server_id: row.id.clone(),
             inner: Mutex::new(inner),
             status: RwLock::new(McpStatus::Connected),
             tools: RwLock::new(tools),
+            stdout_reader: None,
+            shutdown_tx,
+            shutdown_rx,
         })
     }
 
@@ -984,20 +1202,20 @@ impl McpConnectionManager {
         client: &reqwest::Client,
         url: &str,
         req: &JsonRpcRequest,
-        auth_header: Option<&str>,
+        headers: &HashMap<String, String>,
     ) -> Result<JsonRpcResponse> {
         let body = serde_json::to_string(req)?;
 
         let mut builder = client
             .post(url)
+            // Required by the MCP Streamable HTTP spec: the server uses this to
+            // decide whether to reply with plain JSON or an SSE stream.
+            .header("Accept", "application/json, text/event-stream")
             .header("Content-Type", "application/json")
             .body(body);
 
-        if let Some(header) = auth_header {
-            // header is "HeaderName: Value" — split on the first ": ".
-            if let Some((name, value)) = header.split_once(": ") {
-                builder = builder.header(name, value);
-            }
+        for (name, value) in headers {
+            builder = builder.header(name.as_str(), value.as_str());
         }
 
         let response = builder
@@ -1012,12 +1230,46 @@ impl McpConnectionManager {
             ));
         }
 
-        let resp: JsonRpcResponse = response
-            .json()
-            .await
-            .map_err(|e| anyhow!("JSON decode error: {}", e))?;
+        // The MCP Streamable HTTP spec allows the server to respond with either
+        // `application/json` (single JSON object) or `text/event-stream` (SSE).
+        // We must handle both.
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
 
-        Ok(resp)
+        if content_type.contains("text/event-stream") {
+            // Read the SSE stream and return the first JSON-RPC response found
+            // in a `data:` line.  Per the spec the server SHOULD close the
+            // stream after sending the response, so we stop at the first hit.
+            let text = response
+                .text()
+                .await
+                .map_err(|e| anyhow!("SSE read error: {}", e))?;
+
+            for line in text.lines() {
+                if let Some(data) = line.strip_prefix("data:") {
+                    let data = data.trim();
+                    if data.is_empty() || data == "[DONE]" {
+                        continue;
+                    }
+                    let resp: JsonRpcResponse = serde_json::from_str(data)
+                        .map_err(|e| anyhow!("SSE JSON decode error: {}", e))?;
+                    return Ok(resp);
+                }
+            }
+
+            Err(anyhow!("SSE stream ended without a JSON-RPC response"))
+        } else {
+            let resp: JsonRpcResponse = response
+                .json()
+                .await
+                .map_err(|e| anyhow!("JSON decode error: {}", e))?;
+
+            Ok(resp)
+        }
     }
 
     // ─── Connection monitoring ─────────────────────────────────────────────────
@@ -1037,15 +1289,21 @@ impl McpConnectionManager {
     }
 
     async fn monitor_local(&self, server_id: &str, conn: &Arc<McpConnection>) {
+        let mut shutdown_rx = conn.shutdown_rx.clone();
         loop {
-            tokio::time::sleep(Duration::from_secs(2)).await;
-
-            // Check if an explicit shutdown was requested.
-            {
-                let inner = conn.inner.lock().await;
-                if inner.shutting_down {
-                    return;
+            // Wait 2 s or until shutdown is signalled — whichever comes first.
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_secs(2)) => {}
+                _ = shutdown_rx.changed() => {
+                    if *shutdown_rx.borrow() {
+                        return;
+                    }
                 }
+            }
+
+            // Also check the flag in case it was set before we subscribed.
+            if *conn.shutdown_rx.borrow() {
+                return;
             }
 
             // Poll the child process status (non-blocking).
@@ -1079,15 +1337,21 @@ impl McpConnectionManager {
     async fn monitor_remote(&self, server_id: &str, conn: &Arc<McpConnection>) {
         // For remote servers we send a periodic ping.  A failure signals the
         // connection is lost and triggers a reconnect.
+        let mut shutdown_rx = conn.shutdown_rx.clone();
         loop {
-            tokio::time::sleep(Duration::from_secs(30)).await;
-
-            // Check for explicit shutdown.
-            {
-                let inner = conn.inner.lock().await;
-                if inner.shutting_down {
-                    return;
+            // Wait 30 s or until shutdown fires.
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_secs(30)) => {}
+                _ = shutdown_rx.changed() => {
+                    if *shutdown_rx.borrow() {
+                        return;
+                    }
                 }
+            }
+
+            // Also check the flag in case it was set before we subscribed.
+            if *conn.shutdown_rx.borrow() {
+                return;
             }
 
             // If the connection was removed from the pool, stop monitoring.
@@ -1101,8 +1365,8 @@ impl McpConnectionManager {
                 let inner = conn.inner.lock().await;
                 if let (Some(client), Some(url)) = (&inner.http_client, &inner.remote_url) {
                     let ping_req = JsonRpcRequest::request(0, "tools/list", None);
-                    let auth = inner.auth_header.as_deref();
-                    self.post_rpc(client, url, &ping_req, auth)
+                    let headers = inner.extra_headers.clone();
+                    self.post_rpc(client, url, &ping_req, &headers)
                         .await
                         .map(|_| ())
                 } else {

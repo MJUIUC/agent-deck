@@ -391,7 +391,7 @@ export const copilotApi = {
 
 export type McpServerConfig =
   | { executable: string; args: string[]; env: Record<string, string> }
-  | { url: string; auth_header: string; credential_key: string };
+  | { url: string; auth_header?: string; credential_key?: string };
 
 export const mcpServersApi = {
   list(): Promise<{ data: McpServer[] }> {

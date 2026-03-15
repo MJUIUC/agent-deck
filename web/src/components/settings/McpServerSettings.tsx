@@ -1,6 +1,8 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
+import { Plus } from "lucide-react";
 import type { McpServer, McpTool } from "@/types";
-import { mcpServersApi } from "@/api/client";
+import { mcpServersApi, credentialsApi } from "@/api/client";
+import type { Credential } from "@/api/client";
 import {
   Btn,
   FieldLabel,
@@ -427,11 +429,14 @@ interface LocalFormState {
 interface RemoteFormState {
   url: string;
   auth_header: string;
+  auth_format: string;
   credential_key: string;
+  headerPairs: EnvPair[];
 }
 
 interface FormState {
   name: string;
+  tag: string;
   description: string;
   source_url: string;
   server_type: "local" | "remote";
@@ -441,11 +446,18 @@ interface FormState {
 
 const EMPTY_FORM: FormState = {
   name: "",
+  tag: "",
   description: "",
   source_url: "",
   server_type: "local",
   local: { executable: "", args: "", envPairs: [] },
-  remote: { url: "", auth_header: "Authorization", credential_key: "" },
+  remote: {
+    url: "",
+    auth_header: "",
+    auth_format: "",
+    credential_key: "",
+    headerPairs: [],
+  },
 };
 
 function serverToFormState(server: McpServer): FormState {
@@ -470,12 +482,19 @@ function serverToFormState(server: McpServer): FormState {
 
   const remote: RemoteFormState = {
     url: (parsed.url as string) ?? "",
-    auth_header: (parsed.auth_header as string) ?? "Authorization",
+    auth_header: (parsed.auth_header as string) ?? "",
+    auth_format: (parsed.auth_format as string) ?? "",
     credential_key: (parsed.credential_key as string) ?? "",
+    headerPairs: parsed.headers
+      ? Object.entries(parsed.headers as Record<string, string>).map(
+          ([key, value]) => ({ key, value }),
+        )
+      : [],
   };
 
   return {
     name: server.name,
+    tag: server.tag ?? "",
     description: server.description ?? "",
     source_url: server.source_url ?? "",
     server_type: server.server_type as "local" | "remote",
@@ -533,10 +552,22 @@ function formStateToConfig(form: FormState) {
       env,
     };
   } else {
+    const headers: Record<string, string> = {};
+    for (const pair of form.remote.headerPairs) {
+      if (pair.key.trim()) headers[pair.key.trim()] = pair.value;
+    }
     return {
       url: form.remote.url,
-      auth_header: form.remote.auth_header || "Authorization",
-      credential_key: form.remote.credential_key,
+      ...(form.remote.auth_header?.trim()
+        ? { auth_header: form.remote.auth_header.trim() }
+        : {}),
+      ...(form.remote.auth_format?.trim()
+        ? { auth_format: form.remote.auth_format.trim() }
+        : {}),
+      ...(form.remote.credential_key?.trim()
+        ? { credential_key: form.remote.credential_key.trim() }
+        : {}),
+      ...(Object.keys(headers).length > 0 ? { headers } : {}),
     };
   }
 }
@@ -557,9 +588,42 @@ function McpForm({
   const [form, setForm] = useState<FormState>(initial);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showAuth, setShowAuth] = useState(false);
+  const [tagTouched, setTagTouched] = useState(!!initial.tag);
+  const [credentials, setCredentials] = useState<Credential[]>([]);
+  const credentialsFetched = useRef(false);
+
+  useEffect(() => {
+    if (credentialsFetched.current) return;
+    credentialsFetched.current = true;
+    credentialsApi
+      .list()
+      .then(setCredentials)
+      .catch(() => setCredentials([]));
+  }, []);
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((f) => ({ ...f, [key]: value }));
+
+  const handleNameChange = (value: string) => {
+    set("name", value);
+    if (!tagTouched) {
+      // Mirror server-side derivation: lowercase, spaces → underscores,
+      // strip anything that isn't alphanumeric / hyphen / underscore.
+      set(
+        "tag",
+        value
+          .toLowerCase()
+          .replace(/\s+/g, "_")
+          .replace(/[^a-z0-9_-]/g, ""),
+      );
+    }
+  };
+
+  const handleTagChange = (value: string) => {
+    setTagTouched(true);
+    set("tag", value.toLowerCase().replace(/[^a-z0-9_-]/g, ""));
+  };
 
   const setLocal = <K extends keyof LocalFormState>(
     key: K,
@@ -590,6 +654,7 @@ function McpForm({
     try {
       const payload = {
         name: form.name.trim(),
+        tag: form.tag.trim() || undefined,
         description: form.description.trim() || undefined,
         source_url: form.source_url.trim() || undefined,
         server_type: form.server_type,
@@ -656,15 +721,46 @@ function McpForm({
             display: "flex",
             flexDirection: "column",
             gap: 5,
-            gridColumn: "1 / -1",
           }}
         >
           <FieldLabel>Name *</FieldLabel>
           <FieldInput
             value={form.name}
-            onChange={(e) => set("name", e.target.value)}
+            onChange={(e) => handleNameChange(e.target.value)}
             placeholder="e.g. Filesystem Server"
           />
+        </div>
+
+        {/* Tag */}
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 5,
+          }}
+        >
+          <FieldLabel>Tag</FieldLabel>
+          <FieldInput
+            value={form.tag}
+            onChange={(e) => handleTagChange(e.target.value)}
+            placeholder="e.g. filesystem"
+            mono
+          />
+          <FieldHint>
+            Tool name prefix — tools appear as{" "}
+            <code
+              style={{
+                fontFamily: '"SF Mono","Fira Code",monospace',
+                fontSize: 11,
+                background: "var(--bg-tertiary)",
+                padding: "1px 4px",
+                borderRadius: 3,
+              }}
+            >
+              {form.tag || "tag"}__tool_name
+            </code>
+            . Auto-derived from name.
+          </FieldHint>
         </div>
 
         {/* Description */}
@@ -846,44 +942,193 @@ function McpForm({
               />
             </div>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-              <FieldLabel>Auth Header Name</FieldLabel>
-              <FieldInput
-                value={form.remote.auth_header}
-                onChange={(e) => setRemote("auth_header", e.target.value)}
-                placeholder="Authorization"
-                mono
-              />
-              <FieldHint>
-                HTTP header used to send the auth token, e.g.{" "}
-                <code
+            <div>
+              <button
+                type="button"
+                onClick={() => setShowAuth((v) => !v)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  padding: 0,
+                  cursor: "pointer",
+                  fontSize: 12,
+                  color: "var(--text-tertiary)",
+                  fontFamily: "inherit",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
+                }}
+              >
+                <span
                   style={{
-                    fontFamily: '"SF Mono","Fira Code",monospace',
-                    fontSize: 11,
-                    background: "var(--bg-tertiary)",
-                    padding: "1px 4px",
-                    borderRadius: 3,
+                    display: "inline-block",
+                    transition: "transform 0.15s",
+                    transform: showAuth ? "rotate(90deg)" : "rotate(0deg)",
+                    fontSize: 10,
                   }}
                 >
-                  Authorization
-                </code>
-                .
-              </FieldHint>
-            </div>
+                  ▶
+                </span>
+                Authentication (optional)
+              </button>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-              <FieldLabel>Credential Key</FieldLabel>
-              <FieldInput
-                value={form.remote.credential_key}
-                onChange={(e) => setRemote("credential_key", e.target.value)}
-                placeholder="e.g. github-token (free text for now)"
-                mono
-              />
-              <FieldHint>
-                Key of the stored credential to inject as the auth token. Will
-                become a credential picker once the credential store is built
-                (Story 3.x).
-              </FieldHint>
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 5,
+                  marginTop: 12,
+                }}
+              >
+                <FieldLabel>Extra Headers</FieldLabel>
+                <EnvVarEditor
+                  pairs={form.remote.headerPairs}
+                  onChange={(pairs) => setRemote("headerPairs", pairs)}
+                />
+                <FieldHint>
+                  Additional HTTP headers sent on every request to this server.
+                  These are merged with the auth header above. Values may
+                  reference stored credentials using{" "}
+                  <code
+                    style={{
+                      fontFamily: '"SF Mono","Fira Code",monospace',
+                      fontSize: 11,
+                      background: "var(--bg-tertiary)",
+                      padding: "1px 4px",
+                      borderRadius: 3,
+                    }}
+                  >
+                    {"{credential:key}"}
+                  </code>
+                  .
+                </FieldHint>
+              </div>
+
+              {showAuth && (
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 12,
+                    marginTop: 12,
+                  }}
+                >
+                  <div
+                    style={{ display: "flex", flexDirection: "column", gap: 5 }}
+                  >
+                    <FieldLabel>Credential</FieldLabel>
+                    {credentials.length > 0 ? (
+                      <select
+                        value={form.remote.credential_key}
+                        onChange={(e) =>
+                          setRemote("credential_key", e.target.value)
+                        }
+                        style={{
+                          background: "var(--bg-tertiary)",
+                          border: "1px solid var(--border-default)",
+                          borderRadius: 7,
+                          color: form.remote.credential_key
+                            ? "var(--text-primary)"
+                            : "var(--text-tertiary)",
+                          fontFamily: '"SF Mono","Fira Code",monospace',
+                          fontSize: 12,
+                          padding: "7px 10px",
+                          width: "100%",
+                          outline: "none",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <option value="">— none —</option>
+                        {credentials.map((c) => (
+                          <option key={c.id} value={c.key}>
+                            {c.display_name}
+                            {c.service ? ` (${c.service})` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <FieldInput
+                        value={form.remote.credential_key}
+                        onChange={(e) =>
+                          setRemote("credential_key", e.target.value)
+                        }
+                        placeholder="e.g. github_pat"
+                        mono
+                      />
+                    )}
+                    <FieldHint>
+                      The credential whose secret will be injected as the auth
+                      token. Add credentials in the Credentials settings tab.
+                    </FieldHint>
+                  </div>
+
+                  <div
+                    style={{ display: "flex", flexDirection: "column", gap: 5 }}
+                  >
+                    <FieldLabel>Auth Header Name</FieldLabel>
+                    <FieldInput
+                      value={form.remote.auth_header}
+                      onChange={(e) => setRemote("auth_header", e.target.value)}
+                      placeholder="Authorization"
+                      mono
+                    />
+                    <FieldHint>
+                      Defaults to{" "}
+                      <code
+                        style={{
+                          fontFamily: '"SF Mono","Fira Code",monospace',
+                          fontSize: 11,
+                          background: "var(--bg-tertiary)",
+                          padding: "1px 4px",
+                          borderRadius: 3,
+                        }}
+                      >
+                        Authorization
+                      </code>
+                      .
+                    </FieldHint>
+                  </div>
+
+                  <div
+                    style={{ display: "flex", flexDirection: "column", gap: 5 }}
+                  >
+                    <FieldLabel>Auth Format</FieldLabel>
+                    <FieldInput
+                      value={form.remote.auth_format}
+                      onChange={(e) => setRemote("auth_format", e.target.value)}
+                      placeholder="Bearer {value}"
+                      mono
+                    />
+                    <FieldHint>
+                      Token injection template. Use{" "}
+                      <code
+                        style={{
+                          fontFamily: '"SF Mono","Fira Code",monospace',
+                          fontSize: 11,
+                          background: "var(--bg-tertiary)",
+                          padding: "1px 4px",
+                          borderRadius: 3,
+                        }}
+                      >
+                        {"{value}"}
+                      </code>{" "}
+                      as the placeholder. Defaults to{" "}
+                      <code
+                        style={{
+                          fontFamily: '"SF Mono","Fira Code",monospace',
+                          fontSize: 11,
+                          background: "var(--bg-tertiary)",
+                          padding: "1px 4px",
+                          borderRadius: 3,
+                        }}
+                      >
+                        Bearer {"{value}"}
+                      </code>
+                      .
+                    </FieldHint>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1267,6 +1512,14 @@ export function McpServerSettings() {
                 onDelete={handleDeleteClick}
               />
             ),
+          )}
+          {formMode === null && (
+            <div style={{ marginTop: 14 }}>
+              <Btn variant="ghost" onClick={handleAddClick}>
+                <Plus size={13} />
+                Add Server
+              </Btn>
+            </div>
           )}
         </div>
       )}
