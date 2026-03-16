@@ -93,7 +93,7 @@ pub struct AppState {
     /// Per-thread run state map.  Created on first access for each thread.
     pub run_states: DashMap<String, Arc<RunState>>,
     /// Handle to the copilot-api side-car service.  `None` when the service
-    /// could not be started (e.g. `bun` not on PATH).
+    /// could not be started (e.g. `node` not on PATH).
     pub copilot: Option<CopilotApiService>,
     /// MCP connection pool.  Manages all local and remote MCP server connections,
     /// tool caching, and status broadcasting.

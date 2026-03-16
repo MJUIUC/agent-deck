@@ -37,7 +37,7 @@ pub enum CopilotStatus {
     Connected,
     /// Process exited unexpectedly; service is waiting before restarting.
     Reconnecting,
-    /// Process could not be started (e.g. `bun` not on PATH).
+    /// Process could not be started (e.g. `node` not on PATH).
     Error(String),
 }
 
@@ -267,7 +267,7 @@ impl CopilotApiService {
     /// Kill any stale process already listening on COPILOT_PORT.
     ///
     /// When the Rust server is hard-killed (SIGKILL, IDE restart, etc.) the
-    /// supervised `bun` child becomes an orphan — its Tokio `Child` handle is
+    /// supervised `node` child becomes an orphan — its Tokio `Child` handle is
     /// dropped without calling `start_kill()`, so it keeps running and holds
     /// the port.  We do a best-effort `lsof`-based kill before spawning so the
     /// new process can bind successfully.
@@ -744,15 +744,15 @@ mod tests {
     async fn set_status_error_includes_reason() {
         let (svc, mut rx) = make_service();
         svc.set_status(
-            CopilotStatus::Error("bun not found".to_string()),
-            Some("bun not found".to_string()),
+            CopilotStatus::Error("node not found".to_string()),
+            Some("node not found".to_string()),
         )
         .await;
 
         let event = rx.try_recv().expect("event");
         match event {
             GlobalEvent::ProviderStatus { reason, .. } => {
-                assert_eq!(reason, Some("bun not found".to_string()));
+                assert_eq!(reason, Some("node not found".to_string()));
             }
             _ => panic!("wrong event"),
         }
