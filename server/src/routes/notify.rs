@@ -211,14 +211,17 @@ pub async fn notify(
         let trigger_content = content.clone();
 
         tokio::spawn(async move {
+            // Acquire semaphore first — queues behind any in-progress run.
+            // The cancel token is replaced only after we hold the semaphore
+            // so we never clobber the active run's token while it is still
+            // executing.
+            let _permit = run_state.semaphore.acquire().await.unwrap();
+
             let new_token = tokio_util::sync::CancellationToken::new();
             {
                 let mut lock = run_state.cancel_token.lock().await;
                 *lock = new_token.clone();
             }
-
-            // Acquire semaphore — queues behind any in-progress run on this thread
-            let _permit = run_state.semaphore.acquire().await.unwrap();
 
             crate::services::agent::run(state_clone, tid, trigger_content, new_token).await;
 

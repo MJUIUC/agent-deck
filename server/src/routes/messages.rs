@@ -209,20 +209,32 @@ pub async fn send(
     let content = payload.content.clone();
 
     tokio::spawn(async move {
-        // Wait for SSE subscriber before starting to stream
-        state_clone
-            .wait_for_subscriber(&tid, std::time::Duration::from_secs(3))
-            .await;
+        // Acquire semaphore — queues behind any in-progress run on this thread.
+        // This must happen before wait_for_subscriber so that:
+        //   1. The SSE subscriber check uses the freshest possible connection
+        //      state (after any preceding run has finished and the client may
+        //      have briefly cycled its EventSource).
+        //   2. The cancel token is not replaced until this run is actually
+        //      next-in-line, preventing a queued task from clobbering the
+        //      active run's token while it is still executing.
+        let _permit = run_state.semaphore.acquire().await.unwrap();
 
-        // Create a fresh cancellation token for this run
+        // Create a fresh cancellation token for this run now that we hold
+        // the semaphore and are guaranteed to be the next active run.
         let new_token = CancellationToken::new();
         {
             let mut lock = run_state.cancel_token.lock().await;
             *lock = new_token.clone();
         }
 
-        // Acquire semaphore — queues behind any in-progress run on this thread
-        let _permit = run_state.semaphore.acquire().await.unwrap();
+        // Wait for the SSE subscriber immediately before streaming begins so
+        // tokens are not fired into the void.  The subscriber is checked here
+        // (after acquiring the semaphore) so the wait reflects the actual
+        // connection state at the moment generation starts, not the moment the
+        // message was sent.
+        state_clone
+            .wait_for_subscriber(&tid, std::time::Duration::from_secs(3))
+            .await;
 
         crate::services::agent::run(state_clone, tid, content, new_token).await;
 
