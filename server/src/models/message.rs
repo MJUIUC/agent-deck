@@ -11,6 +11,8 @@ pub struct Message {
     pub routine_id: Option<String>,
     pub visibility: String, // "visible" | "hidden"
     pub execution_id: Option<String>,
+    pub event_type: Option<String>,
+    pub stopped: bool,
     pub created_at: String,
 }
 
@@ -37,6 +39,8 @@ pub struct MessageResponse {
     pub routine_id: Option<String>,
     pub visibility: String,
     pub execution_id: Option<String>,
+    pub event_type: Option<String>,
+    pub stopped: bool,
     pub created_at: String,
 }
 
@@ -63,6 +67,8 @@ impl Message {
             routine_id: req.routine_id,
             visibility: req.visibility,
             execution_id: req.execution_id,
+            event_type: None,
+            stopped: false,
             created_at: chrono::Utc::now()
                 .format("%Y-%m-%dT%H:%M:%S%.3fZ")
                 .to_string(),
@@ -79,6 +85,8 @@ impl Message {
             routine_id: None,
             visibility: "visible".to_string(),
             execution_id: None,
+            event_type: None,
+            stopped: false,
             created_at: chrono::Utc::now()
                 .format("%Y-%m-%dT%H:%M:%S%.3fZ")
                 .to_string(),
@@ -95,6 +103,26 @@ impl Message {
             routine_id: None,
             visibility: "visible".to_string(),
             execution_id: None,
+            event_type: None,
+            stopped: false,
+            created_at: chrono::Utc::now()
+                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+                .to_string(),
+        }
+    }
+
+    pub fn new_assistant_stopped(thread_id: impl Into<String>, content: impl Into<String>) -> Self {
+        Self {
+            id: Uuid::new_v4().to_string(),
+            thread_id: thread_id.into(),
+            role: "assistant".to_string(),
+            content: content.into(),
+            source: "chat".to_string(),
+            routine_id: None,
+            visibility: "visible".to_string(),
+            execution_id: None,
+            event_type: None,
+            stopped: true,
             created_at: chrono::Utc::now()
                 .format("%Y-%m-%dT%H:%M:%S%.3fZ")
                 .to_string(),
@@ -115,6 +143,8 @@ impl Message {
             routine_id: Some(routine_id.into()),
             visibility: "visible".to_string(),
             execution_id: None,
+            event_type: None,
+            stopped: false,
             created_at: chrono::Utc::now()
                 .format("%Y-%m-%dT%H:%M:%S%.3fZ")
                 .to_string(),
@@ -133,6 +163,8 @@ impl From<Message> for MessageResponse {
             routine_id: m.routine_id,
             visibility: m.visibility,
             execution_id: m.execution_id,
+            event_type: m.event_type,
+            stopped: m.stopped,
             created_at: m.created_at,
         }
     }

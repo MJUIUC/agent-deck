@@ -34,3 +34,4 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 async-trait = "0.1"
 dashmap = "6"
 dirs = "5"
+tokio-util = { version = "0.7", features = ["rt"] }

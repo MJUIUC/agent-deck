@@ -2,7 +2,11 @@ import { create } from "zustand";
 import { useMessageStore } from "./useMessageStore";
 import { useThreadStore } from "./useThreadStore";
 import { bufferToken } from "./tokenBuffer";
-import type { SseThreadEvent, SseGlobalEvent } from "@/types";
+import type {
+  SseThreadEvent,
+  SseGlobalEvent,
+  SseSystemEventEvent,
+} from "@/types";
 
 // Reconnection config
 const INITIAL_BACKOFF_MS = 1000;
@@ -120,7 +124,35 @@ export const useSseStore = create<SseStore>((set, get) => ({
               routine_id: null,
               visibility: "visible",
               execution_id: null,
+              stopped: data.stopped,
               created_at: data.created_at,
+            });
+          }
+        } catch {
+          // ignore
+        }
+      };
+
+      const handleSystemEvent = (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data) as SseSystemEventEvent;
+          if (data.event === "system_event") {
+            // Add as a system message so ConfigPane or ChatView can
+            // optionally render it. The message is visibility=hidden on the
+            // server so it won't appear in paginated loads unless the client
+            // explicitly requests it; here we surface it in the live store
+            // so connected clients see it immediately.
+            useMessageStore.getState().addMessage({
+              id: `system-event-${Date.now()}`,
+              thread_id: threadId,
+              role: "system",
+              content: data.content,
+              source: "system_event",
+              routine_id: null,
+              visibility: "hidden",
+              execution_id: null,
+              event_type: data.event_type,
+              created_at: new Date().toISOString(),
             });
           }
         } catch {
@@ -208,6 +240,7 @@ export const useSseStore = create<SseStore>((set, get) => ({
       es.addEventListener("token", handleToken);
       es.addEventListener("message_complete", handleMessageComplete);
       es.addEventListener("routine_message", handleRoutineMessage);
+      es.addEventListener("system_event", handleSystemEvent);
       // Named "stream_error" to avoid collision with EventSource's built-in
       // "error" event (which fires for connection drops, not server errors).
       es.addEventListener("stream_error", handleError);
@@ -228,6 +261,7 @@ export const useSseStore = create<SseStore>((set, get) => ({
         es.removeEventListener("token", handleToken);
         es.removeEventListener("message_complete", handleMessageComplete);
         es.removeEventListener("routine_message", handleRoutineMessage);
+        es.removeEventListener("system_event", handleSystemEvent);
         es.removeEventListener("stream_error", handleError);
         es.close();
       };

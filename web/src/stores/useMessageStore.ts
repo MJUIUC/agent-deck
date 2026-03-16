@@ -47,6 +47,7 @@ interface MessageStore {
   setStreamingError: (threadId: string, errorMsg: string) => void;
   clearMessages: (threadId: string) => void;
   clearError: (threadId: string) => void;
+  cancelRun: (threadId: string) => Promise<void>;
 }
 
 // ── Store ─────────────────────────────────────────────────────────────────────
@@ -187,6 +188,8 @@ const storeCreator: StateCreator<MessageStore> = (set, get) => ({
   // streaming → idle
   // Strips optimistic messages, appends the completed assistant message,
   // and is idempotent (safe to call twice).
+  // If the message has stopped=true (cancelled mid-stream), it is still
+  // appended — the UI renders a "stopped" label on it via MessageBubble.
 
   finalizeStream: (threadId, message) => {
     cancelTokenBuffer(threadId);
@@ -276,6 +279,19 @@ const storeCreator: StateCreator<MessageStore> = (set, get) => ({
         threads: setThread(state.threads, threadId, { phase: IDLE }),
       };
     });
+  },
+
+  // ── cancelRun ────────────────────────────────────────────────────────────────
+  // Sends a cancellation request to the server for the currently running
+  // agent run on the given thread.  The server will set the cancellation token;
+  // the streaming response will end and a stopped=true message will be emitted.
+
+  cancelRun: async (threadId) => {
+    try {
+      await messagesApi.cancel(threadId);
+    } catch {
+      // Silently swallow — if the request fails the run will complete normally
+    }
   },
 });
 

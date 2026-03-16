@@ -1,4 +1,4 @@
-//! Agent run-loop service — Story 2.5 / 4.4
+//! Agent run-loop service — Story 2.5 / 4.4 / 5.1
 //!
 //! Responsible for:
 //! - Assembling the context (system prompt + message history + memory recall)
@@ -7,12 +7,14 @@
 //! - Handling tool calls (save_memory / recall_memory) inline
 //! - Persisting the completed assistant message to the database
 //! - Emitting `message_complete` and `thread_updated` SSE events
+//! - Honouring per-run cancellation tokens (Story 5.1 Part B)
 
 use anyhow::{anyhow, Result};
 use async_openai::types::{ChatCompletionRequestMessage, ChatCompletionRequestToolMessageArgs};
 use futures::StreamExt;
 use serde_json::Value;
 use sqlx::SqlitePool;
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
 use crate::services::copilot::GlobalEvent;
@@ -49,8 +51,16 @@ const MEMORY_RECALL_LIMIT: i64 = 10;
 
 // ─── Public entry point ────────────────────────────────────────────────────────
 
+/// Result of a generation loop run, capturing the final content and whether
+/// the run was stopped early by a cancellation signal.
+struct GenerationResult {
+    content: String,
+    stopped: bool,
+}
+
 /// Run the agent for a given thread and new user message.
 ///
+/// Accepts a `CancellationToken` so callers can abort the run mid-stream.
 /// This is intended to be called from inside a `tokio::spawn` — it runs until
 /// the LLM has finished generating (including any tool-call rounds) and then
 /// emits the final `message_complete` and `thread_updated` SSE events.
@@ -58,8 +68,13 @@ const MEMORY_RECALL_LIMIT: i64 = 10;
 /// Errors during generation are surfaced as SSE `error` events rather than
 /// returned as `Err` values, so the caller doesn't need to do anything special
 /// with the return value.
-pub async fn run(state: AppState, thread_id: String, user_message: String) {
-    if let Err(e) = run_inner(&state, &thread_id, &user_message).await {
+pub async fn run(
+    state: AppState,
+    thread_id: String,
+    user_message: String,
+    cancel: CancellationToken,
+) {
+    if let Err(e) = run_inner(&state, &thread_id, &user_message, cancel).await {
         error!(
             thread_id = %thread_id,
             error = %e,
@@ -78,11 +93,17 @@ pub async fn run(state: AppState, thread_id: String, user_message: String) {
 
 // ─── Inner implementation ─────────────────────────────────────────────────────
 
-async fn run_inner(state: &AppState, thread_id: &str, user_message: &str) -> Result<()> {
+async fn run_inner(
+    state: &AppState,
+    thread_id: &str,
+    user_message: &str,
+    cancel: CancellationToken,
+) -> Result<()> {
     // ── 1. Fetch the thread and its persona ────────────────────────────────────
     let thread: crate::models::thread::Thread = sqlx::query_as(
         "SELECT id, user_id, persona_id, title, active_model, active_provider,
-                system_prompt_addendum, status, show_tool_activity, created_at, updated_at
+                system_prompt_addendum, status, show_tool_activity, show_system_events,
+                created_at, updated_at
          FROM threads WHERE id = ?",
     )
     .bind(thread_id)
@@ -282,7 +303,7 @@ async fn run_inner(state: &AppState, thread_id: &str, user_message: &str) -> Res
     });
 
     // ── 5. Run the generation loop (handles tool calls inline) ─────────────────
-    let assistant_content = generation_loop(
+    let gen_result = generation_loop(
         state,
         thread_id,
         user_id,
@@ -292,15 +313,21 @@ async fn run_inner(state: &AppState, thread_id: &str, user_message: &str) -> Res
         assembled.messages,
         assembled.tools,
         &attached,
+        cancel,
     )
     .await?;
 
     // ── 6. Persist the completed assistant message ─────────────────────────────
-    let assistant_msg = Message::new_assistant(thread_id, &assistant_content);
+    let assistant_msg = if gen_result.stopped {
+        Message::new_assistant_stopped(thread_id, &gen_result.content)
+    } else {
+        Message::new_assistant(thread_id, &gen_result.content)
+    };
 
     sqlx::query(
-        "INSERT INTO messages (id, thread_id, role, content, source, routine_id, visibility, execution_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO messages (id, thread_id, role, content, source, routine_id, visibility,
+                               execution_id, event_type, stopped, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&assistant_msg.id)
     .bind(&assistant_msg.thread_id)
@@ -310,6 +337,8 @@ async fn run_inner(state: &AppState, thread_id: &str, user_message: &str) -> Res
     .bind(&assistant_msg.routine_id)
     .bind(&assistant_msg.visibility)
     .bind(&assistant_msg.execution_id)
+    .bind(&assistant_msg.event_type)
+    .bind(assistant_msg.stopped)
     .bind(&assistant_msg.created_at)
     .execute(&state.pool)
     .await?;
@@ -327,6 +356,9 @@ async fn run_inner(state: &AppState, thread_id: &str, user_message: &str) -> Res
     // using the first user message and first assistant reply, persist the result,
     // and broadcast TitleUpdated so the client sidebar updates in real time
     // without a page reload or a second HTTP call from the client.
+    // Only generate title for non-stopped runs to avoid titling partial responses
+    let assistant_content = &gen_result.content;
+
     let message_count: (i64,) = sqlx::query_as(
         "SELECT COUNT(*) FROM messages
          WHERE thread_id = ? AND role IN ('user', 'assistant') AND visibility = 'visible'",
@@ -348,7 +380,7 @@ async fn run_inner(state: &AppState, thread_id: &str, user_message: &str) -> Res
 
         if let Some((user_content,)) = first_user {
             let generated_title =
-                title_service::try_llm_title(state, &thread, &user_content, &assistant_msg.content)
+                title_service::try_llm_title(state, &thread, &user_content, assistant_content)
                     .await;
 
             let now = chrono::Utc::now()
@@ -383,6 +415,7 @@ async fn run_inner(state: &AppState, thread_id: &str, user_message: &str) -> Res
             role: assistant_msg.role.clone(),
             content: assistant_msg.content.clone(),
             created_at: assistant_msg.created_at.clone(),
+            stopped: gen_result.stopped,
         },
     );
 
@@ -395,6 +428,7 @@ async fn run_inner(state: &AppState, thread_id: &str, user_message: &str) -> Res
     info!(
         thread_id = %thread_id,
         message_id = %assistant_msg.id,
+        stopped = gen_result.stopped,
         "Agent run-loop complete"
     );
 
@@ -404,8 +438,8 @@ async fn run_inner(state: &AppState, thread_id: &str, user_message: &str) -> Res
 // ─── Generation loop ──────────────────────────────────────────────────────────
 
 /// Core generation loop.  Streams tokens from the provider, handles any tool
-/// calls, then continues generation.  Returns the full assistant text content
-/// accumulated across all turns.
+/// calls, then continues generation.  Returns a `GenerationResult` containing
+/// the full assistant text and a `stopped` flag if cancelled mid-stream.
 async fn generation_loop(
     state: &AppState,
     thread_id: &str,
@@ -416,7 +450,8 @@ async fn generation_loop(
     mut messages: Vec<ChatCompletionRequestMessage>,
     tools: Vec<async_openai::types::ChatCompletionTool>,
     attached_mcp: &[AttachedMcpServer],
-) -> Result<String> {
+    cancel: CancellationToken,
+) -> Result<GenerationResult> {
     // We accumulate the final visible text across all tool-call rounds.
     let mut final_content = String::new();
 
@@ -436,6 +471,15 @@ async fn generation_loop(
             tool_count = tools.len(),
             "generation_loop: starting stream turn"
         );
+
+        // Check cancellation before starting a new streaming turn
+        if cancel.is_cancelled() {
+            info!(thread_id = %thread_id, "generation_loop: cancelled before stream turn");
+            return Ok(GenerationResult {
+                content: final_content,
+                stopped: true,
+            });
+        }
 
         let stream_result = provider
             .stream(model_id, messages.clone(), tools.clone())
@@ -498,6 +542,20 @@ async fn generation_loop(
                 );
             }
 
+            // ── Cancellation check after each chunk ───────────────────────────
+            if cancel.is_cancelled() {
+                info!(
+                    thread_id = %thread_id,
+                    partial_len = turn_text.len(),
+                    "generation_loop: cancelled mid-stream"
+                );
+                final_content.push_str(&turn_text);
+                return Ok(GenerationResult {
+                    content: final_content,
+                    stopped: true,
+                });
+            }
+
             // ── Tool-call fragments ───────────────────────────────────────────
             if let Some(index) = chunk.tool_call_index {
                 let idx = index as usize;
@@ -522,6 +580,16 @@ async fn generation_loop(
         if had_error {
             // Do not persist a partial message on mid-stream failure.
             return Err(anyhow!("Mid-stream error — response not persisted"));
+        }
+
+        // Check cancellation after the stream ends (covers the case where
+        // cancellation arrives exactly as the last chunk is processed).
+        if cancel.is_cancelled() && turn_text.is_empty() && tool_calls.is_empty() {
+            info!(thread_id = %thread_id, "generation_loop: cancelled after stream, no content");
+            return Ok(GenerationResult {
+                content: final_content,
+                stopped: true,
+            });
         }
 
         // Drop any malformed tool-call slots that arrived without a name or id.
@@ -571,6 +639,20 @@ async fn generation_loop(
 
         // Execute each tool call and append the results.
         for tc in &tool_calls {
+            // Check cancellation before each tool call
+            if cancel.is_cancelled() {
+                info!(
+                    thread_id = %thread_id,
+                    tool = %tc.name,
+                    "generation_loop: cancelled before tool call"
+                );
+                final_content.push_str(&turn_text);
+                return Ok(GenerationResult {
+                    content: final_content,
+                    stopped: true,
+                });
+            }
+
             info!(
                 thread_id = %thread_id,
                 tool = %tc.name,
@@ -587,6 +669,7 @@ async fn generation_loop(
                 thread_id,
                 tc,
                 attached_mcp,
+                &cancel,
             )
             .await;
 
@@ -629,7 +712,10 @@ async fn generation_loop(
         );
     }
 
-    Ok(final_content)
+    Ok(GenerationResult {
+        content: final_content,
+        stopped: false,
+    })
 }
 
 // ─── Tool execution ────────────────────────────────────────────────────────────
@@ -643,6 +729,7 @@ async fn execute_tool(
     thread_id: &str,
     tc: &PendingToolCall,
     attached_mcp: &[AttachedMcpServer],
+    cancel: &CancellationToken,
 ) -> Result<String> {
     match tc.name.as_str() {
         TOOL_SAVE_MEMORY => {
@@ -782,7 +869,18 @@ async fn execute_tool(
                         )
                         .await;
 
-                        let result = state.mcp.call_tool(&s.id, tool_name, args).await;
+                        // Use select! to honour cancellation during potentially long MCP calls
+                        let result = tokio::select! {
+                            r = state.mcp.call_tool(&s.id, tool_name, args) => r,
+                            _ = cancel.cancelled() => {
+                                info!(
+                                    thread_id = %thread_id,
+                                    tool = %tc.name,
+                                    "execute_tool: MCP call cancelled"
+                                );
+                                return Err(anyhow!("Tool call cancelled"));
+                            }
+                        };
                         info!(
                             thread_id = %thread_id,
                             server_id = %s.id,
@@ -856,14 +954,17 @@ async fn persist_tool_message(pool: &SqlitePool, thread_id: &str, role: &str, co
         routine_id: None,
         visibility: "hidden".to_string(),
         execution_id: None,
+        event_type: None,
+        stopped: false,
         created_at: chrono::Utc::now()
             .format("%Y-%m-%dT%H:%M:%S%.3fZ")
             .to_string(),
     };
 
     if let Err(e) = sqlx::query(
-        "INSERT INTO messages (id, thread_id, role, content, source, routine_id, visibility, execution_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO messages (id, thread_id, role, content, source, routine_id, visibility,
+                               execution_id, event_type, stopped, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&msg.id)
     .bind(&msg.thread_id)
@@ -873,6 +974,8 @@ async fn persist_tool_message(pool: &SqlitePool, thread_id: &str, role: &str, co
     .bind(&msg.routine_id)
     .bind(&msg.visibility)
     .bind(&msg.execution_id)
+    .bind(&msg.event_type)
+    .bind(msg.stopped)
     .bind(&msg.created_at)
     .execute(pool)
     .await

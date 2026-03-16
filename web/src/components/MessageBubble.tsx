@@ -63,6 +63,9 @@ export function MessageBubble({
       <div className={[styles.col, isUser ? styles.colUser : ""].join(" ")}>
         <div className={`${styles.bubble} ${bubbleClass}`}>
           {isRoutine && <div className={styles.routineLabel}>⚡ Routine</div>}
+          {message.stopped && (
+            <div className={styles.stoppedLabel}>⏹ Stopped</div>
+          )}
           {isUser ? (
             message.content
           ) : (

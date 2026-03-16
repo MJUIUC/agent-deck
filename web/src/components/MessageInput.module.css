@@ -68,6 +68,28 @@
     cursor: default;
 }
 
+.stopBtn {
+    width: 32px;
+    height: 32px;
+    border-radius: 7px;
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    cursor: pointer;
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+    transition:
+        background 0.15s,
+        color 0.15s;
+}
+
+.stopBtn:hover {
+    background: var(--danger-muted, #3d1f1f);
+    color: var(--danger, #f87171);
+}
+
 .hints {
     display: flex;
     justify-content: space-between;
@@ -78,4 +100,10 @@
 .hint {
     font-size: 11px;
     color: var(--text-tertiary);
+}
+
+.queuedIndicator {
+    font-size: 11px;
+    color: var(--accent-muted, #6b7fc9);
+    font-style: italic;
 }

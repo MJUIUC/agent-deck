@@ -1,19 +1,25 @@
 import { useRef, useState, useCallback, useEffect } from "react";
-import { SendHorizonal } from "lucide-react";
+import { SendHorizonal, Square } from "lucide-react";
 import styles from "./MessageInput.module.css";
 
 interface MessageInputProps {
   threadId: string;
   personaName?: string;
   isSending: boolean;
+  isStreaming?: boolean;
   onSend: (content: string) => void;
+  onCancel?: () => void;
+  queuedCount?: number;
 }
 
 export function MessageInput({
   threadId,
   personaName = "Agent",
   isSending,
+  isStreaming = false,
   onSend,
+  onCancel,
+  queuedCount = 0,
 }: MessageInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [value, setValue] = useState("");
@@ -43,6 +49,8 @@ export function MessageInput({
 
   const handleSubmit = useCallback(() => {
     const trimmed = value.trim();
+    // Allow sending while streaming (queues behind current run)
+    // Only block while isSending (optimistic phase, before SSE started)
     if (!trimmed || isSending) return;
     onSend(trimmed);
     setValue("");
@@ -60,6 +68,10 @@ export function MessageInput({
     },
     [handleSubmit],
   );
+
+  const handleCancel = useCallback(() => {
+    if (onCancel) onCancel();
+  }, [onCancel]);
 
   const isEmpty = value.trim().length === 0;
 
@@ -82,20 +94,39 @@ export function MessageInput({
           className={styles.textarea}
           style={{ minHeight: "22px", maxHeight: "160px" }}
         />
-        <button
-          onClick={handleSubmit}
-          disabled={isEmpty || isSending}
-          aria-label="Send message"
-          title="Send"
-          className={styles.sendBtn}
-        >
-          <SendHorizonal size={15} strokeWidth={2} />
-        </button>
+
+        {isStreaming ? (
+          /* Stop button — shown while the agent is streaming */
+          <button
+            onClick={handleCancel}
+            aria-label="Stop generation"
+            title="Stop"
+            className={styles.stopBtn}
+          >
+            <Square size={14} strokeWidth={2} fill="currentColor" />
+          </button>
+        ) : (
+          /* Send button */
+          <button
+            onClick={handleSubmit}
+            disabled={isEmpty || isSending}
+            aria-label="Send message"
+            title="Send"
+            className={styles.sendBtn}
+          >
+            <SendHorizonal size={15} strokeWidth={2} />
+          </button>
+        )}
       </div>
 
       {/* Hints row */}
       <div className={styles.hints}>
         <span className={styles.hint}>↵ send · Shift+↵ newline</span>
+        {queuedCount > 0 && (
+          <span className={styles.queuedIndicator}>
+            {queuedCount} message{queuedCount !== 1 ? "s" : ""} queued
+          </span>
+        )}
       </div>
     </div>
   );

@@ -23,6 +23,7 @@ export interface Thread {
   system_prompt_addendum: string | null;
   status: string;
   show_tool_activity: boolean;
+  show_system_events: boolean;
   created_at: string;
   updated_at: string;
   // Joined client-side for display convenience
@@ -35,10 +36,12 @@ export interface Message {
   thread_id: string;
   role: "user" | "assistant" | "system";
   content: string;
-  source: "chat" | "routine" | "tool";
+  source: "chat" | "routine" | "tool" | "system_event";
   routine_id: string | null;
   visibility: "visible" | "hidden";
   execution_id: string | null;
+  event_type?: string;
+  stopped?: boolean;
   created_at: string;
 }
 
@@ -108,6 +111,18 @@ export interface SseMessageCompleteEvent {
   role: string;
   content: string;
   created_at: string;
+  stopped?: boolean;
+}
+
+export interface SseSystemEventEvent {
+  event: "system_event";
+  event_type: string;
+  content: string;
+}
+
+export interface SseCancelledEvent {
+  event: "cancelled";
+  thread_id: string;
 }
 
 export interface SseRoutineMessageEvent {
@@ -133,7 +148,9 @@ export type SseThreadEvent =
   | SseTokenEvent
   | SseMessageCompleteEvent
   | SseRoutineMessageEvent
-  | SseErrorEvent;
+  | SseErrorEvent
+  | SseSystemEventEvent
+  | SseCancelledEvent;
 
 // Global SSE event from copilot.rs GlobalEvent
 export interface SseThreadUpdatedEvent {

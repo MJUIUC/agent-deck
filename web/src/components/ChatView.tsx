@@ -56,6 +56,7 @@ export function ChatView({
   const { messages, phase } = threadState;
   const isStreaming = phase.status === "streaming";
   const isSending = phase.status === "sending";
+  const cancelRun = useMessageStore((s) => s.cancelRun);
   const streamingContent = phase.status === "streaming" ? phase.content : "";
   const messageError = phase.status === "error" ? phase.message : null;
 
@@ -114,6 +115,10 @@ export function ChatView({
     },
     [upsertThread, thread.persona],
   );
+
+  const handleCancel = useCallback(() => {
+    cancelRun(thread.id);
+  }, [cancelRun, thread.id]);
 
   const handleSend = useCallback(
     (content: string) => {
@@ -194,8 +199,10 @@ export function ChatView({
       <MessageInput
         threadId={thread.id}
         personaName={personaName}
-        isSending={isSending || isStreaming}
+        isSending={isSending}
+        isStreaming={isStreaming}
         onSend={handleSend}
+        onCancel={handleCancel}
       />
 
       {/* ── Config pane — hidden in draft mode ── */}

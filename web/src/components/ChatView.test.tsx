@@ -34,8 +34,18 @@ vi.mock("./ChatHeader", () => ({
 }));
 
 vi.mock("./MessageInput", () => ({
-  MessageInput: ({ isSending }: { isSending: boolean }) => (
-    <div data-testid="message-input" data-is-sending={String(isSending)} />
+  MessageInput: ({
+    isSending,
+    isStreaming,
+  }: {
+    isSending: boolean;
+    isStreaming?: boolean;
+  }) => (
+    <div
+      data-testid="message-input"
+      data-is-sending={String(isSending)}
+      data-is-streaming={String(isStreaming ?? false)}
+    />
   ),
 }));
 
@@ -70,6 +80,7 @@ function makeThread(id = "t1"): Thread {
     system_prompt_addendum: null,
     status: "active",
     show_tool_activity: false,
+    show_system_events: false,
     created_at: "2024-01-01T00:00:00.000Z",
     updated_at: "2024-01-01T00:00:00.000Z",
     persona: {
@@ -177,7 +188,7 @@ describe("ChatView", () => {
     expect(screen.getByTestId("streaming-bubble")).toBeInTheDocument();
   });
 
-  it("disables the input while streaming", () => {
+  it("shows stop button (isStreaming) while streaming", () => {
     useMessageStore.setState({
       threads: {
         t1: {
@@ -189,8 +200,14 @@ describe("ChatView", () => {
 
     render(<ChatView thread={makeThread()} />);
 
+    // ChatView now passes isSending=false / isStreaming=true while streaming —
+    // the input itself stays enabled so the user can queue a follow-up message.
     expect(screen.getByTestId("message-input")).toHaveAttribute(
       "data-is-sending",
+      "false",
+    );
+    expect(screen.getByTestId("message-input")).toHaveAttribute(
+      "data-is-streaming",
       "true",
     );
   });

@@ -8,6 +8,7 @@ vi.mock("@/api/client", () => ({
     list: vi.fn(),
     send: vi.fn(),
     sendCommand: vi.fn(),
+    cancel: vi.fn(),
   },
 }));
 
@@ -24,6 +25,7 @@ const mockMessagesApi = messagesApi as {
   list: ReturnType<typeof vi.fn>;
   send: ReturnType<typeof vi.fn>;
   sendCommand: ReturnType<typeof vi.fn>;
+  cancel: ReturnType<typeof vi.fn>;
 };
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────

@@ -1,16 +1,19 @@
 use axum::{
     body::Body,
     extract::Request,
-    http::{header, StatusCode},
+    http::header,
     middleware::{self, Next},
-    response::{IntoResponse, Response},
+    response::Response,
     routing::get,
     Router,
 };
+use dashmap::DashMap;
 use sqlx::SqlitePool;
 use std::collections::HashMap;
+use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex};
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::broadcast;
+use tokio_util::sync::CancellationToken;
 use tower_http::{services::ServeDir, trace::TraceLayer};
 use tracing::warn;
 
@@ -28,6 +31,7 @@ pub mod health;
 pub mod memory;
 pub mod messages;
 pub mod models;
+pub mod notify;
 pub mod personas;
 pub mod providers;
 pub mod routines;
@@ -37,13 +41,37 @@ pub mod sse;
 pub mod threads;
 pub mod tokens;
 
-/// A unit of work sent from the `send` message handler to the background
-/// agent worker.  Decouples the HTTP response lifecycle from agent execution —
-/// the handler enqueues the job and returns the 201 immediately; the worker
-/// drains the queue independently.
+/// A unit of work — kept for compatibility with any remaining references,
+/// but the channel-based agent dispatch has been replaced with per-thread
+/// `RunState` and direct `tokio::spawn` in the `send` handler.
 pub struct AgentJob {
     pub thread_id: String,
     pub content: String,
+}
+
+/// Per-thread run state.  Controls concurrency and cancellation for agent
+/// runs on a single thread.
+///
+/// - `semaphore`: capacity-1 semaphore that serialises concurrent runs.
+///   The second run waits behind the first rather than being rejected.
+/// - `depth`: count of tasks that have been spawned and not yet completed.
+///   Used to reject sends that would exceed `MAX_DEPTH`.
+/// - `cancel_token`: the cancellation token for the currently running (or
+///   most recently started) agent run.  Replaced atomically before each run.
+pub struct RunState {
+    pub semaphore: tokio::sync::Semaphore,
+    pub depth: AtomicUsize,
+    pub cancel_token: tokio::sync::Mutex<CancellationToken>,
+}
+
+impl RunState {
+    pub fn new() -> Self {
+        Self {
+            semaphore: tokio::sync::Semaphore::new(1),
+            depth: AtomicUsize::new(0),
+            cancel_token: tokio::sync::Mutex::new(CancellationToken::new()),
+        }
+    }
 }
 
 /// Application state shared across all handlers via Axum's `State` extractor.
@@ -62,11 +90,8 @@ pub struct AppState {
     pub thread_senders: Arc<
         Mutex<HashMap<String, Vec<tokio::sync::mpsc::Sender<crate::routes::sse::ThreadEvent>>>>,
     >,
-    /// Agent work queue.  The `send` handler drops a job here and returns the
-    /// HTTP 201 immediately.  A single background task drains this channel and
-    /// runs each agent job in its own spawned task, keeping the queue itself
-    /// non-blocking.
-    pub agent_tx: mpsc::Sender<AgentJob>,
+    /// Per-thread run state map.  Created on first access for each thread.
+    pub run_states: DashMap<String, Arc<RunState>>,
     /// Handle to the copilot-api side-car service.  `None` when the service
     /// could not be started (e.g. `bun` not on PATH).
     pub copilot: Option<CopilotApiService>,
@@ -75,29 +100,17 @@ pub struct AppState {
     pub mcp: McpConnectionManager,
 }
 
-/// Build the main application router.
-/// Spawn the background task that drains the agent work queue.
-///
-/// Each job is run in its own `tokio::spawn` so that slow or failing agent
-/// runs never block the queue from processing subsequent jobs.
-fn start_agent_worker(mut rx: mpsc::Receiver<AgentJob>, state: AppState) {
-    tokio::spawn(async move {
-        while let Some(job) = rx.recv().await {
-            let job_state = state.clone();
-            tokio::spawn(async move {
-                // Wait up to 3 seconds for the SSE client to connect before
-                // starting to stream.  If no subscriber appears in time we
-                // proceed anyway — message_complete and DB persistence still
-                // happen so the user sees the response on next load.
-                job_state
-                    .wait_for_subscriber(&job.thread_id, std::time::Duration::from_secs(3))
-                    .await;
-                crate::services::agent::run(job_state, job.thread_id, job.content).await;
-            });
-        }
-    });
+impl AppState {
+    /// Get or create the `RunState` for a given thread.
+    pub fn get_run_state(&self, thread_id: &str) -> Arc<RunState> {
+        self.run_states
+            .entry(thread_id.to_string())
+            .or_insert_with(|| Arc::new(RunState::new()))
+            .clone()
+    }
 }
 
+/// Build the main application router.
 pub async fn build_router(
     pool: SqlitePool,
     config: Config,
@@ -117,8 +130,6 @@ pub async fn build_router(
     tracing::info!("╚══════════════════════════════════════════════════════════╝");
 
     // ── SSE broadcast channel ─────────────────────────────────────────────────
-    // Capacity of 256 gives global-stream clients some slack before they start
-    // lagging on bursts of events.
     let (global_tx, _global_rx) = broadcast::channel::<GlobalEvent>(256);
 
     // ── copilot-api side-car ──────────────────────────────────────────────────
@@ -126,8 +137,6 @@ pub async fn build_router(
     let copilot_handle = copilot.clone();
 
     // ── MCP connection manager ────────────────────────────────────────────────
-    // The master key is needed to decrypt credential secrets injected into MCP
-    // server env vars and auth headers.
     let master_key = credentials_service::get_or_create_master_key(&pool).await?;
     let mcp = McpConnectionManager::new(
         pool.clone(),
@@ -135,10 +144,6 @@ pub async fn build_router(
         global_tx.clone(),
         config.mcp_dir.clone(),
     );
-
-    // Agent work queue — capacity of 64 is generous; in practice there will
-    // rarely be more than a handful of concurrent agent runs.
-    let (agent_tx, agent_rx) = mpsc::channel::<AgentJob>(64);
 
     let state = AppState {
         pool,
@@ -148,21 +153,15 @@ pub async fn build_router(
         auth_token,
         global_tx,
         thread_senders: Arc::new(Mutex::new(HashMap::new())),
-        agent_tx,
+        run_states: DashMap::new(),
         copilot: Some(copilot_handle),
         mcp: mcp.clone(),
     };
 
-    // Start the agent worker before the router starts accepting requests.
-    start_agent_worker(agent_rx, state.clone());
-
     // Start copilot-api supervision in the background.
-    // This is non-blocking — the server starts immediately regardless of whether
-    // copilot-api becomes available.
     copilot.start();
 
-    // Connect all enabled MCP servers.  Each connection runs in its own task
-    // with backoff restart, so this returns immediately.
+    // Connect all enabled MCP servers.
     mcp.start().await;
 
     // Public API routes (no auth required)
@@ -271,6 +270,15 @@ pub async fn build_router(
             "/api/threads/:id/command",
             axum::routing::post(messages::slash_command),
         )
+        // Run management
+        .route(
+            "/api/threads/:id/cancel",
+            axum::routing::post(messages::cancel_run),
+        )
+        .route(
+            "/api/threads/:id/notify",
+            axum::routing::post(notify::notify),
+        )
         // SSE streams
         .route("/api/threads/:id/stream", get(sse::thread_stream))
         .route("/api/events", get(sse::global_stream))
@@ -324,7 +332,6 @@ pub async fn build_router(
         ));
 
     // Static file serving (React SPA) — serves from public_dir
-    // Falls back to index.html for SPA routing (404 → index.html)
     let static_files = Router::new().nest_service(
         "/",
         ServeDir::new(&config.public_dir).not_found_service(tower_http::services::ServeFile::new(
@@ -333,8 +340,6 @@ pub async fn build_router(
     );
 
     // ── Copilot provider auth routes — genuinely public, no auth required ──
-    // These endpoints drive the GitHub device-code flow from the UI, which
-    // may be used before the user has a session token.
     let copilot_routes = Router::new()
         .route(
             "/api/providers/copilot/auth-status",
@@ -425,103 +430,8 @@ mod tests {
         body::Body,
         http::{Request, StatusCode},
     };
+    use std::sync::atomic::Ordering;
     use tower::ServiceExt;
-
-    // ── AgentJob channel tests ────────────────────────────────────────────────
-
-    /// The agent_tx channel must accept a job without blocking — the send
-    /// handler depends on this being a cheap, non-blocking enqueue.
-    #[tokio::test]
-    async fn agent_tx_send_does_not_block() {
-        let (tx, _rx) = mpsc::channel::<AgentJob>(64);
-        // try_send (non-async) must succeed immediately — channel has capacity.
-        tx.try_send(AgentJob {
-            thread_id: "t1".to_string(),
-            content: "hello".to_string(),
-        })
-        .expect("send should succeed without blocking");
-    }
-
-    /// Jobs sent to agent_tx are received by the worker in order.
-    #[tokio::test]
-    async fn agent_worker_receives_jobs_in_order() {
-        let (tx, mut rx) = mpsc::channel::<AgentJob>(64);
-
-        tx.send(AgentJob {
-            thread_id: "t1".to_string(),
-            content: "first".to_string(),
-        })
-        .await
-        .unwrap();
-
-        tx.send(AgentJob {
-            thread_id: "t2".to_string(),
-            content: "second".to_string(),
-        })
-        .await
-        .unwrap();
-
-        let job1 = rx.recv().await.unwrap();
-        assert_eq!(job1.thread_id, "t1");
-        assert_eq!(job1.content, "first");
-
-        let job2 = rx.recv().await.unwrap();
-        assert_eq!(job2.thread_id, "t2");
-        assert_eq!(job2.content, "second");
-    }
-
-    /// Dropping the sender closes the channel — the worker's recv loop exits
-    /// cleanly rather than hanging forever.
-    #[tokio::test]
-    async fn agent_worker_exits_when_sender_dropped() {
-        let (tx, mut rx) = mpsc::channel::<AgentJob>(64);
-        drop(tx);
-        // recv() must return None immediately once the sender is gone.
-        assert!(rx.recv().await.is_none());
-    }
-
-    /// The channel does not block the caller when at capacity — try_send
-    /// returns Err rather than waiting, protecting the HTTP handler from
-    /// stalling if the worker falls behind.
-    #[tokio::test]
-    async fn agent_tx_try_send_fails_when_full() {
-        // Capacity of 1 so we can fill it with a single job.
-        let (tx, _rx) = mpsc::channel::<AgentJob>(1);
-
-        tx.try_send(AgentJob {
-            thread_id: "t1".to_string(),
-            content: "fill".to_string(),
-        })
-        .expect("first send fills the channel");
-
-        // Channel is now full — try_send must not block, it must error.
-        let result = tx.try_send(AgentJob {
-            thread_id: "t2".to_string(),
-            content: "overflow".to_string(),
-        });
-
-        assert!(result.is_err(), "try_send should fail on a full channel");
-    }
-
-    /// AgentJob fields are stored and retrieved intact.
-    #[tokio::test]
-    async fn agent_job_fields_roundtrip() {
-        let (tx, mut rx) = mpsc::channel::<AgentJob>(8);
-
-        let thread_id = "d05a7947-9b72-4573-aee5-48572afaf198".to_string();
-        let content = "Plan a trip to Japan 🇯🇵".to_string();
-
-        tx.send(AgentJob {
-            thread_id: thread_id.clone(),
-            content: content.clone(),
-        })
-        .await
-        .unwrap();
-
-        let job = rx.recv().await.unwrap();
-        assert_eq!(job.thread_id, thread_id);
-        assert_eq!(job.content, content);
-    }
 
     async fn test_app() -> (Router, String) {
         let pool = sqlx::SqlitePool::connect("sqlite::memory:")
@@ -545,8 +455,6 @@ mod tests {
         let token = auth_service::get_or_create_auth_token(&pool)
             .await
             .expect("token");
-        // build_router starts copilot supervision — that's fine in tests,
-        // it will fail to spawn bun (not installed in CI) and back off quietly.
         let (app, _mcp) = build_router(pool, config).await.expect("router");
         (app, token)
     }
@@ -594,7 +502,6 @@ mod tests {
             )
             .await
             .unwrap();
-        // 200 or other non-401 is fine — we just need auth to pass
         assert_ne!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
@@ -643,5 +550,26 @@ mod tests {
             .await
             .unwrap();
         assert_ne!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn run_state_depth_increments() {
+        let state = RunState::new();
+        let prev = state.depth.fetch_add(1, Ordering::SeqCst);
+        assert_eq!(prev, 0);
+        assert_eq!(state.depth.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn run_state_cancel_token_can_be_replaced() {
+        let state = RunState::new();
+        let new_token = CancellationToken::new();
+        {
+            let mut lock = state.cancel_token.lock().await;
+            *lock = new_token.clone();
+        }
+        new_token.cancel();
+        let lock = state.cancel_token.lock().await;
+        assert!(lock.is_cancelled());
     }
 }

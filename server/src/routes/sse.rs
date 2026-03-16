@@ -42,7 +42,10 @@ pub enum ThreadEvent {
         role: String,
         content: String,
         created_at: String,
+        stopped: bool,
     },
+    /// A system event notification (model switched, MCP attached, etc.)
+    SystemEvent { event_type: String, content: String },
     /// A message produced by a routine firing on this thread.
     RoutineMessage {
         id: String,
@@ -63,6 +66,7 @@ impl ThreadEvent {
             ThreadEvent::Token { .. } => "token",
             ThreadEvent::MessageComplete { .. } => "message_complete",
             ThreadEvent::RoutineMessage { .. } => "routine_message",
+            ThreadEvent::SystemEvent { .. } => "system_event",
             ThreadEvent::Error { .. } => "stream_error",
         }
     }
@@ -300,7 +304,6 @@ mod tests {
 
     fn make_state() -> AppState {
         let (global_tx, _) = broadcast::channel(64);
-        let (agent_tx, _agent_rx) = tokio::sync::mpsc::channel(64);
         let pool = sqlx::SqlitePool::connect_lazy("sqlite::memory:").unwrap();
         let (mcp_tx, _) = tokio::sync::broadcast::channel(1);
         let mcp = crate::services::mcp::McpConnectionManager::new(
@@ -321,10 +324,11 @@ mod tests {
                 fcm_service_account_json: None,
             },
             machine_secret: "test-secret".to_string(),
+            credential_master_key: "test-master-key".to_string(),
             auth_token: "test-token".to_string(),
             global_tx,
             thread_senders: Arc::new(Mutex::new(HashMap::new())),
-            agent_tx,
+            run_states: dashmap::DashMap::new(),
             copilot: None,
             mcp,
         }
@@ -477,6 +481,7 @@ mod tests {
             role: "assistant".to_string(),
             content: "hello".to_string(),
             created_at: "2025-01-01".to_string(),
+            stopped: false,
         };
         assert_eq!(e.event_name(), "message_complete");
     }

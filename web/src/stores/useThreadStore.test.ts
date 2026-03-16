@@ -7,7 +7,9 @@ import type { Thread } from "@/types";
 vi.mock("@/api/client", () => ({
   threadsApi: {
     list: vi.fn(),
-    archive: vi.fn().mockResolvedValue({ data: { id: "t1", status: "archived" } }),
+    archive: vi
+      .fn()
+      .mockResolvedValue({ data: { id: "t1", status: "archived" } }),
   },
   personasApi: {
     list: vi.fn(),
@@ -29,6 +31,7 @@ function makeThread(id: string, updatedAt: string): Thread {
     system_prompt_addendum: null,
     status: "active",
     show_tool_activity: false,
+    show_system_events: false,
     created_at: "2024-01-01T00:00:00.000Z",
     updated_at: updatedAt,
   };

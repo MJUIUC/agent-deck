@@ -16,6 +16,7 @@ export function makeDraftThread(persona: AgentPersona): Thread {
     system_prompt_addendum: null,
     status: "active",
     show_tool_activity: false,
+    show_system_events: false,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     persona,

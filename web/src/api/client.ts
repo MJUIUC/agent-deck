@@ -170,11 +170,30 @@ export const threadsApi = {
       active_provider?: string;
       system_prompt_addendum?: string;
       show_tool_activity?: boolean;
+      show_system_events?: boolean;
     },
   ): Promise<{ data: Thread }> {
     return apiFetch(`/api/threads/${id}`, {
       method: "PUT",
       body: JSON.stringify(payload),
+    });
+  },
+
+  notify(
+    id: string,
+    event_type: string,
+    payload?: Record<string, unknown>,
+  ): Promise<{
+    data: {
+      event_type: string;
+      persisted: boolean;
+      triggered: boolean;
+      message_id: string | null;
+    };
+  }> {
+    return apiFetch(`/api/threads/${id}/notify`, {
+      method: "POST",
+      body: JSON.stringify({ event_type, payload }),
     });
   },
 
@@ -252,6 +271,12 @@ export const messagesApi = {
     return apiFetch(`/api/threads/${threadId}/messages`, {
       method: "POST",
       body: JSON.stringify({ content }),
+    });
+  },
+
+  cancel(threadId: string): Promise<{ data: { cancelled: boolean } }> {
+    return apiFetch(`/api/threads/${threadId}/cancel`, {
+      method: "POST",
     });
   },
 

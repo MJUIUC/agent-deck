@@ -63,6 +63,17 @@ async fn main() -> Result<()> {
     // Initialize database
     let pool = db::init(&config.database_url).await?;
 
+    // Cleanup orphaned routine_executions from a previous crash.
+    // Any execution that was marked 'running' at startup never completed —
+    // mark them as failed so the UI doesn't show them as stuck.
+    sqlx::query(
+        "UPDATE routine_executions SET status = 'failed', error = 'server restarted during execution'
+         WHERE status = 'running'",
+    )
+    .execute(&pool)
+    .await?;
+    info!("Orphaned routine_executions cleaned up");
+
     // Build the application router.  Also returns the McpConnectionManager
     // handle so we can shut down all MCP child processes cleanly on exit.
     let (app, mcp) = routes::build_router(pool.clone(), config.clone()).await?;

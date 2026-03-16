@@ -505,6 +505,12 @@ export function ConfigPane({
   );
   const [isSavingToolActivity, setIsSavingToolActivity] = useState(false);
 
+  // ── System events ──
+  const [showSystemEvents, setShowSystemEvents] = useState(
+    thread.show_system_events ?? false,
+  );
+  const [isSavingSystemEvents, setIsSavingSystemEvents] = useState(false);
+
   // ── MCP servers ──
   const [attachedEntries, setAttachedEntries] = useState<ThreadMcpEntry[]>([]);
   const [mcpServersMap, setMcpServersMap] = useState<Record<string, McpServer>>(
@@ -520,9 +526,15 @@ export function ConfigPane({
   useEffect(() => {
     setAddendum(thread.system_prompt_addendum ?? "");
     setShowToolActivity(thread.show_tool_activity ?? false);
+    setShowSystemEvents(thread.show_system_events ?? false);
     setShowAttachPicker(false);
     setShowArchiveConfirm(false);
-  }, [thread.id, thread.system_prompt_addendum, thread.show_tool_activity]);
+  }, [
+    thread.id,
+    thread.system_prompt_addendum,
+    thread.show_tool_activity,
+    thread.show_system_events,
+  ]);
 
   // Load attached MCP servers whenever the pane opens or thread changes
   useEffect(() => {
@@ -570,6 +582,10 @@ export function ConfigPane({
         system_prompt_addendum: current || undefined,
       });
       onThreadUpdated(res.data);
+      // Notify connected clients about the addendum change
+      threadsApi.notify(thread.id, "addendum_updated").catch(() => {
+        /* silently degrade */
+      });
     } catch {
       setAddendum(thread.system_prompt_addendum ?? "");
     } finally {
@@ -592,6 +608,21 @@ export function ConfigPane({
     }
   };
 
+  const handleSystemEventsChange = async (value: boolean) => {
+    setShowSystemEvents(value);
+    setIsSavingSystemEvents(true);
+    try {
+      const res = await threadsApi.update(thread.id, {
+        show_system_events: value,
+      });
+      onThreadUpdated(res.data);
+    } catch {
+      setShowSystemEvents(!value);
+    } finally {
+      setIsSavingSystemEvents(false);
+    }
+  };
+
   const handleModelUpdate = useCallback(
     async (providerRecordId: string, modelRecordId: string) => {
       try {
@@ -602,6 +633,17 @@ export function ConfigPane({
         // Server returns the updated thread with UUID fields — upserts the store,
         // which reactively updates ChatHeader and any other thread consumers.
         onThreadUpdated(res.data);
+
+        // Notify the thread about the model switch so system events are recorded
+        // Look up the display names from the updated thread for the notify payload
+        threadsApi
+          .notify(thread.id, "model_switched", {
+            provider_name: res.data.active_provider ?? "unknown",
+            model_name: res.data.active_model ?? "unknown",
+          })
+          .catch(() => {
+            /* silently degrade */
+          });
       } catch {
         // silently degrade — UI local state already updated optimistically
       }
@@ -610,11 +652,20 @@ export function ConfigPane({
   );
 
   const handleDetachServer = async (mcpServerId: string) => {
+    const server = mcpServersMap[mcpServerId];
     try {
       await threadsApi.detachMcpServer(thread.id, mcpServerId);
       setAttachedEntries((prev) =>
         prev.filter((e) => e.mcp_server_id !== mcpServerId),
       );
+      // Notify thread about detach
+      if (server) {
+        threadsApi
+          .notify(thread.id, "mcp_server_detached", { name: server.name })
+          .catch(() => {
+            /* silently degrade */
+          });
+      }
     } catch {
       // silently degrade
     }
@@ -629,6 +680,12 @@ export function ConfigPane({
       );
       setAttachedEntries((prev) => [...prev, entry]);
       setMcpServersMap((prev) => ({ ...prev, [server.id]: server }));
+      // Notify thread about attach
+      threadsApi
+        .notify(thread.id, "mcp_server_attached", { name: server.name })
+        .catch(() => {
+          /* silently degrade */
+        });
     } catch {
       // silently degrade
     }
@@ -823,6 +880,23 @@ export function ConfigPane({
                 checked={showToolActivity}
                 onChange={handleToolActivityChange}
                 disabled={isSavingToolActivity}
+              />
+            </div>
+
+            {/* System events toggle */}
+            <div className={styles.toolActivityRow}>
+              <div className={styles.toolActivityInfo}>
+                <div className={styles.toolActivityLabel}>
+                  Show system events in chat
+                </div>
+                <div className={styles.toolActivityHint}>
+                  Display model switches, MCP attach/detach, and other events
+                </div>
+              </div>
+              <Toggle
+                checked={showSystemEvents}
+                onChange={handleSystemEventsChange}
+                disabled={isSavingSystemEvents}
               />
             </div>
           </div>
