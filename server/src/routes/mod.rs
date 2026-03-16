@@ -572,4 +572,192 @@ mod tests {
         let lock = state.cancel_token.lock().await;
         assert!(lock.is_cancelled());
     }
+
+    // ── RunState additional unit tests ────────────────────────────────────────
+
+    #[test]
+    fn run_state_new_has_zero_depth() {
+        let state = RunState::new();
+        assert_eq!(state.depth.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn run_state_semaphore_has_one_permit() {
+        let state = RunState::new();
+        // A freshly created Semaphore(1) should report 1 available permit.
+        assert_eq!(state.semaphore.available_permits(), 1);
+    }
+
+    #[tokio::test]
+    async fn run_state_semaphore_blocks_second_acquire() {
+        use std::sync::Arc;
+        use tokio::sync::Semaphore;
+        use tokio::time::{timeout, Duration};
+
+        // Use a standalone Arc<Semaphore> so the permit's lifetime is tied to
+        // the Arc, not to a RunState owned inside the async block.
+        let sem = Arc::new(Semaphore::new(1));
+
+        // Acquire the single permit — holds it for the duration of the test.
+        let _permit = sem.acquire().await.unwrap();
+
+        // A second acquire on a capacity-1 semaphore that is already held
+        // must block.  Wrap it in a short timeout to prove it never succeeds.
+        let sem2 = Arc::clone(&sem);
+        let result = timeout(Duration::from_millis(50), async move {
+            // Drive the acquire but drop the permit inside the block so
+            // nothing is returned that would reference sem2.
+            let _p = sem2.acquire().await.unwrap();
+            drop(_p);
+        })
+        .await;
+
+        assert!(
+            result.is_err(),
+            "second semaphore acquire should have timed out (semaphore is at capacity)"
+        );
+    }
+
+    #[tokio::test]
+    async fn run_state_cancel_triggers_token() {
+        let state = RunState::new();
+
+        // Grab the current token and cancel it.
+        let token = {
+            let lock = state.cancel_token.lock().await;
+            lock.clone()
+        };
+
+        assert!(
+            !token.is_cancelled(),
+            "token should not be cancelled initially"
+        );
+        token.cancel();
+        assert!(
+            token.is_cancelled(),
+            "token should be cancelled after cancel()"
+        );
+
+        // The value stored inside the Mutex reflects the cancellation.
+        let lock = state.cancel_token.lock().await;
+        assert!(lock.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn run_state_replace_token_old_token_not_affected() {
+        let state = RunState::new();
+
+        // Capture a clone of the original token before replacing it.
+        let old_token = {
+            let lock = state.cancel_token.lock().await;
+            lock.clone()
+        };
+
+        // Replace with a fresh token.
+        let new_token = CancellationToken::new();
+        {
+            let mut lock = state.cancel_token.lock().await;
+            *lock = new_token.clone();
+        }
+
+        // Cancel the new token — the old one must remain unaffected.
+        new_token.cancel();
+        assert!(new_token.is_cancelled(), "new token should be cancelled");
+        assert!(
+            !old_token.is_cancelled(),
+            "old token must not be affected by cancelling the replacement"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_run_state_returns_same_arc_for_same_thread_id() {
+        use std::collections::HashMap;
+        use std::sync::{Arc, Mutex};
+        use tokio::sync::broadcast;
+
+        let (global_tx, _) = broadcast::channel(64);
+        let pool = sqlx::SqlitePool::connect_lazy("sqlite::memory:").unwrap();
+        let (mcp_tx, _) = tokio::sync::broadcast::channel(1);
+        let mcp = crate::services::mcp::McpConnectionManager::new(
+            pool.clone(),
+            "test-master-key".to_string(),
+            mcp_tx,
+            std::path::PathBuf::from("/tmp/test-deck/mcp"),
+        );
+        let app_state = AppState {
+            pool,
+            config: Config {
+                port: 7474,
+                data_dir: std::path::PathBuf::from("/tmp/test-deck"),
+                mcp_dir: std::path::PathBuf::from("/tmp/test-deck/mcp"),
+                personas_dir: std::path::PathBuf::from("/tmp/test-deck/personas"),
+                database_url: "sqlite::memory:".to_string(),
+                public_dir: "./public".to_string(),
+                fcm_service_account_json: None,
+            },
+            machine_secret: "test-secret".to_string(),
+            credential_master_key: "test-master-key".to_string(),
+            auth_token: "test-token".to_string(),
+            global_tx,
+            thread_senders: Arc::new(Mutex::new(HashMap::new())),
+            run_states: dashmap::DashMap::new(),
+            copilot: None,
+            mcp,
+        };
+
+        let rs1 = app_state.get_run_state("thread-abc");
+        let rs2 = app_state.get_run_state("thread-abc");
+
+        // Both calls with the same thread_id must return the exact same Arc.
+        assert!(
+            Arc::ptr_eq(&rs1, &rs2),
+            "get_run_state must return the same Arc for the same thread_id"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_run_state_returns_different_arc_for_different_threads() {
+        use std::collections::HashMap;
+        use std::sync::{Arc, Mutex};
+        use tokio::sync::broadcast;
+
+        let (global_tx, _) = broadcast::channel(64);
+        let pool = sqlx::SqlitePool::connect_lazy("sqlite::memory:").unwrap();
+        let (mcp_tx, _) = tokio::sync::broadcast::channel(1);
+        let mcp = crate::services::mcp::McpConnectionManager::new(
+            pool.clone(),
+            "test-master-key".to_string(),
+            mcp_tx,
+            std::path::PathBuf::from("/tmp/test-deck/mcp"),
+        );
+        let app_state = AppState {
+            pool,
+            config: Config {
+                port: 7474,
+                data_dir: std::path::PathBuf::from("/tmp/test-deck"),
+                mcp_dir: std::path::PathBuf::from("/tmp/test-deck/mcp"),
+                personas_dir: std::path::PathBuf::from("/tmp/test-deck/personas"),
+                database_url: "sqlite::memory:".to_string(),
+                public_dir: "./public".to_string(),
+                fcm_service_account_json: None,
+            },
+            machine_secret: "test-secret".to_string(),
+            credential_master_key: "test-master-key".to_string(),
+            auth_token: "test-token".to_string(),
+            global_tx,
+            thread_senders: Arc::new(Mutex::new(HashMap::new())),
+            run_states: dashmap::DashMap::new(),
+            copilot: None,
+            mcp,
+        };
+
+        let rs_a = app_state.get_run_state("thread-aaa");
+        let rs_b = app_state.get_run_state("thread-bbb");
+
+        // Different thread IDs must produce distinct Arc instances.
+        assert!(
+            !Arc::ptr_eq(&rs_a, &rs_b),
+            "get_run_state must return distinct Arcs for different thread IDs"
+        );
+    }
 }

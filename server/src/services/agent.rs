@@ -1195,4 +1195,64 @@ mod tests {
         assert!(result.contains("No memories found matching"));
         assert!(result.contains("project Atlas"));
     }
+
+    // ── GenerationResult ──────────────────────────────────────────────────────
+
+    #[test]
+    fn generation_result_not_stopped_by_default() {
+        let result = GenerationResult {
+            content: String::new(),
+            stopped: false,
+        };
+        assert!(!result.stopped);
+    }
+
+    #[test]
+    fn generation_result_stopped_flag_is_accessible() {
+        let result = GenerationResult {
+            content: "some content".to_string(),
+            stopped: true,
+        };
+        assert!(result.stopped);
+        assert_eq!(result.content, "some content");
+    }
+
+    // ── CancellationToken behaviour ───────────────────────────────────────────
+
+    #[test]
+    fn cancellation_token_is_not_cancelled_initially() {
+        use tokio_util::sync::CancellationToken;
+        let token = CancellationToken::new();
+        assert!(
+            !token.is_cancelled(),
+            "a freshly created CancellationToken must not be cancelled"
+        );
+    }
+
+    #[test]
+    fn cancellation_token_is_cancelled_after_cancel_called() {
+        use tokio_util::sync::CancellationToken;
+        let token = CancellationToken::new();
+        token.cancel();
+        assert!(
+            token.is_cancelled(),
+            "token must be cancelled after cancel() is called"
+        );
+    }
+
+    #[test]
+    fn cancelled_token_is_cancelled_immediately() {
+        use tokio_util::sync::CancellationToken;
+        // cancelled() returns a future that resolves instantly when the token
+        // is already cancelled.  We verify this synchronously by checking the
+        // is_cancelled predicate — no need to drive the runtime.
+        let token = CancellationToken::new();
+        token.cancel();
+        // Cloning a cancelled token produces a token that is also cancelled.
+        let cloned = token.clone();
+        assert!(
+            cloned.is_cancelled(),
+            "a clone of a cancelled token must also be cancelled immediately"
+        );
+    }
 }

@@ -235,3 +235,222 @@ pub async fn notify(
         }
     })))
 }
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    // ── from_str ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn unknown_event_type_returns_none() {
+        assert!(SystemEventType::from_str("totally_unknown").is_none());
+        assert!(SystemEventType::from_str("").is_none());
+        assert!(SystemEventType::from_str("MODEL_SWITCHED").is_none()); // case-sensitive
+    }
+
+    #[test]
+    fn all_known_event_types_parse_from_str() {
+        assert_eq!(
+            SystemEventType::from_str("model_switched"),
+            Some(SystemEventType::ModelSwitched)
+        );
+        assert_eq!(
+            SystemEventType::from_str("provider_switched"),
+            Some(SystemEventType::ProviderSwitched)
+        );
+        assert_eq!(
+            SystemEventType::from_str("mcp_server_attached"),
+            Some(SystemEventType::McpServerAttached)
+        );
+        assert_eq!(
+            SystemEventType::from_str("mcp_server_detached"),
+            Some(SystemEventType::McpServerDetached)
+        );
+        assert_eq!(
+            SystemEventType::from_str("addendum_updated"),
+            Some(SystemEventType::AddendumUpdated)
+        );
+        assert_eq!(
+            SystemEventType::from_str("routine_fired"),
+            Some(SystemEventType::RoutineFired)
+        );
+    }
+
+    // ── persist / trigger flags ───────────────────────────────────────────────
+
+    #[test]
+    fn model_switched_has_persist_true_trigger_false() {
+        let et = SystemEventType::ModelSwitched;
+        assert!(et.persist());
+        assert!(!et.trigger());
+    }
+
+    #[test]
+    fn provider_switched_has_persist_true_trigger_false() {
+        let et = SystemEventType::ProviderSwitched;
+        assert!(et.persist());
+        assert!(!et.trigger());
+    }
+
+    #[test]
+    fn mcp_server_attached_has_persist_true_trigger_false() {
+        let et = SystemEventType::McpServerAttached;
+        assert!(et.persist());
+        assert!(!et.trigger());
+    }
+
+    #[test]
+    fn mcp_server_detached_has_persist_true_trigger_false() {
+        let et = SystemEventType::McpServerDetached;
+        assert!(et.persist());
+        assert!(!et.trigger());
+    }
+
+    #[test]
+    fn addendum_updated_has_persist_true_trigger_false() {
+        let et = SystemEventType::AddendumUpdated;
+        assert!(et.persist());
+        assert!(!et.trigger());
+    }
+
+    #[test]
+    fn routine_fired_has_persist_false_trigger_true() {
+        let et = SystemEventType::RoutineFired;
+        assert!(!et.persist());
+        assert!(et.trigger());
+    }
+
+    #[test]
+    fn all_registered_types_have_at_least_one_flag_true() {
+        let all = [
+            SystemEventType::ModelSwitched,
+            SystemEventType::ProviderSwitched,
+            SystemEventType::McpServerAttached,
+            SystemEventType::McpServerDetached,
+            SystemEventType::AddendumUpdated,
+            SystemEventType::RoutineFired,
+        ];
+        for et in &all {
+            assert!(
+                et.persist() || et.trigger(),
+                "{:?} has both persist=false and trigger=false — every type must have at least one flag set",
+                et
+            );
+        }
+    }
+
+    // ── as_str roundtrip ──────────────────────────────────────────────────────
+
+    #[test]
+    fn as_str_roundtrips_for_all_variants() {
+        let all = [
+            SystemEventType::ModelSwitched,
+            SystemEventType::ProviderSwitched,
+            SystemEventType::McpServerAttached,
+            SystemEventType::McpServerDetached,
+            SystemEventType::AddendumUpdated,
+            SystemEventType::RoutineFired,
+        ];
+        for et in &all {
+            let s = et.as_str();
+            let parsed = SystemEventType::from_str(s).unwrap_or_else(|| {
+                panic!(
+                    "as_str() produced '{}' which does not round-trip via from_str",
+                    s
+                )
+            });
+            assert_eq!(*et, parsed, "roundtrip failed for {:?}", et);
+        }
+    }
+
+    // ── format_content ────────────────────────────────────────────────────────
+
+    #[test]
+    fn model_switched_content_includes_provider_and_model() {
+        let payload = Some(json!({
+            "provider_name": "OpenAI",
+            "model_name": "gpt-4o"
+        }));
+        let content = SystemEventType::ModelSwitched.format_content(&payload);
+        assert!(
+            content.contains("OpenAI"),
+            "expected provider name in content: {}",
+            content
+        );
+        assert!(
+            content.contains("gpt-4o"),
+            "expected model name in content: {}",
+            content
+        );
+    }
+
+    #[test]
+    fn model_switched_content_uses_unknown_when_payload_absent() {
+        let content = SystemEventType::ModelSwitched.format_content(&None);
+        assert!(
+            content.contains("unknown"),
+            "expected 'unknown' placeholder when payload absent: {}",
+            content
+        );
+    }
+
+    #[test]
+    fn provider_switched_content_includes_provider_name() {
+        let payload = Some(json!({ "provider_name": "Anthropic" }));
+        let content = SystemEventType::ProviderSwitched.format_content(&payload);
+        assert!(
+            content.contains("Anthropic"),
+            "expected provider name in content: {}",
+            content
+        );
+    }
+
+    #[test]
+    fn mcp_server_attached_content_includes_server_name() {
+        let payload = Some(json!({ "name": "filesystem" }));
+        let content = SystemEventType::McpServerAttached.format_content(&payload);
+        assert!(
+            content.contains("filesystem"),
+            "expected server name in content: {}",
+            content
+        );
+    }
+
+    #[test]
+    fn mcp_server_detached_content_includes_server_name() {
+        let payload = Some(json!({ "name": "brave-search" }));
+        let content = SystemEventType::McpServerDetached.format_content(&payload);
+        assert!(
+            content.contains("brave-search"),
+            "expected server name in content: {}",
+            content
+        );
+    }
+
+    #[test]
+    fn addendum_updated_content_is_fixed_string() {
+        // The content should be the same fixed string regardless of payload.
+        let with_payload =
+            SystemEventType::AddendumUpdated.format_content(&Some(json!({ "anything": true })));
+        let without_payload = SystemEventType::AddendumUpdated.format_content(&None);
+        assert_eq!(with_payload, without_payload);
+        assert!(!with_payload.is_empty(), "fixed string should not be empty");
+    }
+
+    #[test]
+    fn routine_fired_content_is_payload_string() {
+        let payload = Some(Value::String("Run the daily report".to_string()));
+        let content = SystemEventType::RoutineFired.format_content(&payload);
+        assert_eq!(content, "Run the daily report");
+    }
+
+    #[test]
+    fn routine_fired_content_is_empty_when_no_payload() {
+        let content = SystemEventType::RoutineFired.format_content(&None);
+        assert_eq!(content, "");
+    }
+}
