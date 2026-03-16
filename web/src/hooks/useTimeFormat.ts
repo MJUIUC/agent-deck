@@ -12,7 +12,11 @@ export function formatThreadTime(isoString: string): string {
   if (isNaN(date.getTime())) return "";
 
   const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfToday = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+  );
   const startOfYesterday = new Date(startOfToday.getTime() - 86400000);
   const sevenDaysAgo = new Date(startOfToday.getTime() - 6 * 86400000);
 
@@ -55,13 +59,21 @@ export function formatDateDivider(isoString: string): string {
   if (isNaN(date.getTime())) return "";
 
   const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfToday = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+  );
   const startOfYesterday = new Date(startOfToday.getTime() - 86400000);
 
   if (date >= startOfToday) return "Today";
   if (date >= startOfYesterday) return "Yesterday";
 
-  return date.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+  return date.toLocaleDateString([], {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
 }
 
 /**
@@ -69,16 +81,23 @@ export function formatDateDivider(isoString: string): string {
  * Returns an array of { dateLabel, items } groups, oldest first.
  */
 export function groupByDate<T extends { created_at: string }>(
-  items: T[]
-): { dateLabel: string; items: T[] }[] {
-  const groups: { dateLabel: string; items: T[] }[] = [];
-  let currentLabel = "";
+  items: T[],
+): { dateLabel: string; dateKey: string; items: T[] }[] {
+  const groups: { dateLabel: string; dateKey: string; items: T[] }[] = [];
+  let currentKey = "";
 
   for (const item of items) {
     const label = formatDateDivider(item.created_at);
-    if (label !== currentLabel) {
-      currentLabel = label;
-      groups.push({ dateLabel: label, items: [] });
+    // Use the calendar date string (YYYY-MM-DD) as the stable group key so
+    // that two groups whose human-readable label happens to be the same string
+    // (e.g. both "Today" across a midnight boundary) still get distinct keys.
+    const d = new Date(item.created_at);
+    const key = isNaN(d.getTime())
+      ? label
+      : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    if (key !== currentKey) {
+      currentKey = key;
+      groups.push({ dateLabel: label, dateKey: key, items: [] });
     }
     groups[groups.length - 1].items.push(item);
   }
@@ -98,6 +117,6 @@ export function useTimeFormat() {
       formatDateDivider,
       groupByDate,
     }),
-    []
+    [],
   );
 }

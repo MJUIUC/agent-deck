@@ -158,8 +158,8 @@ export function ChatView({
           </div>
         ) : (
           <>
-            {grouped.map(({ dateLabel, items }) => (
-              <div key={dateLabel}>
+            {grouped.map(({ dateLabel, dateKey, items }) => (
+              <div key={dateKey}>
                 {/* Date divider */}
                 <div className="date-divider">{dateLabel}</div>
 
