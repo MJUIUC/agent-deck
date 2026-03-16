@@ -215,22 +215,6 @@ async fn run_inner(
     // Build the concrete provider instance.
     let provider: Box<dyn LlmProvider> = build_provider(&state, &provider_row)?;
 
-    // Quick health check.
-    if !provider.is_healthy().await {
-        state.send_thread_event(
-            thread_id,
-            ThreadEvent::Error {
-                code: "PROVIDER_UNAVAILABLE".to_string(),
-                message: format!(
-                    "Provider '{}' is not reachable. \
-                     Check your API key and provider settings, or switch to a different model.",
-                    provider_row.name
-                ),
-            },
-        );
-        return Ok(());
-    }
-
     // ── 3. Load visible message history for this thread ────────────────────────
     let history_rows: Vec<(String, String, String)> = sqlx::query_as(
         "SELECT role, content, visibility
