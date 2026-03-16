@@ -58,7 +58,62 @@ pub async fn list(
     .fetch_all(&state.pool)
     .await?;
 
-    Ok((StatusCode::OK, Json(json!({ "data": threads }))))
+    // Fetch the last visible message content for each thread in one query,
+    // then merge into the response. Using a separate query with GROUP BY is
+    // simpler than a correlated subquery and works well with SQLx's type system.
+    let previews: Vec<(String, String)> = sqlx::query_as(
+        "SELECT thread_id, content
+         FROM messages
+         WHERE (thread_id, created_at) IN (
+             SELECT thread_id, MAX(created_at)
+             FROM messages
+             WHERE thread_id IN (
+                 SELECT id FROM threads WHERE user_id = ? AND status = ?
+             )
+             AND visibility = 'visible'
+             AND role IN ('user', 'assistant')
+             GROUP BY thread_id
+         )",
+    )
+    .bind(&user_id)
+    .bind(status)
+    .fetch_all(&state.pool)
+    .await
+    .unwrap_or_default();
+
+    let preview_map: std::collections::HashMap<String, String> = previews
+        .into_iter()
+        .map(|(tid, content)| {
+            // Truncate to 120 chars, collapse newlines to spaces
+            let truncated = content
+                .lines()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .chars()
+                .take(120)
+                .collect::<String>();
+            (tid, truncated)
+        })
+        .collect();
+
+    let response: Vec<serde_json::Value> = threads
+        .into_iter()
+        .map(|t| {
+            let preview = preview_map.get(&t.id).cloned();
+            let mut v = serde_json::to_value(&t).unwrap_or(serde_json::Value::Null);
+            if let serde_json::Value::Object(ref mut map) = v {
+                map.insert(
+                    "last_message_preview".to_string(),
+                    preview
+                        .map(serde_json::Value::String)
+                        .unwrap_or(serde_json::Value::Null),
+                );
+            }
+            v
+        })
+        .collect();
+
+    Ok((StatusCode::OK, Json(json!({ "data": response }))))
 }
 
 /// GET /api/threads/:id
