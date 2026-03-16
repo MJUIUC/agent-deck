@@ -208,30 +208,31 @@ pub async fn send(
     let tid = thread_id.clone();
     let content = payload.content.clone();
 
+    // Create and store the cancellation token BEFORE spawning so that
+    // cancel_run always has a valid token to trigger, even if the spawned
+    // task hasn't started yet.  The token is a child of a fresh parent so
+    // that cancelling it does not affect any subsequent run's token.
+    let new_token = CancellationToken::new();
+    {
+        let mut lock = run_state.cancel_token.lock().await;
+        *lock = new_token.clone();
+    }
+
     tokio::spawn(async move {
         // Acquire semaphore — queues behind any in-progress run on this thread.
-        // This must happen before wait_for_subscriber so that:
-        //   1. The SSE subscriber check uses the freshest possible connection
-        //      state (after any preceding run has finished and the client may
-        //      have briefly cycled its EventSource).
-        //   2. The cancel token is not replaced until this run is actually
-        //      next-in-line, preventing a queued task from clobbering the
-        //      active run's token while it is still executing.
+        // The token was already stored above, so cancel_run can reach it
+        // at any point from here on.
         let _permit = run_state.semaphore.acquire().await.unwrap();
 
-        // Create a fresh cancellation token for this run now that we hold
-        // the semaphore and are guaranteed to be the next active run.
-        let new_token = CancellationToken::new();
-        {
-            let mut lock = run_state.cancel_token.lock().await;
-            *lock = new_token.clone();
+        // If cancellation arrived while we were queued behind another run,
+        // bail out immediately without starting the agent.
+        if new_token.is_cancelled() {
+            run_state.depth.fetch_sub(1, Ordering::SeqCst);
+            return;
         }
 
         // Wait for the SSE subscriber immediately before streaming begins so
-        // tokens are not fired into the void.  The subscriber is checked here
-        // (after acquiring the semaphore) so the wait reflects the actual
-        // connection state at the moment generation starts, not the moment the
-        // message was sent.
+        // tokens are not fired into the void.
         state_clone
             .wait_for_subscriber(&tid, std::time::Duration::from_secs(3))
             .await;
