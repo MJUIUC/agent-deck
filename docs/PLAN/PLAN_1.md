@@ -369,7 +369,7 @@ CREATE TABLE providers (
   name         TEXT NOT NULL,             -- e.g. "GitHub Copilot", "OpenAI", "Anthropic"
   kind         TEXT NOT NULL,             -- 'copilot' | 'openai' | 'anthropic' | 'custom'
   base_url     TEXT NOT NULL,             -- e.g. "http://localhost:4141/v1"
-  api_key      TEXT,                      -- encrypted at rest, null for copilot (uses proxy auth)
+  api_key      TEXT,                      -- DEPRECATED: migrated to credentials table in Story 4.1; always null post-migration. Retained to avoid breaking the migration chain. Key resolution goes through credential store. (uses proxy auth)
   enabled      INTEGER NOT NULL DEFAULT 1,
   created_at   TEXT NOT NULL DEFAULT (datetime('now')),
   FOREIGN KEY (user_id) REFERENCES users(id)
@@ -634,4 +634,3 @@ CREATE TABLE app_config (
 ```
 
 ---
-
