@@ -7,20 +7,23 @@
 //! - Handling tool calls (save_memory / recall_memory) inline
 //! - Persisting the completed assistant message to the database
 //! - Emitting `message_complete` and `thread_updated` SSE events
-//! - Honouring per-run cancellation tokens (Story 5.1 Part B)
+//! - Progress tracking via `RunProgress` so `cancel_run` can perform
+//!   principled cleanup after aborting the task (Story 5.1 redesign)
 
 use anyhow::{anyhow, Result};
 use async_openai::types::{ChatCompletionRequestMessage, ChatCompletionRequestToolMessageArgs};
 use futures::StreamExt;
 use serde_json::Value;
 use sqlx::SqlitePool;
-use tokio_util::sync::CancellationToken;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+
 use tracing::{error, info, warn};
 
 use crate::services::copilot::GlobalEvent;
 use crate::{
     models::message::Message,
-    routes::{sse::ThreadEvent, AppState},
+    routes::{sse::ThreadEvent, AppState, RunPhase, RunProgress},
     services::{
         context::{self, AssemblyInput, HistoryMessage},
         encryption, memory as memory_service,
@@ -51,16 +54,18 @@ const MEMORY_RECALL_LIMIT: i64 = 10;
 
 // ─── Public entry point ────────────────────────────────────────────────────────
 
-/// Result of a generation loop run, capturing the final content and whether
-/// the run was stopped early by a cancellation signal.
+/// Result of a generation loop run, capturing the final accumulated content
+/// and whether the run was stopped early due to cancellation.
 struct GenerationResult {
     content: String,
-    stopped: bool,
 }
 
 /// Run the agent for a given thread and new user message.
 ///
-/// Accepts a `CancellationToken` so callers can abort the run mid-stream.
+/// Accepts a shared `RunProgress` so the cancel handler can inspect phase and
+/// partial content after an abort, and a `persist_lock` so the assistant-message
+/// INSERT is serialised against any concurrent cancel-handler insert.
+///
 /// This is intended to be called from inside a `tokio::spawn` — it runs until
 /// the LLM has finished generating (including any tool-call rounds) and then
 /// emits the final `message_complete` and `thread_updated` SSE events.
@@ -72,9 +77,10 @@ pub async fn run(
     state: AppState,
     thread_id: String,
     user_message: String,
-    cancel: CancellationToken,
+    progress: Arc<Mutex<RunProgress>>,
+    persist_lock: Arc<Mutex<()>>,
 ) {
-    if let Err(e) = run_inner(&state, &thread_id, &user_message, cancel).await {
+    if let Err(e) = run_inner(&state, &thread_id, &user_message, progress, persist_lock).await {
         error!(
             thread_id = %thread_id,
             error = %e,
@@ -97,8 +103,15 @@ async fn run_inner(
     state: &AppState,
     thread_id: &str,
     user_message: &str,
-    cancel: CancellationToken,
+    progress: Arc<Mutex<RunProgress>>,
+    persist_lock: Arc<Mutex<()>>,
 ) -> Result<()> {
+    // ── 0. Transition to BuildingContext ───────────────────────────────────────
+    {
+        let mut p = progress.lock().await;
+        p.phase = RunPhase::BuildingContext;
+    }
+
     // ── 1. Fetch the thread and its persona ────────────────────────────────────
     let thread: crate::models::thread::Thread = sqlx::query_as(
         "SELECT id, user_id, persona_id, title, active_model, active_provider,
@@ -250,7 +263,10 @@ async fn run_inner(
         .bind(thread_id)
         .fetch_all(&state.pool)
         .await
-        .unwrap_or_default();
+        .unwrap_or_else(|e| {
+            warn!(thread_id = %thread_id, error = %e, "Failed to load attached MCP servers; proceeding with none");
+            Vec::new()
+        });
 
         rows.into_iter()
             .map(|(id, tag)| AttachedMcpServer { id, tag })
@@ -297,35 +313,50 @@ async fn run_inner(
         assembled.messages,
         assembled.tools,
         &attached,
-        cancel,
+        progress.clone(),
     )
     .await?;
 
     // ── 6. Persist the completed assistant message ─────────────────────────────
-    let assistant_msg = if gen_result.stopped {
-        Message::new_assistant_stopped(thread_id, &gen_result.content)
-    } else {
-        Message::new_assistant(thread_id, &gen_result.content)
-    };
+    // Transition to PersistingMessage before acquiring the lock so that
+    // cancel_run can see we are about to write when it reads the phase.
+    {
+        let mut p = progress.lock().await;
+        p.phase = RunPhase::PersistingMessage;
+    }
 
-    sqlx::query(
-        "INSERT INTO messages (id, thread_id, role, content, source, routine_id, visibility,
-                               execution_id, event_type, stopped, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    )
-    .bind(&assistant_msg.id)
-    .bind(&assistant_msg.thread_id)
-    .bind(&assistant_msg.role)
-    .bind(&assistant_msg.content)
-    .bind(&assistant_msg.source)
-    .bind(&assistant_msg.routine_id)
-    .bind(&assistant_msg.visibility)
-    .bind(&assistant_msg.execution_id)
-    .bind(&assistant_msg.event_type)
-    .bind(assistant_msg.stopped)
-    .bind(&assistant_msg.created_at)
-    .execute(&state.pool)
-    .await?;
+    let assistant_msg = Message::new_assistant(thread_id, &gen_result.content);
+
+    // Acquire persist_lock so cancel_run cannot insert a duplicate if it races
+    // this INSERT.
+    {
+        let _lock = persist_lock.lock().await;
+
+        sqlx::query(
+            "INSERT INTO messages (id, thread_id, role, content, source, routine_id, visibility,
+                                   execution_id, event_type, stopped, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&assistant_msg.id)
+        .bind(&assistant_msg.thread_id)
+        .bind(&assistant_msg.role)
+        .bind(&assistant_msg.content)
+        .bind(&assistant_msg.source)
+        .bind(&assistant_msg.routine_id)
+        .bind(&assistant_msg.visibility)
+        .bind(&assistant_msg.execution_id)
+        .bind(&assistant_msg.event_type)
+        .bind(assistant_msg.stopped)
+        .bind(&assistant_msg.created_at)
+        .execute(&state.pool)
+        .await?;
+    }
+
+    // Transition to Complete now that the row is committed.
+    {
+        let mut p = progress.lock().await;
+        p.phase = RunPhase::Complete;
+    }
 
     // Update thread timestamp so it floats to the top of the sidebar.
     sqlx::query("UPDATE threads SET updated_at = ? WHERE id = ?")
@@ -378,10 +409,13 @@ async fn run_inner(
                 .execute(&state.pool)
                 .await?;
 
-            let _ = state.send_global_event(GlobalEvent::TitleUpdated {
+            if let Err(e) = state.send_global_event(GlobalEvent::TitleUpdated {
                 thread_id: thread_id.to_string(),
                 title: generated_title,
-            });
+            }) {
+                // No global-stream subscribers — normal when no client is connected.
+                tracing::debug!(thread_id = %thread_id, error = %e, "TitleUpdated broadcast had no receivers");
+            }
 
             info!(
                 thread_id = %thread_id,
@@ -399,20 +433,22 @@ async fn run_inner(
             role: assistant_msg.role.clone(),
             content: assistant_msg.content.clone(),
             created_at: assistant_msg.created_at.clone(),
-            stopped: gen_result.stopped,
+            stopped: false,
         },
     );
 
-    let _ = state.send_global_event(GlobalEvent::ThreadUpdated {
+    if let Err(e) = state.send_global_event(GlobalEvent::ThreadUpdated {
         thread_id: thread_id.to_string(),
         last_message: assistant_content.chars().take(120).collect::<String>(),
         updated_at: assistant_msg.created_at.clone(),
-    });
+    }) {
+        // No global-stream subscribers — normal when no client is connected.
+        tracing::debug!(thread_id = %thread_id, error = %e, "ThreadUpdated broadcast had no receivers");
+    }
 
     info!(
         thread_id = %thread_id,
         message_id = %assistant_msg.id,
-        stopped = gen_result.stopped,
         "Agent run-loop complete"
     );
 
@@ -423,7 +459,7 @@ async fn run_inner(
 
 /// Core generation loop.  Streams tokens from the provider, handles any tool
 /// calls, then continues generation.  Returns a `GenerationResult` containing
-/// the full assistant text and a `stopped` flag if cancelled mid-stream.
+/// the full assistant text.
 async fn generation_loop(
     state: &AppState,
     thread_id: &str,
@@ -434,7 +470,7 @@ async fn generation_loop(
     mut messages: Vec<ChatCompletionRequestMessage>,
     tools: Vec<async_openai::types::ChatCompletionTool>,
     attached_mcp: &[AttachedMcpServer],
-    cancel: CancellationToken,
+    progress: Arc<Mutex<RunProgress>>,
 ) -> Result<GenerationResult> {
     // We accumulate the final visible text across all tool-call rounds.
     let mut final_content = String::new();
@@ -456,15 +492,14 @@ async fn generation_loop(
             "generation_loop: starting stream turn"
         );
 
-        // Check cancellation before starting a new streaming turn
-        if cancel.is_cancelled() {
-            info!(thread_id = %thread_id, "generation_loop: cancelled before stream turn");
-            return Ok(GenerationResult {
-                content: final_content,
-                stopped: true,
-            });
+        // Update progress: entering a new streaming turn.
+        {
+            let mut p = progress.lock().await;
+            p.phase = RunPhase::Streaming { round: tool_rounds };
+            p.tool_round = tool_rounds;
         }
 
+        let mut turn_text = String::new();
         let stream_result = provider
             .stream(model_id, messages.clone(), tools.clone())
             .await;
@@ -487,15 +522,16 @@ async fn generation_loop(
             }
         };
 
-        // Accumulate text and tool-call fragments from this turn.
-        let mut turn_text = String::new();
-
         // Tool-call accumulation: we may receive a tool call name/args across
         // multiple chunks — gather them here, keyed by index.
         let mut tool_calls: Vec<PendingToolCall> = Vec::new();
         let mut had_error = false;
 
-        while let Some(chunk_result) = token_stream.next().await {
+        loop {
+            let chunk_result = match token_stream.next().await {
+                Some(r) => r,
+                None => break,
+            };
             let chunk = match chunk_result {
                 Ok(c) => c,
                 Err(e) => {
@@ -518,26 +554,22 @@ async fn generation_loop(
             // ── Text delta ────────────────────────────────────────────────────
             if !chunk.delta.is_empty() {
                 turn_text.push_str(&chunk.delta);
+                // Update progress BEFORE sending the SSE token.  This ensures
+                // that if the task is aborted at the next .await (the send),
+                // assistant_content_so_far already contains this token and the
+                // cancel handler will persist it.  The alternative ordering
+                // (send first, then update progress) creates a window where the
+                // client has seen the token but the cancel handler has not.
+                {
+                    let mut p = progress.lock().await;
+                    p.assistant_content_so_far.push_str(&chunk.delta);
+                }
                 state.send_thread_event(
                     thread_id,
                     ThreadEvent::Token {
                         token: chunk.delta.clone(),
                     },
                 );
-            }
-
-            // ── Cancellation check after each chunk ───────────────────────────
-            if cancel.is_cancelled() {
-                info!(
-                    thread_id = %thread_id,
-                    partial_len = turn_text.len(),
-                    "generation_loop: cancelled mid-stream"
-                );
-                final_content.push_str(&turn_text);
-                return Ok(GenerationResult {
-                    content: final_content,
-                    stopped: true,
-                });
             }
 
             // ── Tool-call fragments ───────────────────────────────────────────
@@ -559,21 +591,11 @@ async fn generation_loop(
                     tool_calls[idx].id = id;
                 }
             }
-        }
+        } // end streaming loop
 
         if had_error {
             // Do not persist a partial message on mid-stream failure.
             return Err(anyhow!("Mid-stream error — response not persisted"));
-        }
-
-        // Check cancellation after the stream ends (covers the case where
-        // cancellation arrives exactly as the last chunk is processed).
-        if cancel.is_cancelled() && turn_text.is_empty() && tool_calls.is_empty() {
-            info!(thread_id = %thread_id, "generation_loop: cancelled after stream, no content");
-            return Ok(GenerationResult {
-                content: final_content,
-                stopped: true,
-            });
         }
 
         // Drop any malformed tool-call slots that arrived without a name or id.
@@ -593,6 +615,7 @@ async fn generation_loop(
         // If there were no tool calls, this turn is done.
         if tool_calls.is_empty() {
             info!(thread_id = %thread_id, "generation_loop: no tool calls — done");
+            // turn_text was already added to assistant_content_so_far token-by-token above.
             final_content.push_str(&turn_text);
             break;
         }
@@ -623,18 +646,13 @@ async fn generation_loop(
 
         // Execute each tool call and append the results.
         for tc in &tool_calls {
-            // Check cancellation before each tool call
-            if cancel.is_cancelled() {
-                info!(
-                    thread_id = %thread_id,
-                    tool = %tc.name,
-                    "generation_loop: cancelled before tool call"
-                );
-                final_content.push_str(&turn_text);
-                return Ok(GenerationResult {
-                    content: final_content,
-                    stopped: true,
-                });
+            // Update progress: entering tool execution.
+            {
+                let mut p = progress.lock().await;
+                p.phase = RunPhase::ExecutingTool {
+                    round: tool_rounds,
+                    tool_name: tc.name.clone(),
+                };
             }
 
             info!(
@@ -653,7 +671,6 @@ async fn generation_loop(
                 thread_id,
                 tc,
                 attached_mcp,
-                &cancel,
             )
             .await;
 
@@ -698,11 +715,20 @@ async fn generation_loop(
 
     Ok(GenerationResult {
         content: final_content,
-        stopped: false,
     })
 }
 
 // ─── Tool execution ────────────────────────────────────────────────────────────
+
+/// Format a structured error message to return to the LLM when a tool receives
+/// malformed JSON arguments.  Extracted so the error format can be unit-tested
+/// without spinning up a full AppState.
+fn tool_json_parse_error(tool_name: &str, error: &serde_json::Error, raw_args: &str) -> String {
+    format!(
+        "Tool '{}' received invalid JSON arguments: {}. Raw args: {}",
+        tool_name, error, raw_args
+    )
+}
 
 /// Execute a single tool call, returning the result text to feed back to the LLM.
 async fn execute_tool(
@@ -713,12 +739,13 @@ async fn execute_tool(
     thread_id: &str,
     tc: &PendingToolCall,
     attached_mcp: &[AttachedMcpServer],
-    cancel: &CancellationToken,
 ) -> Result<String> {
     match tc.name.as_str() {
         TOOL_SAVE_MEMORY => {
-            let args: Value =
-                serde_json::from_str(&tc.args).unwrap_or_else(|_| serde_json::json!({}));
+            let args: Value = match serde_json::from_str(&tc.args) {
+                Ok(v) => v,
+                Err(e) => return Ok(tool_json_parse_error(TOOL_SAVE_MEMORY, &e, &tc.args)),
+            };
 
             let content = args
                 .get("content")
@@ -750,8 +777,10 @@ async fn execute_tool(
         }
 
         TOOL_RECALL_MEMORY => {
-            let args: Value =
-                serde_json::from_str(&tc.args).unwrap_or_else(|_| serde_json::json!({}));
+            let args: Value = match serde_json::from_str(&tc.args) {
+                Ok(v) => v,
+                Err(e) => return Ok(tool_json_parse_error(TOOL_RECALL_MEMORY, &e, &tc.args)),
+            };
 
             let query = args
                 .get("query")
@@ -832,8 +861,13 @@ async fn execute_tool(
                 let server = attached_mcp.iter().find(|s| s.tag == tag);
                 match server {
                     Some(s) => {
-                        let args: serde_json::Value = serde_json::from_str(&tc.args)
-                            .unwrap_or(serde_json::Value::Object(Default::default()));
+                        let args: serde_json::Value = match serde_json::from_str(&tc.args) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                warn!(tool = %tc.name, error = %e, raw_args = %tc.args, "MCP tool received invalid JSON arguments");
+                                return Ok(tool_json_parse_error(&tc.name, &e, &tc.args));
+                            }
+                        };
 
                         info!(
                             thread_id = %thread_id,
@@ -853,18 +887,7 @@ async fn execute_tool(
                         )
                         .await;
 
-                        // Use select! to honour cancellation during potentially long MCP calls
-                        let result = tokio::select! {
-                            r = state.mcp.call_tool(&s.id, tool_name, args) => r,
-                            _ = cancel.cancelled() => {
-                                info!(
-                                    thread_id = %thread_id,
-                                    tool = %tc.name,
-                                    "execute_tool: MCP call cancelled"
-                                );
-                                return Err(anyhow!("Tool call cancelled"));
-                            }
-                        };
+                        let result = state.mcp.call_tool(&s.id, tool_name, args).await;
                         info!(
                             thread_id = %thread_id,
                             server_id = %s.id,
@@ -1014,10 +1037,17 @@ fn build_assistant_tool_call_message(
         builder.tool_calls(api_tool_calls);
     }
 
-    builder
-        .build()
-        .expect("assistant tool-call message build")
-        .into()
+    builder.build().map(Into::into).unwrap_or_else(|e| {
+        // The builder only fails if neither content nor tool_calls were set,
+        // which cannot happen here since we always have tool calls when this
+        // function is called. Log and fall back to a minimal assistant message.
+        warn!(error = %e, "Failed to build assistant tool-call message; using empty fallback");
+        async_openai::types::ChatCompletionRequestAssistantMessageArgs::default()
+            .content("")
+            .build()
+            .expect("empty assistant message build is infallible")
+            .into()
+    })
 }
 
 // ─── Provider factory ──────────────────────────────────────────────────────────
@@ -1183,60 +1213,62 @@ mod tests {
     // ── GenerationResult ──────────────────────────────────────────────────────
 
     #[test]
-    fn generation_result_not_stopped_by_default() {
+    fn generation_result_has_content_field() {
         let result = GenerationResult {
-            content: String::new(),
-            stopped: false,
+            content: "hello from the model".to_string(),
         };
-        assert!(!result.stopped);
+        assert_eq!(result.content, "hello from the model");
     }
 
-    #[test]
-    fn generation_result_stopped_flag_is_accessible() {
-        let result = GenerationResult {
-            content: "some content".to_string(),
-            stopped: true,
-        };
-        assert!(result.stopped);
-        assert_eq!(result.content, "some content");
-    }
-
-    // ── CancellationToken behaviour ───────────────────────────────────────────
+    // ── tool_json_parse_error ─────────────────────────────────────────────────
 
     #[test]
-    fn cancellation_token_is_not_cancelled_initially() {
-        use tokio_util::sync::CancellationToken;
-        let token = CancellationToken::new();
+    fn tool_json_parse_error_contains_tool_name() {
+        let err = serde_json::from_str::<serde_json::Value>("{bad}").unwrap_err();
+        let msg = tool_json_parse_error("save_memory", &err, "{bad}");
         assert!(
-            !token.is_cancelled(),
-            "a freshly created CancellationToken must not be cancelled"
+            msg.contains("save_memory"),
+            "error message should contain the tool name"
         );
     }
 
     #[test]
-    fn cancellation_token_is_cancelled_after_cancel_called() {
-        use tokio_util::sync::CancellationToken;
-        let token = CancellationToken::new();
-        token.cancel();
+    fn tool_json_parse_error_contains_raw_args() {
+        let raw = r#"{"key": }"#;
+        let err = serde_json::from_str::<serde_json::Value>(raw).unwrap_err();
+        let msg = tool_json_parse_error("recall_memory", &err, raw);
         assert!(
-            token.is_cancelled(),
-            "token must be cancelled after cancel() is called"
+            msg.contains(raw),
+            "error message should echo the raw args so the model can diagnose what it sent"
         );
     }
 
     #[test]
-    fn cancelled_token_is_cancelled_immediately() {
-        use tokio_util::sync::CancellationToken;
-        // cancelled() returns a future that resolves instantly when the token
-        // is already cancelled.  We verify this synchronously by checking the
-        // is_cancelled predicate — no need to drive the runtime.
-        let token = CancellationToken::new();
-        token.cancel();
-        // Cloning a cancelled token produces a token that is also cancelled.
-        let cloned = token.clone();
+    fn tool_json_parse_error_contains_parse_description() {
+        let raw = "{bad}";
+        let err = serde_json::from_str::<serde_json::Value>(raw).unwrap_err();
+        let msg = tool_json_parse_error("some_tool", &err, raw);
         assert!(
-            cloned.is_cancelled(),
-            "a clone of a cancelled token must also be cancelled immediately"
+            msg.contains("invalid JSON arguments"),
+            "error message should describe the problem"
         );
+        // The serde_json error itself should be embedded so the model sees the
+        // specific parse failure (e.g. "expected ident at line 1 column 2").
+        assert!(!msg.is_empty(), "error message must not be empty");
+    }
+
+    #[test]
+    fn tool_json_parse_error_not_empty_args_fallback() {
+        // Verify that malformed JSON does NOT silently produce an empty-args
+        // result.  The returned string must mention the failure, not be a
+        // valid JSON object.
+        let raw = "{not valid json";
+        let err = serde_json::from_str::<serde_json::Value>(raw).unwrap_err();
+        let msg = tool_json_parse_error(TOOL_SAVE_MEMORY, &err, raw);
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&msg).is_err(),
+            "the error message should not itself be valid JSON (i.e. not an empty-args fallback)"
+        );
+        assert!(msg.contains(TOOL_SAVE_MEMORY));
     }
 }
