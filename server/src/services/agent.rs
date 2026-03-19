@@ -1,4 +1,4 @@
-//! Agent run-loop service — Story 2.5 / 4.4 / 5.1
+//! Agent run-loop service — Story 2.5 / 4.4 / 5.1 / H.1 / H.2
 //!
 //! Responsible for:
 //! - Assembling the context (system prompt + message history + memory recall)
@@ -9,6 +9,14 @@
 //! - Emitting `message_complete` and `thread_updated` SSE events
 //! - Progress tracking via `RunProgress` so `cancel_run` can perform
 //!   principled cleanup after aborting the task (Story 5.1 redesign)
+//!
+//! ## Structure (H.2)
+//!
+//! `generation_loop` is a thin coordinator that owns the turn loop.
+//! Each turn delegates to:
+//!   - `stream_one_turn` — drives the provider stream, emits SSE tokens, and
+//!     returns a `TurnResult` (accumulated text + resolved tool calls).
+//!   - `execute_tool_calls` — dispatches each tool call and returns results.
 
 use anyhow::{anyhow, Result};
 use async_openai::types::{ChatCompletionRequestMessage, ChatCompletionRequestToolMessageArgs};
@@ -54,10 +62,47 @@ const MEMORY_RECALL_LIMIT: i64 = 10;
 
 // ─── Public entry point ────────────────────────────────────────────────────────
 
-/// Result of a generation loop run, capturing the final accumulated content
-/// and whether the run was stopped early due to cancellation.
+/// Result of a complete generation loop run.
 struct GenerationResult {
     content: String,
+}
+
+// ─── Stream event types ────────────────────────────────────────────────────────
+
+/// Typed events produced by `stream_one_turn` from the raw provider stream.
+/// Using an enum here makes it straightforward to add new content types
+/// (e.g. thinking tokens, structured diffs) without touching the accumulation
+/// logic.
+#[derive(Debug)]
+enum StreamEvent {
+    /// A text delta to display immediately and accumulate.
+    TextDelta(String),
+    /// A fragment of a tool call arriving across one or more chunks.
+    ToolCallFragment {
+        index: usize,
+        id: Option<String>,
+        name: Option<String>,
+        args_fragment: Option<String>,
+    },
+    /// The stream ended cleanly.
+    Done,
+}
+
+/// A fully assembled tool call after all fragments have been merged.
+#[derive(Debug)]
+struct ResolvedToolCall {
+    id: String,
+    name: String,
+    args: String,
+}
+
+/// Result of streaming a single LLM turn.
+struct TurnResult {
+    /// Full text produced by the model during this turn (may be empty when the
+    /// model only emits tool calls).
+    text: String,
+    /// Tool calls requested by the model, fully assembled from fragments.
+    tool_calls: Vec<ResolvedToolCall>,
 }
 
 /// Run the agent for a given thread and new user message.
@@ -457,9 +502,9 @@ async fn run_inner(
 
 // ─── Generation loop ──────────────────────────────────────────────────────────
 
-/// Core generation loop.  Streams tokens from the provider, handles any tool
-/// calls, then continues generation.  Returns a `GenerationResult` containing
-/// the full assistant text.
+/// Thin coordinator: loops over turns, delegating streaming to `stream_one_turn`
+/// and tool dispatch to `execute_tool_calls`.  Returns the full accumulated
+/// assistant text across all rounds.
 async fn generation_loop(
     state: &AppState,
     thread_id: &str,
@@ -472,250 +517,334 @@ async fn generation_loop(
     attached_mcp: &[AttachedMcpServer],
     progress: Arc<Mutex<RunProgress>>,
 ) -> Result<GenerationResult> {
-    // We accumulate the final visible text across all tool-call rounds.
     let mut final_content = String::new();
 
-    // We permit a generous number of consecutive tool-call rounds so multi-step
-    // tasks (directory traversal, multi-file reads, etc.) can complete without
-    // hitting the cap.  20 rounds is high enough for complex agentic workflows
-    // while still guarding against infinite loops.
+    // 20 rounds is generous enough for complex agentic workflows while still
+    // guarding against infinite tool-call loops.
     const MAX_TOOL_ROUNDS: usize = 20;
     let mut tool_rounds = 0;
 
     loop {
-        // ── Stream one generation turn ─────────────────────────────────────────
-        info!(
-            thread_id = %thread_id,
-            tool_round = tool_rounds,
-            message_count = messages.len(),
-            tool_count = tools.len(),
-            "generation_loop: starting stream turn"
-        );
-
-        // Update progress: entering a new streaming turn.
+        info!(thread_id = %thread_id, tool_round = tool_rounds, "generation_loop: starting turn");
         {
             let mut p = progress.lock().await;
             p.phase = RunPhase::Streaming { round: tool_rounds };
             p.tool_round = tool_rounds;
         }
+        let turn = stream_one_turn(
+            state,
+            thread_id,
+            provider,
+            model_id,
+            messages.clone(),
+            tools.clone(),
+            &progress,
+        )
+        .await?;
 
-        let mut turn_text = String::new();
-        let stream_result = provider
-            .stream(model_id, messages.clone(), tools.clone())
-            .await;
+        info!(thread_id = %thread_id, tool_round = tool_rounds,
+            text_len = turn.text.len(), tools = turn.tool_calls.len(), "generation_loop: turn finished");
 
-        let mut token_stream = match stream_result {
-            Ok(s) => s,
-            Err(e) => {
-                state.send_thread_event(
-                    thread_id,
-                    ThreadEvent::Error {
-                        code: "PROVIDER_UNAVAILABLE".to_string(),
-                        message: format!(
-                            "Failed to start streaming from provider: {}. \
-                             Check your API key and provider settings.",
-                            e
-                        ),
-                    },
-                );
-                return Err(anyhow!("Provider stream error: {}", e));
-            }
-        };
-
-        // Tool-call accumulation: we may receive a tool call name/args across
-        // multiple chunks — gather them here, keyed by index.
-        let mut tool_calls: Vec<PendingToolCall> = Vec::new();
-        let mut had_error = false;
-
-        loop {
-            let chunk_result = match token_stream.next().await {
-                Some(r) => r,
-                None => break,
-            };
-            let chunk = match chunk_result {
-                Ok(c) => c,
-                Err(e) => {
-                    error!(error = %e, "Mid-stream error from provider");
-                    state.send_thread_event(
-                        thread_id,
-                        ThreadEvent::Error {
-                            code: "STREAM_ERROR".to_string(),
-                            message: format!(
-                                "Streaming was interrupted: {}. The response may be incomplete.",
-                                e
-                            ),
-                        },
-                    );
-                    had_error = true;
-                    break;
-                }
-            };
-
-            // ── Text delta ────────────────────────────────────────────────────
-            if !chunk.delta.is_empty() {
-                turn_text.push_str(&chunk.delta);
-                // Update progress BEFORE sending the SSE token.  This ensures
-                // that if the task is aborted at the next .await (the send),
-                // assistant_content_so_far already contains this token and the
-                // cancel handler will persist it.  The alternative ordering
-                // (send first, then update progress) creates a window where the
-                // client has seen the token but the cancel handler has not.
-                {
-                    let mut p = progress.lock().await;
-                    p.assistant_content_so_far.push_str(&chunk.delta);
-                }
-                state.send_thread_event(
-                    thread_id,
-                    ThreadEvent::Token {
-                        token: chunk.delta.clone(),
-                    },
-                );
-            }
-
-            // ── Tool-call fragments ───────────────────────────────────────────
-            if let Some(index) = chunk.tool_call_index {
-                let idx = index as usize;
-
-                // Ensure the slot exists.
-                while tool_calls.len() <= idx {
-                    tool_calls.push(PendingToolCall::default());
-                }
-
-                if let Some(name) = chunk.tool_call_name {
-                    tool_calls[idx].name = name;
-                }
-                if let Some(args_fragment) = chunk.tool_call_args {
-                    tool_calls[idx].args.push_str(&args_fragment);
-                }
-                if let Some(id) = chunk.tool_call_id {
-                    tool_calls[idx].id = id;
-                }
-            }
-        } // end streaming loop
-
-        if had_error {
-            // Do not persist a partial message on mid-stream failure.
-            return Err(anyhow!("Mid-stream error — response not persisted"));
-        }
-
-        // Drop any malformed tool-call slots that arrived without a name or id.
-        // This can happen with some providers (e.g. Copilot) that emit index
-        // fragments before the name/id chunks, leaving default-constructed slots
-        // in the accumulator. Passing them downstream causes a 400 error.
-        tool_calls.retain(|tc| !tc.name.is_empty() && !tc.id.is_empty());
-
-        info!(
-            thread_id = %thread_id,
-            tool_round = tool_rounds,
-            turn_text_len = turn_text.len(),
-            tool_call_count = tool_calls.len(),
-            "generation_loop: stream turn finished"
-        );
-
-        // If there were no tool calls, this turn is done.
-        if tool_calls.is_empty() {
-            info!(thread_id = %thread_id, "generation_loop: no tool calls — done");
-            // turn_text was already added to assistant_content_so_far token-by-token above.
-            final_content.push_str(&turn_text);
+        if turn.tool_calls.is_empty() {
+            final_content.push_str(&turn.text);
             break;
         }
 
-        // ── Handle tool calls ──────────────────────────────────────────────────
         if tool_rounds >= MAX_TOOL_ROUNDS {
-            warn!(
-                thread_id = %thread_id,
-                "Reached maximum tool-call rounds ({}); stopping generation",
-                MAX_TOOL_ROUNDS
-            );
-            final_content.push_str(&turn_text);
+            warn!(thread_id = %thread_id,
+                "Reached maximum tool-call rounds ({}); stopping generation", MAX_TOOL_ROUNDS);
+            final_content.push_str(&turn.text);
             break;
         }
         tool_rounds += 1;
 
-        info!(
-            thread_id = %thread_id,
-            tool_round = tool_rounds,
-            tools = ?tool_calls.iter().map(|tc| tc.name.as_str()).collect::<Vec<_>>(),
-            "generation_loop: executing tool calls"
-        );
+        let pending: Vec<PendingToolCall> = turn
+            .tool_calls
+            .iter()
+            .map(|tc| PendingToolCall {
+                id: tc.id.clone(),
+                name: tc.name.clone(),
+                args: tc.args.clone(),
+            })
+            .collect();
+        messages.push(build_assistant_tool_call_message(&turn.text, &pending));
 
-        // Append the assistant's tool-call turn to the message history so the
-        // provider knows what it asked for when we feed back results.
-        let assistant_turn = build_assistant_tool_call_message(&turn_text, &tool_calls);
-        messages.push(assistant_turn);
+        let tool_results = execute_tool_calls(
+            state,
+            thread_id,
+            user_id,
+            persona_id,
+            tool_rounds,
+            &turn.tool_calls,
+            attached_mcp,
+            &progress,
+        )
+        .await;
 
-        // Execute each tool call and append the results.
-        for tc in &tool_calls {
-            // Update progress: entering tool execution.
-            {
-                let mut p = progress.lock().await;
-                p.phase = RunPhase::ExecutingTool {
-                    round: tool_rounds,
-                    tool_name: tc.name.clone(),
-                };
-            }
-
-            info!(
-                thread_id = %thread_id,
-                tool = %tc.name,
-                tool_call_id = %tc.id,
-                args_len = tc.args.len(),
-                "generation_loop: dispatching tool call"
-            );
-
-            let tool_result = execute_tool(
-                state,
-                &state.pool,
-                user_id,
-                persona_id,
-                thread_id,
-                tc,
-                attached_mcp,
-            )
-            .await;
-
-            let result_content = match tool_result {
-                Ok(r) => {
-                    info!(
-                        thread_id = %thread_id,
-                        tool = %tc.name,
-                        result_len = r.len(),
-                        "generation_loop: tool call returned result"
-                    );
-                    r
-                }
-                Err(e) => {
-                    warn!(
-                        tool = %tc.name,
-                        error = %e,
-                        "Tool execution failed; returning error to model"
-                    );
-                    format!("Tool execution failed: {}", e)
-                }
-            };
-
+        for (tc, result) in turn.tool_calls.iter().zip(tool_results) {
             messages.push(
                 ChatCompletionRequestToolMessageArgs::default()
-                    .content(result_content.as_str())
+                    .content(result.as_str())
                     .tool_call_id(tc.id.as_str())
                     .build()
                     .map_err(|e| anyhow!("Failed to build tool result message: {}", e))?
                     .into(),
             );
         }
-
-        // Loop: the model will now generate a response incorporating the tool results.
-        info!(
-            thread_id = %thread_id,
-            tool_round = tool_rounds,
-            message_count = messages.len(),
-            "generation_loop: all tool calls complete, re-entering loop"
-        );
     }
 
     Ok(GenerationResult {
         content: final_content,
     })
+}
+
+// ─── stream_one_turn ─────────────────────────────────────────────────────────
+
+/// Drive the provider stream for one LLM turn.
+///
+/// Consumes the raw `TokenChunk` stream, classifies each chunk into a
+/// `StreamEvent`, accumulates text and tool-call fragments, emits SSE tokens
+/// to connected clients, and returns a `TurnResult` when the stream closes.
+///
+/// Progress is updated on every text token so the cancel handler always has
+/// the latest partial content.
+async fn stream_one_turn(
+    state: &AppState,
+    thread_id: &str,
+    provider: &dyn LlmProvider,
+    model_id: &str,
+    messages: Vec<ChatCompletionRequestMessage>,
+    tools: Vec<async_openai::types::ChatCompletionTool>,
+    progress: &Arc<Mutex<RunProgress>>,
+) -> Result<TurnResult> {
+    let mut token_stream = match provider.stream(model_id, messages, tools).await {
+        Ok(s) => s,
+        Err(e) => {
+            state.send_thread_event(
+                thread_id,
+                ThreadEvent::Error {
+                    code: "PROVIDER_UNAVAILABLE".to_string(),
+                    message: format!(
+                        "Failed to start streaming from provider: {}. \
+                         Check your API key and provider settings.",
+                        e
+                    ),
+                },
+            );
+            return Err(anyhow!("Provider stream error: {}", e));
+        }
+    };
+
+    let mut turn_text = String::new();
+    // Keyed by index; slots are grown on demand as fragments arrive.
+    let mut pending_calls: Vec<PendingToolCall> = Vec::new();
+
+    loop {
+        let chunk = match token_stream.next().await {
+            None => break,
+            Some(Ok(c)) => c,
+            Some(Err(e)) => {
+                error!(error = %e, "Mid-stream error from provider");
+                state.send_thread_event(
+                    thread_id,
+                    ThreadEvent::Error {
+                        code: "STREAM_ERROR".to_string(),
+                        message: format!(
+                            "Streaming was interrupted: {}. The response may be incomplete.",
+                            e
+                        ),
+                    },
+                );
+                return Err(anyhow!("Mid-stream error — response not persisted"));
+            }
+        };
+
+        // Classify the chunk into a StreamEvent (or two — a single chunk can
+        // carry both a text delta and a tool-call fragment).
+        if !chunk.delta.is_empty() {
+            handle_stream_event(
+                StreamEvent::TextDelta(chunk.delta),
+                state,
+                thread_id,
+                progress,
+                &mut turn_text,
+                &mut pending_calls,
+            )
+            .await;
+        }
+
+        if let Some(index) = chunk.tool_call_index {
+            handle_stream_event(
+                StreamEvent::ToolCallFragment {
+                    index: index as usize,
+                    id: chunk.tool_call_id,
+                    name: chunk.tool_call_name,
+                    args_fragment: chunk.tool_call_args,
+                },
+                state,
+                thread_id,
+                progress,
+                &mut turn_text,
+                &mut pending_calls,
+            )
+            .await;
+        }
+    }
+
+    handle_stream_event(
+        StreamEvent::Done,
+        state,
+        thread_id,
+        progress,
+        &mut turn_text,
+        &mut pending_calls,
+    )
+    .await;
+
+    // Drop slots that arrived without a name or id — some providers (e.g.
+    // Copilot) emit index fragments before name/id chunks, leaving
+    // default-constructed slots.  Passing them downstream causes a 400.
+    let tool_calls: Vec<ResolvedToolCall> = pending_calls
+        .into_iter()
+        .filter(|tc| !tc.name.is_empty() && !tc.id.is_empty())
+        .map(|tc| ResolvedToolCall {
+            id: tc.id,
+            name: tc.name,
+            args: tc.args,
+        })
+        .collect();
+
+    Ok(TurnResult {
+        text: turn_text,
+        tool_calls,
+    })
+}
+
+/// Apply a single `StreamEvent` to the mutable accumulator state.
+///
+/// Separated from `stream_one_turn` so each variant's logic is a flat match
+/// arm rather than a deeply nested if-chain inside the stream loop.
+async fn handle_stream_event(
+    event: StreamEvent,
+    state: &AppState,
+    thread_id: &str,
+    progress: &Arc<Mutex<RunProgress>>,
+    turn_text: &mut String,
+    pending_calls: &mut Vec<PendingToolCall>,
+) {
+    match event {
+        StreamEvent::TextDelta(delta) => {
+            turn_text.push_str(&delta);
+            // Update progress BEFORE sending the SSE token so that if the task
+            // is aborted at the next .await the cancel handler already has this
+            // token in assistant_content_so_far and will persist it.
+            {
+                let mut p = progress.lock().await;
+                p.assistant_content_so_far.push_str(&delta);
+            }
+            state.send_thread_event(thread_id, ThreadEvent::Token { token: delta });
+        }
+
+        StreamEvent::ToolCallFragment {
+            index,
+            id,
+            name,
+            args_fragment,
+        } => {
+            while pending_calls.len() <= index {
+                pending_calls.push(PendingToolCall::default());
+            }
+            if let Some(id) = id {
+                pending_calls[index].id = id;
+            }
+            if let Some(name) = name {
+                pending_calls[index].name = name;
+            }
+            if let Some(fragment) = args_fragment {
+                pending_calls[index].args.push_str(&fragment);
+            }
+        }
+
+        StreamEvent::Done => {
+            // Nothing to accumulate; the caller reads turn_text / pending_calls
+            // after this returns.
+        }
+    }
+}
+
+// ─── execute_tool_calls ───────────────────────────────────────────────────────
+
+/// Dispatch all tool calls for one round and return their result strings in
+/// the same order as `calls`.  Each result is suitable for feeding directly
+/// back to the model as a `tool` role message.
+///
+/// Errors from individual tools are converted to error strings so one failing
+/// tool does not abort the entire round.
+async fn execute_tool_calls(
+    state: &AppState,
+    thread_id: &str,
+    user_id: &str,
+    persona_id: &str,
+    tool_round: usize,
+    calls: &[ResolvedToolCall],
+    attached_mcp: &[AttachedMcpServer],
+    progress: &Arc<Mutex<RunProgress>>,
+) -> Vec<String> {
+    let mut results = Vec::with_capacity(calls.len());
+
+    for tc in calls {
+        {
+            let mut p = progress.lock().await;
+            p.phase = RunPhase::ExecutingTool {
+                round: tool_round,
+                tool_name: tc.name.clone(),
+            };
+        }
+
+        info!(
+            thread_id = %thread_id,
+            tool = %tc.name,
+            tool_call_id = %tc.id,
+            args_len = tc.args.len(),
+            "execute_tool_calls: dispatching tool call"
+        );
+
+        let pending = PendingToolCall {
+            id: tc.id.clone(),
+            name: tc.name.clone(),
+            args: tc.args.clone(),
+        };
+
+        let result_content = match execute_tool(
+            state,
+            &state.pool,
+            user_id,
+            persona_id,
+            thread_id,
+            &pending,
+            attached_mcp,
+        )
+        .await
+        {
+            Ok(r) => {
+                info!(
+                    thread_id = %thread_id,
+                    tool = %tc.name,
+                    result_len = r.len(),
+                    "execute_tool_calls: tool returned result"
+                );
+                r
+            }
+            Err(e) => {
+                warn!(tool = %tc.name, error = %e, "Tool execution failed; returning error to model");
+                format!("Tool execution failed: {}", e)
+            }
+        };
+
+        results.push(result_content);
+    }
+
+    results
 }
 
 // ─── Tool execution ────────────────────────────────────────────────────────────
@@ -993,20 +1122,21 @@ async fn persist_tool_message(pool: &SqlitePool, thread_id: &str, role: &str, co
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
-/// Accumulates tool call fragments from a streaming response.
+/// Accumulates tool-call fragments as they arrive across streaming chunks.
+/// Once the stream closes, complete slots are promoted to `ResolvedToolCall`.
 #[derive(Debug, Default)]
 struct PendingToolCall {
     /// The tool call ID assigned by the provider.
     id: String,
     /// The tool name.
     name: String,
-    /// Accumulated JSON argument string.
+    /// Accumulated JSON argument string (may arrive across many chunks).
     args: String,
 }
 
-/// Build an assistant message that includes tool call requests.
-/// This is appended to the conversation so the model can see what it asked for
-/// when we feed back the tool results.
+/// Build the assistant message that records which tool calls the model
+/// requested.  Appended to the conversation so the provider sees the
+/// request/result pair on the next turn.
 fn build_assistant_tool_call_message(
     text: &str,
     tool_calls: &[PendingToolCall],
@@ -1270,5 +1400,138 @@ mod tests {
             "the error message should not itself be valid JSON (i.e. not an empty-args fallback)"
         );
         assert!(msg.contains(TOOL_SAVE_MEMORY));
+    }
+
+    // ── stream_one_turn / StreamEvent accumulation ────────────────────────────
+
+    /// Verify that multiple `ToolCallFragment` events for the same index are
+    /// correctly merged into a single `ResolvedToolCall` with the full args
+    /// string.  This mirrors the real-world scenario where providers stream
+    /// tool arguments across many small chunks.
+    #[test]
+    fn stream_event_tool_call_fragments_accumulate_into_resolved_call() {
+        // Simulate the fragment sequence the accumulator sees.
+        let mut pending: Vec<PendingToolCall> = Vec::new();
+
+        // First chunk: id + name arrive together.
+        apply_fragment(
+            &mut pending,
+            0,
+            Some("call_abc".to_string()),
+            Some("save_memory".to_string()),
+            None,
+        );
+        // Subsequent chunks: args arrive in pieces.
+        apply_fragment(&mut pending, 0, None, None, Some("{\"cont".to_string()));
+        apply_fragment(&mut pending, 0, None, None, Some("ent\":".to_string()));
+        apply_fragment(&mut pending, 0, None, None, Some("\"hello\"}".to_string()));
+
+        // Promote to resolved.
+        let resolved: Vec<ResolvedToolCall> = pending
+            .into_iter()
+            .filter(|tc| !tc.name.is_empty() && !tc.id.is_empty())
+            .map(|tc| ResolvedToolCall {
+                id: tc.id,
+                name: tc.name,
+                args: tc.args,
+            })
+            .collect();
+
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].id, "call_abc");
+        assert_eq!(resolved[0].name, "save_memory");
+        assert_eq!(resolved[0].args, r#"{"content":"hello"}"#);
+    }
+
+    #[test]
+    fn stream_event_multiple_tool_calls_kept_separate() {
+        let mut pending: Vec<PendingToolCall> = Vec::new();
+
+        apply_fragment(
+            &mut pending,
+            0,
+            Some("id_0".to_string()),
+            Some("save_memory".to_string()),
+            Some("{\"content\":\"a\"}".to_string()),
+        );
+        apply_fragment(
+            &mut pending,
+            1,
+            Some("id_1".to_string()),
+            Some("recall_memory".to_string()),
+            Some("{\"query\":\"b\"}".to_string()),
+        );
+
+        let resolved: Vec<ResolvedToolCall> = pending
+            .into_iter()
+            .filter(|tc| !tc.name.is_empty() && !tc.id.is_empty())
+            .map(|tc| ResolvedToolCall {
+                id: tc.id,
+                name: tc.name,
+                args: tc.args,
+            })
+            .collect();
+
+        assert_eq!(resolved.len(), 2);
+        assert_eq!(resolved[0].name, "save_memory");
+        assert_eq!(resolved[1].name, "recall_memory");
+    }
+
+    #[test]
+    fn stream_event_malformed_slot_without_name_is_filtered() {
+        let mut pending: Vec<PendingToolCall> = Vec::new();
+
+        // A slot with an id but no name should be filtered out.
+        apply_fragment(
+            &mut pending,
+            0,
+            Some("id_orphan".to_string()),
+            None,
+            Some("{}".to_string()),
+        );
+        // A valid slot alongside it.
+        apply_fragment(
+            &mut pending,
+            1,
+            Some("id_good".to_string()),
+            Some("recall_memory".to_string()),
+            Some("{\"query\":\"x\"}".to_string()),
+        );
+
+        let resolved: Vec<ResolvedToolCall> = pending
+            .into_iter()
+            .filter(|tc| !tc.name.is_empty() && !tc.id.is_empty())
+            .map(|tc| ResolvedToolCall {
+                id: tc.id,
+                name: tc.name,
+                args: tc.args,
+            })
+            .collect();
+
+        assert_eq!(resolved.len(), 1, "only the complete slot should survive");
+        assert_eq!(resolved[0].name, "recall_memory");
+    }
+
+    /// Helper that applies a `ToolCallFragment`-equivalent operation to the
+    /// pending accumulator without needing a full async context.
+    fn apply_fragment(
+        pending: &mut Vec<PendingToolCall>,
+        index: usize,
+        id: Option<String>,
+        name: Option<String>,
+        args_fragment: Option<String>,
+    ) {
+        while pending.len() <= index {
+            pending.push(PendingToolCall::default());
+        }
+        if let Some(id) = id {
+            pending[index].id = id;
+        }
+        if let Some(name) = name {
+            pending[index].name = name;
+        }
+        if let Some(fragment) = args_fragment {
+            pending[index].args.push_str(&fragment);
+        }
     }
 }
