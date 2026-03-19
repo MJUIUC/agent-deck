@@ -1,27 +1,27 @@
-//! Agent run-loop service — Story 2.5 / 4.4 / 5.1 / H.1 / H.2
+//! Agent run-loop service — Story 2.5 / 4.4 / 5.1 / H.1 / H.2 / H.3
 //!
 //! Responsible for:
 //! - Assembling the context (system prompt + message history + memory recall)
 //! - Calling the LLM provider via the provider abstraction layer
 //! - Streaming tokens back to connected SSE clients
-//! - Handling tool calls (save_memory / recall_memory) inline
+//! - Handling tool calls via the `AgentTool` registry (built-ins) and MCP routing
 //! - Persisting the completed assistant message to the database
 //! - Emitting `message_complete` and `thread_updated` SSE events
 //! - Progress tracking via `RunProgress` so `cancel_run` can perform
 //!   principled cleanup after aborting the task (Story 5.1 redesign)
 //!
-//! ## Structure (H.2)
+//! ## Structure (H.2 / H.3)
 //!
 //! `generation_loop` is a thin coordinator that owns the turn loop.
 //! Each turn delegates to:
 //!   - `stream_one_turn` — drives the provider stream, emits SSE tokens, and
 //!     returns a `TurnResult` (accumulated text + resolved tool calls).
-//!   - `execute_tool_calls` — dispatches each tool call and returns results.
+//!   - `execute_tool_calls` — checks the built-in tool registry first, then
+//!     falls through to MCP routing for dynamically-discovered tools.
 
 use anyhow::{anyhow, Result};
 use async_openai::types::{ChatCompletionRequestMessage, ChatCompletionRequestToolMessageArgs};
 use futures::StreamExt;
-use serde_json::Value;
 use sqlx::SqlitePool;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -34,7 +34,7 @@ use crate::{
     routes::{sse::ThreadEvent, AppState, RunPhase, RunProgress},
     services::{
         context::{self, AssemblyInput, HistoryMessage},
-        encryption, memory as memory_service,
+        encryption,
         provider::{CopilotProvider, LlmProvider, OpenAiProvider},
         title as title_service,
     },
@@ -49,16 +49,6 @@ struct AttachedMcpServer {
     id: String,
     tag: String,
 }
-
-// ─── Memory tool names ─────────────────────────────────────────────────────────
-
-const TOOL_SAVE_MEMORY: &str = "save_memory";
-const TOOL_RECALL_MEMORY: &str = "recall_memory";
-
-// ─── Max content length for save_memory ───────────────────────────────────────
-
-const MEMORY_CONTENT_MAX_CHARS: usize = 500;
-const MEMORY_RECALL_LIMIT: i64 = 10;
 
 // ─── Public entry point ────────────────────────────────────────────────────────
 
@@ -337,6 +327,22 @@ async fn run_inner(
         }
     }
 
+    // Convert the built-in tool registry to ChatCompletionTool defs so the
+    // LLM knows which tools are available.  These appear before MCP tools.
+    let built_in_tool_defs: Vec<async_openai::types::ChatCompletionTool> = state
+        .built_in_tools
+        .iter()
+        .map(|t| async_openai::types::ChatCompletionTool {
+            r#type: async_openai::types::ChatCompletionToolType::Function,
+            function: async_openai::types::FunctionObject {
+                name: t.name().to_string(),
+                description: Some(t.description().to_string()),
+                parameters: Some(t.input_schema()),
+                strict: None,
+            },
+        })
+        .collect();
+
     let assembled = context::assemble(AssemblyInput {
         persona_system_prompt: persona.system_prompt.clone(),
         thread_addendum: thread.system_prompt_addendum.clone(),
@@ -344,6 +350,7 @@ async fn run_inner(
         history_limit: None,
         user_message: user_message.to_string(),
         supports_tools: true,
+        built_in_tool_defs,
         mcp_tools: mcp_tool_defs,
     });
 
@@ -778,6 +785,8 @@ async fn handle_stream_event(
 /// the same order as `calls`.  Each result is suitable for feeding directly
 /// back to the model as a `tool` role message.
 ///
+/// Built-in tools (from `AppState::built_in_tools`) are checked first.
+/// If no built-in matches, the call falls through to MCP routing.
 /// Errors from individual tools are converted to error strings so one failing
 /// tool does not abort the entire round.
 async fn execute_tool_calls(
@@ -790,6 +799,8 @@ async fn execute_tool_calls(
     attached_mcp: &[AttachedMcpServer],
     progress: &Arc<Mutex<RunProgress>>,
 ) -> Vec<String> {
+    use crate::services::tools::ToolContext;
+
     let mut results = Vec::with_capacity(calls.len());
 
     for tc in calls {
@@ -809,35 +820,55 @@ async fn execute_tool_calls(
             "execute_tool_calls: dispatching tool call"
         );
 
-        let pending = PendingToolCall {
-            id: tc.id.clone(),
-            name: tc.name.clone(),
-            args: tc.args.clone(),
-        };
+        // ── Check built-in tool registry first ────────────────────────────────
+        let built_in = state
+            .built_in_tools
+            .iter()
+            .find(|t| t.name() == tc.name.as_str());
 
-        let result_content = match execute_tool(
-            state,
-            &state.pool,
-            user_id,
-            persona_id,
-            thread_id,
-            &pending,
-            attached_mcp,
-        )
-        .await
-        {
-            Ok(r) => {
-                info!(
-                    thread_id = %thread_id,
-                    tool = %tc.name,
-                    result_len = r.len(),
-                    "execute_tool_calls: tool returned result"
-                );
-                r
+        let result_content = if let Some(tool) = built_in {
+            let args: serde_json::Value = match serde_json::from_str(&tc.args) {
+                Ok(v) => v,
+                Err(e) => {
+                    let msg = tool_json_parse_error(&tc.name, &e, &tc.args);
+                    results.push(msg);
+                    continue;
+                }
+            };
+            let context = ToolContext {
+                pool: &state.pool,
+                user_id,
+                persona_id,
+                thread_id,
+            };
+            match tool.run(args, &context).await {
+                Ok(r) => {
+                    info!(thread_id = %thread_id, tool = %tc.name,
+                        result_len = r.len(), "execute_tool_calls: built-in tool returned result");
+                    r
+                }
+                Err(e) => {
+                    warn!(tool = %tc.name, error = %e, "Built-in tool execution failed; returning error to model");
+                    format!("Tool execution failed: {}", e)
+                }
             }
-            Err(e) => {
-                warn!(tool = %tc.name, error = %e, "Tool execution failed; returning error to model");
-                format!("Tool execution failed: {}", e)
+        } else {
+            // ── Fall through to MCP routing ────────────────────────────────────
+            let pending = PendingToolCall {
+                id: tc.id.clone(),
+                name: tc.name.clone(),
+                args: tc.args.clone(),
+            };
+            match execute_mcp_tool(state, thread_id, &pending, attached_mcp).await {
+                Ok(r) => {
+                    info!(thread_id = %thread_id, tool = %tc.name,
+                        result_len = r.len(), "execute_tool_calls: MCP tool returned result");
+                    r
+                }
+                Err(e) => {
+                    warn!(tool = %tc.name, error = %e, "Tool execution failed; returning error to model");
+                    format!("Tool execution failed: {}", e)
+                }
             }
         };
 
@@ -859,218 +890,105 @@ fn tool_json_parse_error(tool_name: &str, error: &serde_json::Error, raw_args: &
     )
 }
 
-/// Execute a single tool call, returning the result text to feed back to the LLM.
-async fn execute_tool(
+/// Route an MCP tool call by tag prefix and return the result text.
+///
+/// Called only after the built-in registry check in `execute_tool_calls` has
+/// found no match, so this function only handles `tag__tool_name` patterns and
+/// truly unknown tool names.
+async fn execute_mcp_tool(
     state: &AppState,
-    pool: &SqlitePool,
-    user_id: &str,
-    persona_id: &str,
     thread_id: &str,
     tc: &PendingToolCall,
     attached_mcp: &[AttachedMcpServer],
 ) -> Result<String> {
-    match tc.name.as_str() {
-        TOOL_SAVE_MEMORY => {
-            let args: Value = match serde_json::from_str(&tc.args) {
+    if !tc.name.contains("__") {
+        warn!(tool = %tc.name, "Unknown tool call requested by model");
+        return Ok(format!("Unknown tool '{}'. No action was taken.", tc.name));
+    }
+
+    let (tag, tool_name) = match tc.name.split_once("__") {
+        Some(pair) => pair,
+        None => return Ok(format!("Unknown tool '{}'.", tc.name)),
+    };
+
+    info!(
+        thread_id = %thread_id,
+        tag = %tag,
+        tool_name = %tool_name,
+        "execute_mcp_tool: routing MCP tool call"
+    );
+
+    let server = attached_mcp.iter().find(|s| s.tag == tag);
+    match server {
+        Some(s) => {
+            let args: serde_json::Value = match serde_json::from_str(&tc.args) {
                 Ok(v) => v,
-                Err(e) => return Ok(tool_json_parse_error(TOOL_SAVE_MEMORY, &e, &tc.args)),
+                Err(e) => {
+                    warn!(tool = %tc.name, error = %e, raw_args = %tc.args,
+                        "MCP tool received invalid JSON arguments");
+                    return Ok(tool_json_parse_error(&tc.name, &e, &tc.args));
+                }
             };
 
-            let content = args
-                .get("content")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
+            info!(
+                thread_id = %thread_id,
+                server_id = %s.id,
+                tag = %tag,
+                tool_name = %tool_name,
+                args = %tc.args,
+                "execute_mcp_tool: calling mcp.call_tool"
+            );
 
-            if content.is_empty() {
-                return Ok("Memory not saved: content was empty.".to_string());
-            }
-
-            // Truncate to 500 chars.
-            let content: String = content.chars().take(MEMORY_CONTENT_MAX_CHARS).collect();
-
-            // Cap enforcement is handled entirely inside memory_service::save_memory.
-            // If the cap is reached it returns Err; we convert that to a structured
-            // tool result rather than propagating it as a hard error so the model
-            // can decide what to do next (e.g. recall and discard something).
-            match memory_service::save_memory(pool, user_id, persona_id, Some(thread_id), &content)
-                .await
-            {
-                Ok(_) => Ok("Memory saved successfully.".to_string()),
-                Err(e) if e.to_string().contains("Memory cap reached") => Ok(
-                    "Memory store is full (500 entries). Cannot save new memory until some are deleted."
-                        .to_string(),
-                ),
-                Err(e) => Err(e),
-            }
-        }
-
-        TOOL_RECALL_MEMORY => {
-            let args: Value = match serde_json::from_str(&tc.args) {
-                Ok(v) => v,
-                Err(e) => return Ok(tool_json_parse_error(TOOL_RECALL_MEMORY, &e, &tc.args)),
-            };
-
-            let query = args
-                .get("query")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-
-            if query.is_empty() {
-                return Ok("No memories found: query was empty.".to_string());
-            }
-
-            let entries = memory_service::recall_memory(
-                pool,
-                user_id,
-                persona_id,
-                &query,
-                MEMORY_RECALL_LIMIT,
+            persist_tool_message(
+                &state.pool,
+                thread_id,
+                "assistant",
+                &format!("**Tool call:** `{}`\n```json\n{}\n```", tc.name, tc.args),
             )
             .await;
 
-            let entries = match entries {
-                Ok(e) => e,
+            let result = state.mcp.call_tool(&s.id, tool_name, args).await;
+            info!(
+                thread_id = %thread_id,
+                server_id = %s.id,
+                tool_name = %tool_name,
+                success = result.is_ok(),
+                "execute_mcp_tool: mcp.call_tool returned"
+            );
+            match result {
+                Ok(text) => {
+                    info!(
+                        thread_id = %thread_id,
+                        tool = %tc.name,
+                        result_preview = %text.chars().take(120).collect::<String>(),
+                        "execute_mcp_tool: MCP tool success"
+                    );
+                    persist_tool_message(
+                        &state.pool,
+                        thread_id,
+                        "tool",
+                        &format!("**Tool result** (`{}`):\n{}", tc.name, text),
+                    )
+                    .await;
+                    Ok(text)
+                }
                 Err(e) => {
-                    warn!(error = %e, "recall_memory query failed");
-                    return Ok(format!(
-                        "No memories found matching \"{}\". (Search error: {})",
-                        query, e
-                    ));
+                    warn!(tool = %tc.name, error = %e, "MCP tool call failed");
+                    Ok(format!("MCP tool '{}' error: {}", tc.name, e))
                 }
-            };
-
-            if entries.is_empty() {
-                return Ok(format!("No memories found matching \"{}\".", query));
-            }
-
-            // Format per PLAN.md §7.6.5
-            let mut lines = vec![format!(
-                "Found {} memor{}:",
-                entries.len(),
-                if entries.len() == 1 { "y" } else { "ies" }
-            )];
-
-            let mut thread_sources: Vec<String> = Vec::new();
-
-            for entry in &entries {
-                // Parse date from ISO timestamp, fall back to full string.
-                let date_str = entry
-                    .created_at
-                    .split('T')
-                    .next()
-                    .unwrap_or(&entry.created_at);
-                lines.push(format!("- [{}] {}", date_str, entry.content));
-
-                if let Some(title) = &entry.thread_title {
-                    if !title.is_empty() && !thread_sources.contains(title) {
-                        thread_sources.push(title.clone());
-                    }
-                }
-            }
-
-            if !thread_sources.is_empty() {
-                lines.push(format!("\n(Thread sources: {})", thread_sources.join(", ")));
-            }
-
-            Ok(lines.join("\n"))
-        }
-
-        // ── MCP tool call — route by tag prefix ───────────────────────────────
-        name if name.contains("__") => {
-            if let Some((tag, tool_name)) = tc.name.split_once("__") {
-                info!(
-                    thread_id = %thread_id,
-                    tag = %tag,
-                    tool_name = %tool_name,
-                    "execute_tool: routing MCP tool call"
-                );
-
-                let server = attached_mcp.iter().find(|s| s.tag == tag);
-                match server {
-                    Some(s) => {
-                        let args: serde_json::Value = match serde_json::from_str(&tc.args) {
-                            Ok(v) => v,
-                            Err(e) => {
-                                warn!(tool = %tc.name, error = %e, raw_args = %tc.args, "MCP tool received invalid JSON arguments");
-                                return Ok(tool_json_parse_error(&tc.name, &e, &tc.args));
-                            }
-                        };
-
-                        info!(
-                            thread_id = %thread_id,
-                            server_id = %s.id,
-                            tag = %tag,
-                            tool_name = %tool_name,
-                            args = %tc.args,
-                            "execute_tool: calling mcp.call_tool"
-                        );
-
-                        // Persist hidden tool-call record.
-                        persist_tool_message(
-                            pool,
-                            thread_id,
-                            "assistant",
-                            &format!("**Tool call:** `{}`\n```json\n{}\n```", tc.name, tc.args),
-                        )
-                        .await;
-
-                        let result = state.mcp.call_tool(&s.id, tool_name, args).await;
-                        info!(
-                            thread_id = %thread_id,
-                            server_id = %s.id,
-                            tool_name = %tool_name,
-                            success = result.is_ok(),
-                            "execute_tool: mcp.call_tool returned"
-                        );
-                        match result {
-                            Ok(text) => {
-                                info!(
-                                    thread_id = %thread_id,
-                                    tool = %tc.name,
-                                    result_preview = %text.chars().take(120).collect::<String>(),
-                                    "execute_tool: MCP tool success"
-                                );
-                                // Persist hidden tool-result record.
-                                persist_tool_message(
-                                    pool,
-                                    thread_id,
-                                    "tool",
-                                    &format!("**Tool result** (`{}`):\n{}", tc.name, text),
-                                )
-                                .await;
-                                Ok(text)
-                            }
-                            Err(e) => {
-                                let msg = format!("MCP tool '{}' error: {}", tc.name, e);
-                                warn!(tool = %tc.name, error = %e, "MCP tool call failed");
-                                Ok(msg)
-                            }
-                        }
-                    }
-                    None => {
-                        let msg = format!(
-                            "No attached MCP server with tag '{}'. Cannot call tool '{}'.",
-                            tag, tc.name
-                        );
-                        warn!(
-                            thread_id = %thread_id,
-                            tag = %tag,
-                            attached = ?attached_mcp.iter().map(|s| s.tag.as_str()).collect::<Vec<_>>(),
-                            "execute_tool: no server matched tag"
-                        );
-                        Ok(msg)
-                    }
-                }
-            } else {
-                Ok(format!("Unknown tool '{}'.", tc.name))
             }
         }
-
-        unknown => {
-            warn!(tool = %unknown, "Unknown tool call requested by model");
-            Ok(format!("Unknown tool '{}'. No action was taken.", unknown))
+        None => {
+            warn!(
+                thread_id = %thread_id,
+                tag = %tag,
+                attached = ?attached_mcp.iter().map(|s| s.tag.as_str()).collect::<Vec<_>>(),
+                "execute_mcp_tool: no server matched tag"
+            );
+            Ok(format!(
+                "No attached MCP server with tag '{}'. Cannot call tool '{}'.",
+                tag, tc.name
+            ))
         }
     }
 }
@@ -1322,15 +1240,6 @@ mod tests {
         assert!(tc.args.is_empty());
     }
 
-    // ── Memory content truncation ─────────────────────────────────────────────
-
-    #[test]
-    fn memory_content_truncated_at_500_chars() {
-        let long = "x".repeat(600);
-        let truncated: String = long.chars().take(MEMORY_CONTENT_MAX_CHARS).collect();
-        assert_eq!(truncated.len(), 500);
-    }
-
     // ── Recall formatting ─────────────────────────────────────────────────────
 
     #[test]
@@ -1394,12 +1303,12 @@ mod tests {
         // valid JSON object.
         let raw = "{not valid json";
         let err = serde_json::from_str::<serde_json::Value>(raw).unwrap_err();
-        let msg = tool_json_parse_error(TOOL_SAVE_MEMORY, &err, raw);
+        let msg = tool_json_parse_error("save_memory", &err, raw);
         assert!(
             serde_json::from_str::<serde_json::Value>(&msg).is_err(),
             "the error message should not itself be valid JSON (i.e. not an empty-args fallback)"
         );
-        assert!(msg.contains(TOOL_SAVE_MEMORY));
+        assert!(msg.contains("save_memory"));
     }
 
     // ── stream_one_turn / StreamEvent accumulation ────────────────────────────

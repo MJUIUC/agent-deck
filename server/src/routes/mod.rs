@@ -24,6 +24,7 @@ use crate::services::auth as auth_service;
 use crate::services::copilot::{CopilotApiService, GlobalEvent};
 use crate::services::credentials as credentials_service;
 use crate::services::mcp::McpConnectionManager;
+use crate::services::tools::{self as tools_service, AgentTool};
 
 pub mod auth;
 pub mod config;
@@ -175,6 +176,9 @@ pub struct AppState {
     /// MCP connection pool.  Manages all local and remote MCP server connections,
     /// tool caching, and status broadcasting.
     pub mcp: McpConnectionManager,
+    /// Statically-registered built-in tools available to every agent run.
+    /// MCP tools are discovered dynamically and routed separately.
+    pub built_in_tools: Arc<Vec<Arc<dyn AgentTool>>>,
 }
 
 impl AppState {
@@ -233,6 +237,7 @@ pub async fn build_router(
         run_states: DashMap::new(),
         copilot: Some(copilot_handle),
         mcp: mcp.clone(),
+        built_in_tools: Arc::new(tools_service::built_in_tools()),
     };
 
     // Start copilot-api supervision in the background.
@@ -795,6 +800,7 @@ mod tests {
             run_states: dashmap::DashMap::new(),
             copilot: None,
             mcp,
+            built_in_tools: std::sync::Arc::new(vec![]),
         };
 
         let rs1 = app_state.get_run_state("thread-abc");
@@ -841,6 +847,7 @@ mod tests {
             run_states: dashmap::DashMap::new(),
             copilot: None,
             mcp,
+            built_in_tools: std::sync::Arc::new(vec![]),
         };
 
         let rs_a = app_state.get_run_state("thread-aaa");

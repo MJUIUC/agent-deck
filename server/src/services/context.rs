@@ -73,6 +73,9 @@ pub struct AssemblyInput {
     /// Whether the active provider supports function calling.
     /// When `false`, the tool array is returned empty.
     pub supports_tools: bool,
+    /// Built-in tool definitions from the `AgentTool` registry.
+    /// These appear first in the tool list, before MCP tools.
+    pub built_in_tool_defs: Vec<async_openai::types::ChatCompletionTool>,
     /// MCP tools already namespaced (tag__tool_name).
     /// Pass an empty vec when none are attached.
     pub mcp_tools: Vec<async_openai::types::ChatCompletionTool>,
@@ -195,7 +198,7 @@ pub fn assemble(input: AssemblyInput) -> AssembledContext {
 
     // ── Tool definitions ──────────────────────────────────────────────────────
     let tools = if input.supports_tools {
-        build_tool_definitions(input.mcp_tools)
+        build_tool_definitions(input.built_in_tool_defs, input.mcp_tools)
     } else {
         vec![]
     };
@@ -209,69 +212,11 @@ pub fn assemble(input: AssemblyInput) -> AssembledContext {
 ///
 /// Always includes `save_memory` and `recall_memory` (PLAN.md §7.6.2).
 /// Any MCP tools passed in are appended after the built-in tools.
-fn build_tool_definitions(mcp_tools: Vec<ChatCompletionTool>) -> Vec<ChatCompletionTool> {
-    let mut tools = vec![
-        // ── save_memory ───────────────────────────────────────────────────────
-        ChatCompletionTool {
-            r#type: ChatCompletionToolType::Function,
-            function: FunctionObject {
-                name: "save_memory".to_string(),
-                description: Some(
-                    "Save a piece of information to your long-term memory for future recall. \
-                     Use this when the user shares a preference, a fact about themselves, a \
-                     project name, a deadline, a relationship detail, or anything worth \
-                     remembering across conversations. Save one fact per call. Write the \
-                     memory as a concise factual statement."
-                        .to_string(),
-                ),
-                parameters: Some(json!({
-                    "type": "object",
-                    "properties": {
-                        "content": {
-                            "type": "string",
-                            "description": "A concise factual statement to remember. \
-                                Examples: 'User prefers TypeScript over JavaScript', \
-                                'User\\'s dog is named Pepper', \
-                                'Project Atlas deadline is March 15 2025', \
-                                'User dislikes being called buddy'"
-                        }
-                    },
-                    "required": ["content"]
-                })),
-                strict: None,
-            },
-        },
-        // ── recall_memory ─────────────────────────────────────────────────────
-        ChatCompletionTool {
-            r#type: ChatCompletionToolType::Function,
-            function: FunctionObject {
-                name: "recall_memory".to_string(),
-                description: Some(
-                    "Search your long-term memory for information you've previously saved \
-                     about the user. Use this before answering questions that might benefit \
-                     from prior context, when the user references something from a past \
-                     conversation, or when you need to check if you already know something. \
-                     Returns up to 10 matching entries."
-                        .to_string(),
-                ),
-                parameters: Some(json!({
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "Keywords to search for in memory. Use specific \
-                                nouns and terms rather than full sentences. \
-                                Examples: 'project deadline', 'dog name', \
-                                'programming language preference'"
-                        }
-                    },
-                    "required": ["query"]
-                })),
-                strict: None,
-            },
-        },
-    ];
-
+fn build_tool_definitions(
+    built_in_tool_defs: Vec<ChatCompletionTool>,
+    mcp_tools: Vec<ChatCompletionTool>,
+) -> Vec<ChatCompletionTool> {
+    let mut tools = built_in_tool_defs;
     tools.extend(mcp_tools);
     tools
 }
@@ -359,8 +304,29 @@ mod tests {
             history_limit: None,
             user_message: user_message.to_string(),
             supports_tools: true,
+            built_in_tool_defs: built_in_tool_defs_for_test(),
             mcp_tools: vec![],
         }
+    }
+
+    /// Build the tool defs that `basic_input` provides — mirrors what
+    /// `run_inner` does at runtime by converting the `AgentTool` registry into
+    /// `ChatCompletionTool` structs.
+    fn built_in_tool_defs_for_test() -> Vec<async_openai::types::ChatCompletionTool> {
+        use crate::services::tools::built_in_tools;
+        use async_openai::types::{ChatCompletionTool, ChatCompletionToolType, FunctionObject};
+        built_in_tools()
+            .iter()
+            .map(|t| ChatCompletionTool {
+                r#type: ChatCompletionToolType::Function,
+                function: FunctionObject {
+                    name: t.name().to_string(),
+                    description: Some(t.description().to_string()),
+                    parameters: Some(t.input_schema()),
+                    strict: None,
+                },
+            })
+            .collect()
     }
 
     // ── Ordering tests ─────────────────────────────────────────────────────────
@@ -591,6 +557,20 @@ mod tests {
     }
 
     #[test]
+    fn tools_empty_when_no_built_in_defs_and_no_mcp() {
+        let input = AssemblyInput {
+            built_in_tool_defs: vec![],
+            mcp_tools: vec![],
+            ..basic_input("hi")
+        };
+        let ctx = assemble(input);
+        assert!(
+            ctx.tools.is_empty(),
+            "tools must be empty when no tool defs are provided"
+        );
+    }
+
+    #[test]
     fn save_memory_tool_is_present() {
         let ctx = assemble(basic_input("hi"));
         let names: Vec<&str> = ctx.tools.iter().map(|t| t.function.name.as_str()).collect();
@@ -649,12 +629,12 @@ mod tests {
     }
 
     #[test]
-    fn exactly_two_memory_tools_defined() {
-        let tools = build_tool_definitions(vec![]);
+    fn exactly_two_built_in_tools_in_registry() {
+        let defs = built_in_tool_defs_for_test();
         assert_eq!(
-            tools.len(),
+            defs.len(),
             2,
-            "expected exactly save_memory and recall_memory"
+            "expected exactly save_memory and recall_memory in the built-in registry"
         );
     }
 
@@ -701,6 +681,7 @@ mod tests {
             history_limit: None,
             user_message: "Show me an example.".to_string(),
             supports_tools: true,
+            built_in_tool_defs: built_in_tool_defs_for_test(),
             mcp_tools: vec![],
         };
 

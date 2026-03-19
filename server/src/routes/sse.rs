@@ -331,6 +331,7 @@ mod tests {
             run_states: dashmap::DashMap::new(),
             copilot: None,
             mcp,
+            built_in_tools: std::sync::Arc::new(vec![]),
         }
     }
 
