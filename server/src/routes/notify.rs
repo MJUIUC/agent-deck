@@ -210,23 +210,40 @@ pub async fn notify(
         let tid = thread_id.clone();
         let trigger_content = content.clone();
 
-        tokio::spawn(async move {
-            // Acquire semaphore first — queues behind any in-progress run.
-            // The cancel token is replaced only after we hold the semaphore
-            // so we never clobber the active run's token while it is still
-            // executing.
-            let _permit = run_state.semaphore.acquire().await.unwrap();
+        // Reset progress BEFORE spawning so cancel_run always has a valid
+        // RunProgress to read, even if the task hasn't started yet.
+        {
+            let mut progress = run_state.progress.lock().await;
+            *progress = crate::routes::RunProgress::new(tid.clone(), None);
+        }
 
-            let new_token = tokio_util::sync::CancellationToken::new();
+        let progress = run_state.progress.clone();
+        let persist_lock = run_state.persist_lock.clone();
+
+        let run_state_for_task = run_state.clone();
+
+        // Lock task_handle BEFORE spawning and hold it until the handle is
+        // stored — the same race-free pattern used in the send handler.
+        let mut handle_lock = run_state.task_handle.lock().await;
+
+        let handle = tokio::spawn(async move {
+            // Block until the caller has stored our handle, guaranteeing
+            // cancel_run can always find and abort us.
             {
-                let mut lock = run_state.cancel_token.lock().await;
-                *lock = new_token.clone();
+                let _ = run_state_for_task.task_handle.lock().await;
             }
 
-            crate::services::agent::run(state_clone, tid, trigger_content, new_token).await;
+            // Acquire semaphore — queues behind any in-progress run.
+            let _permit = run_state_for_task.semaphore.acquire().await.unwrap();
 
-            run_state.depth.fetch_sub(1, Ordering::SeqCst);
+            crate::services::agent::run(state_clone, tid, trigger_content, progress, persist_lock)
+                .await;
+
+            run_state_for_task.depth.fetch_sub(1, Ordering::SeqCst);
         });
+
+        *handle_lock = Some(handle);
+        drop(handle_lock);
     }
 
     Ok(Json(json!({

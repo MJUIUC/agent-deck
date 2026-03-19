@@ -13,7 +13,8 @@ use std::collections::HashMap;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
-use tokio_util::sync::CancellationToken;
+use tokio::task::JoinHandle;
+
 use tower_http::{services::ServeDir, trace::TraceLayer};
 use tracing::warn;
 
@@ -49,19 +50,90 @@ pub struct AgentJob {
     pub content: String,
 }
 
-/// Per-thread run state.  Controls concurrency and cancellation for agent
+// ─── Run-phase tracking ────────────────────────────────────────────────────────
+
+/// Tracks exactly where in the run-loop execution is at any given moment.
+/// Written by the run-loop and read by `cancel_run` after an abort to
+/// determine what cleanup is needed and what partial state to persist.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RunPhase {
+    /// Task has been spawned but is queued behind the semaphore.
+    Queued,
+
+    /// Semaphore acquired; assembling context, loading thread/persona/provider.
+    BuildingContext,
+
+    /// Actively streaming from the LLM. `round` is 0-indexed tool-call round number.
+    /// On round 0 this is the initial generation; round N > 0 means tool results
+    /// have been fed back and the model is generating again.
+    Streaming { round: usize },
+
+    /// A tool call has been dispatched and we are waiting for its result.
+    ExecutingTool { round: usize, tool_name: String },
+
+    /// Generation loop is done; the assistant message is being written to the DB.
+    PersistingMessage,
+
+    /// All work is complete. The task has exited normally.
+    Complete,
+}
+
+/// Live progress of the current run. Held in an `Arc<tokio::sync::Mutex<RunProgress>>`
+/// so both the run-loop (writer) and the cancel handler (reader) can access it safely
+/// across threads.
+pub struct RunProgress {
+    /// Current phase. Updated at every major transition.
+    pub phase: RunPhase,
+
+    /// The thread this run belongs to.
+    pub thread_id: String,
+
+    /// Set once the user message has been persisted to the DB (happens in the
+    /// HTTP handler before spawn, so this is always Some by the time the task starts).
+    pub user_message_id: Option<String>,
+
+    /// Accumulates the assistant's text content as tokens arrive. Updated on
+    /// every token chunk so the cancel handler always has the latest partial
+    /// content available to persist.
+    pub assistant_content_so_far: String,
+
+    /// The current tool-call round number, mirroring the loop counter inside
+    /// `generation_loop`. Kept here so the cancel handler can reason about
+    /// whether orphaned hidden tool messages might exist.
+    pub tool_round: usize,
+}
+
+impl RunProgress {
+    pub fn new(thread_id: String, user_message_id: Option<String>) -> Self {
+        Self {
+            phase: RunPhase::Queued,
+            thread_id,
+            user_message_id,
+            assistant_content_so_far: String::new(),
+            tool_round: 0,
+        }
+    }
+}
+
+/// Per-thread run state.  Controls concurrency and task lifecycle for agent
 /// runs on a single thread.
 ///
 /// - `semaphore`: capacity-1 semaphore that serialises concurrent runs.
 ///   The second run waits behind the first rather than being rejected.
 /// - `depth`: count of tasks that have been spawned and not yet completed.
 ///   Used to reject sends that would exceed `MAX_DEPTH`.
-/// - `cancel_token`: the cancellation token for the currently running (or
-///   most recently started) agent run.  Replaced atomically before each run.
+/// - `task_handle`: handle to the currently running task; `cancel_run` calls
+///   `.abort()` on this to immediately stop the run at the next `.await`.
+/// - `progress`: live progress written by the run-loop so `cancel_run` knows
+///   what cleanup to perform after the abort.
+/// - `persist_lock`: mutex held during the assistant-message INSERT by both the
+///   run-loop and `cancel_run`, preventing double-insert races.
 pub struct RunState {
     pub semaphore: tokio::sync::Semaphore,
     pub depth: AtomicUsize,
-    pub cancel_token: tokio::sync::Mutex<CancellationToken>,
+    pub task_handle: tokio::sync::Mutex<Option<JoinHandle<()>>>,
+    pub progress: Arc<tokio::sync::Mutex<RunProgress>>,
+    pub persist_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl RunState {
@@ -69,7 +141,12 @@ impl RunState {
         Self {
             semaphore: tokio::sync::Semaphore::new(1),
             depth: AtomicUsize::new(0),
-            cancel_token: tokio::sync::Mutex::new(CancellationToken::new()),
+            task_handle: tokio::sync::Mutex::new(None),
+            progress: Arc::new(tokio::sync::Mutex::new(RunProgress::new(
+                String::new(),
+                None,
+            ))),
+            persist_lock: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 }
@@ -560,19 +637,6 @@ mod tests {
         assert_eq!(state.depth.load(Ordering::SeqCst), 1);
     }
 
-    #[tokio::test]
-    async fn run_state_cancel_token_can_be_replaced() {
-        let state = RunState::new();
-        let new_token = CancellationToken::new();
-        {
-            let mut lock = state.cancel_token.lock().await;
-            *lock = new_token.clone();
-        }
-        new_token.cancel();
-        let lock = state.cancel_token.lock().await;
-        assert!(lock.is_cancelled());
-    }
-
     // ── RunState additional unit tests ────────────────────────────────────────
 
     #[test]
@@ -618,55 +682,83 @@ mod tests {
         );
     }
 
+    // ── New RunState task-handle tests ────────────────────────────────────────
+
     #[tokio::test]
-    async fn run_state_cancel_triggers_token() {
+    async fn run_state_task_handle_is_none_initially() {
         let state = RunState::new();
-
-        // Grab the current token and cancel it.
-        let token = {
-            let lock = state.cancel_token.lock().await;
-            lock.clone()
-        };
-
+        let handle = state.task_handle.lock().await;
         assert!(
-            !token.is_cancelled(),
-            "token should not be cancelled initially"
+            handle.is_none(),
+            "task_handle must be None on a freshly created RunState"
         );
-        token.cancel();
-        assert!(
-            token.is_cancelled(),
-            "token should be cancelled after cancel()"
-        );
-
-        // The value stored inside the Mutex reflects the cancellation.
-        let lock = state.cancel_token.lock().await;
-        assert!(lock.is_cancelled());
     }
 
     #[tokio::test]
-    async fn run_state_replace_token_old_token_not_affected() {
+    async fn run_state_abort_on_none_handle_is_noop() {
         let state = RunState::new();
-
-        // Capture a clone of the original token before replacing it.
-        let old_token = {
-            let lock = state.cancel_token.lock().await;
-            lock.clone()
-        };
-
-        // Replace with a fresh token.
-        let new_token = CancellationToken::new();
-        {
-            let mut lock = state.cancel_token.lock().await;
-            *lock = new_token.clone();
+        // Acquiring the lock and calling abort on a None handle must not panic.
+        let handle = state.task_handle.lock().await;
+        if let Some(h) = handle.as_ref() {
+            h.abort();
         }
+        // If we reach here without panicking, the test passes.
+    }
 
-        // Cancel the new token — the old one must remain unaffected.
-        new_token.cancel();
-        assert!(new_token.is_cancelled(), "new token should be cancelled");
-        assert!(
-            !old_token.is_cancelled(),
-            "old token must not be affected by cancelling the replacement"
+    // ── RunPhase / RunProgress tests ──────────────────────────────────────────
+
+    #[test]
+    fn run_phase_transitions_in_order() {
+        // Verify that all RunPhase variants are distinct and comparable via PartialEq.
+        assert_eq!(RunPhase::Queued, RunPhase::Queued);
+        assert_eq!(RunPhase::BuildingContext, RunPhase::BuildingContext);
+        assert_eq!(
+            RunPhase::Streaming { round: 0 },
+            RunPhase::Streaming { round: 0 }
         );
+        assert_ne!(
+            RunPhase::Streaming { round: 0 },
+            RunPhase::Streaming { round: 1 }
+        );
+        assert_eq!(
+            RunPhase::ExecutingTool {
+                round: 1,
+                tool_name: "save_memory".to_string()
+            },
+            RunPhase::ExecutingTool {
+                round: 1,
+                tool_name: "save_memory".to_string()
+            },
+        );
+        assert_ne!(
+            RunPhase::ExecutingTool {
+                round: 0,
+                tool_name: "a".to_string()
+            },
+            RunPhase::ExecutingTool {
+                round: 0,
+                tool_name: "b".to_string()
+            },
+        );
+        assert_eq!(RunPhase::PersistingMessage, RunPhase::PersistingMessage);
+        assert_eq!(RunPhase::Complete, RunPhase::Complete);
+        // Cross-variant comparisons must not be equal.
+        assert_ne!(RunPhase::Queued, RunPhase::BuildingContext);
+        assert_ne!(
+            RunPhase::Streaming { round: 0 },
+            RunPhase::PersistingMessage
+        );
+        assert_ne!(RunPhase::PersistingMessage, RunPhase::Complete);
+    }
+
+    #[test]
+    fn run_progress_content_accumulates() {
+        let mut progress = RunProgress::new("thread-1".to_string(), Some("msg-1".to_string()));
+        assert!(progress.assistant_content_so_far.is_empty());
+
+        progress.assistant_content_so_far.push_str("Hello");
+        progress.assistant_content_so_far.push_str(", world");
+        assert_eq!(progress.assistant_content_so_far, "Hello, world");
     }
 
     #[tokio::test]
