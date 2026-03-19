@@ -57,6 +57,12 @@ pub enum ThreadEvent {
     },
     /// A streaming or provider error.
     Error { code: String, message: String },
+    /// The provider returned a transient error and the run-loop is retrying.
+    Retry {
+        attempt: u32,
+        max_attempts: u32,
+        reason: String,
+    },
 }
 
 impl ThreadEvent {
@@ -68,6 +74,7 @@ impl ThreadEvent {
             ThreadEvent::RoutineMessage { .. } => "routine_message",
             ThreadEvent::SystemEvent { .. } => "system_event",
             ThreadEvent::Error { .. } => "stream_error",
+            ThreadEvent::Retry { .. } => "retry",
         }
     }
 }

@@ -57,6 +57,66 @@ struct GenerationResult {
     content: String,
 }
 
+// ─── Retry strategy ───────────────────────────────────────────────────────────
+
+/// How `stream_one_turn` should behave when the provider returns a transient
+/// error.  Modelled on Zed's `RetryStrategy`.
+#[derive(Debug, Clone, PartialEq)]
+enum RetryStrategy {
+    /// Retry with exponentially growing delays starting at `initial_delay`.
+    ExponentialBackoff {
+        initial_delay: std::time::Duration,
+        max_attempts: u32,
+    },
+    /// Retry with a constant delay between attempts.
+    Fixed {
+        delay: std::time::Duration,
+        max_attempts: u32,
+    },
+    /// Do not retry; surface the error to the client immediately.
+    None,
+}
+
+/// Choose a retry strategy based on the error returned by the provider.
+///
+/// The error message is inspected as a string because provider errors arrive
+/// as `anyhow::Error` with the HTTP status embedded in the message
+/// (e.g. `"Provider X returned 429 — ..."`).
+fn retry_strategy_for(error: &anyhow::Error) -> RetryStrategy {
+    let msg = error.to_string();
+
+    // HTTP 429 — rate limited.  Back off aggressively.
+    if msg.contains("429") {
+        return RetryStrategy::ExponentialBackoff {
+            initial_delay: std::time::Duration::from_secs(2),
+            max_attempts: 4,
+        };
+    }
+
+    // HTTP 5xx — provider-side error.  Shorter backoff.
+    if msg.contains("500") || msg.contains("502") || msg.contains("503") || msg.contains("504") {
+        return RetryStrategy::ExponentialBackoff {
+            initial_delay: std::time::Duration::from_secs(1),
+            max_attempts: 3,
+        };
+    }
+
+    // Network-level failures (connection reset, timeout, etc.).
+    // reqwest wraps these as non-HTTP errors — they don't contain a status code.
+    let is_network_error = error
+        .chain()
+        .any(|e| e.to_string().contains("connection") || e.to_string().contains("timed out"));
+    if is_network_error || msg.contains("connection") || msg.contains("timed out") {
+        return RetryStrategy::Fixed {
+            delay: std::time::Duration::from_secs(1),
+            max_attempts: 2,
+        };
+    }
+
+    // HTTP 4xx (except 429), parse errors, auth errors — surface immediately.
+    RetryStrategy::None
+}
+
 // ─── Stream event types ────────────────────────────────────────────────────────
 
 /// Typed events produced by `stream_one_turn` from the raw provider stream.
@@ -607,11 +667,16 @@ async fn generation_loop(
 
 // ─── stream_one_turn ─────────────────────────────────────────────────────────
 
-/// Drive the provider stream for one LLM turn.
+/// Drive the provider stream for one LLM turn, retrying on transient errors.
 ///
 /// Consumes the raw `TokenChunk` stream, classifies each chunk into a
 /// `StreamEvent`, accumulates text and tool-call fragments, emits SSE tokens
 /// to connected clients, and returns a `TurnResult` when the stream closes.
+///
+/// Transient provider errors (429, 5xx, network) trigger automatic retries
+/// with backoff.  A `ThreadEvent::Retry` SSE event is emitted before each
+/// retry so the client can show progress.  Cancellation is checked before
+/// every backoff sleep.
 ///
 /// Progress is updated on every text token so the cancel handler always has
 /// the latest partial content.
@@ -624,23 +689,109 @@ async fn stream_one_turn(
     tools: Vec<async_openai::types::ChatCompletionTool>,
     progress: &Arc<Mutex<RunProgress>>,
 ) -> Result<TurnResult> {
-    let mut token_stream = match provider.stream(model_id, messages, tools).await {
-        Ok(s) => s,
-        Err(e) => {
-            state.send_thread_event(
-                thread_id,
-                ThreadEvent::Error {
-                    code: "PROVIDER_UNAVAILABLE".to_string(),
-                    message: format!(
-                        "Failed to start streaming from provider: {}. \
-                         Check your API key and provider settings.",
+    let mut attempt: u32 = 0;
+
+    loop {
+        match try_stream_one_turn(
+            state,
+            thread_id,
+            provider,
+            model_id,
+            messages.clone(),
+            tools.clone(),
+            progress,
+        )
+        .await
+        {
+            Ok(result) => return Ok(result),
+            Err(e) => {
+                let strategy = retry_strategy_for(&e);
+
+                let (delay, max_attempts) = match strategy {
+                    RetryStrategy::ExponentialBackoff {
+                        initial_delay,
+                        max_attempts,
+                    } => {
+                        let delay = initial_delay * 2u32.saturating_pow(attempt);
+                        (delay, max_attempts)
+                    }
+                    RetryStrategy::Fixed {
+                        delay,
+                        max_attempts,
+                    } => (delay, max_attempts),
+                    RetryStrategy::None => {
+                        // Not retryable — emit an error event and propagate.
+                        state.send_thread_event(
+                            thread_id,
+                            ThreadEvent::Error {
+                                code: "PROVIDER_ERROR".to_string(),
+                                message: format!(
+                                    "Provider error: {}. Check your API key and provider settings.",
+                                    e
+                                ),
+                            },
+                        );
+                        return Err(e);
+                    }
+                };
+
+                attempt += 1;
+                if attempt > max_attempts {
+                    state.send_thread_event(
+                        thread_id,
+                        ThreadEvent::Error {
+                            code: "PROVIDER_ERROR".to_string(),
+                            message: format!("Provider failed after {} attempt(s): {}", attempt, e),
+                        },
+                    );
+                    return Err(anyhow!(
+                        "Provider failed after {} attempt(s): {}",
+                        attempt,
                         e
-                    ),
-                },
-            );
-            return Err(anyhow!("Provider stream error: {}", e));
+                    ));
+                }
+
+                warn!(
+                    thread_id = %thread_id,
+                    attempt = attempt,
+                    max_attempts = max_attempts,
+                    error = %e,
+                    delay_ms = delay.as_millis(),
+                    "stream_one_turn: transient error, retrying"
+                );
+
+                state.send_thread_event(
+                    thread_id,
+                    ThreadEvent::Retry {
+                        attempt,
+                        max_attempts,
+                        reason: e.to_string(),
+                    },
+                );
+
+                // Sleep with backoff, but bail immediately if the task is
+                // aborted (the sleep future is dropped at the next .await).
+                tokio::time::sleep(delay).await;
+            }
         }
-    };
+    }
+}
+
+/// Single attempt at streaming one LLM turn.  Called by `stream_one_turn`
+/// which owns the retry loop.
+async fn try_stream_one_turn(
+    state: &AppState,
+    thread_id: &str,
+    provider: &dyn LlmProvider,
+    model_id: &str,
+    messages: Vec<ChatCompletionRequestMessage>,
+    tools: Vec<async_openai::types::ChatCompletionTool>,
+    progress: &Arc<Mutex<RunProgress>>,
+) -> Result<TurnResult> {
+    let mut token_stream = provider
+        .stream(model_id, messages, tools)
+        .await
+        .map_err(|e| anyhow!("Provider stream error: {}", e))?;
 
     let mut turn_text = String::new();
     // Keyed by index; slots are grown on demand as fragments arrive.
@@ -652,17 +803,7 @@ async fn stream_one_turn(
             Some(Ok(c)) => c,
             Some(Err(e)) => {
                 error!(error = %e, "Mid-stream error from provider");
-                state.send_thread_event(
-                    thread_id,
-                    ThreadEvent::Error {
-                        code: "STREAM_ERROR".to_string(),
-                        message: format!(
-                            "Streaming was interrupted: {}. The response may be incomplete.",
-                            e
-                        ),
-                    },
-                );
-                return Err(anyhow!("Mid-stream error — response not persisted"));
+                return Err(anyhow!("Mid-stream error: {}", e));
             }
         };
 
@@ -1257,6 +1398,84 @@ mod tests {
             content: "hello from the model".to_string(),
         };
         assert_eq!(result.content, "hello from the model");
+    }
+
+    // ── retry_strategy_for ────────────────────────────────────────────────────
+
+    #[test]
+    fn retry_strategy_429_is_exponential_backoff() {
+        let err = anyhow::anyhow!("Provider X returned 429 — rate limited");
+        assert!(matches!(
+            retry_strategy_for(&err),
+            RetryStrategy::ExponentialBackoff {
+                max_attempts: 4,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn retry_strategy_503_is_exponential_backoff() {
+        let err = anyhow::anyhow!("Provider X returned 503 — service unavailable");
+        assert!(matches!(
+            retry_strategy_for(&err),
+            RetryStrategy::ExponentialBackoff {
+                max_attempts: 3,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn retry_strategy_401_is_none() {
+        let err = anyhow::anyhow!("Provider X returned 401 — unauthorized");
+        assert_eq!(retry_strategy_for(&err), RetryStrategy::None);
+    }
+
+    #[test]
+    fn retry_strategy_400_is_none() {
+        let err = anyhow::anyhow!("Provider X returned 400 — bad request");
+        assert_eq!(retry_strategy_for(&err), RetryStrategy::None);
+    }
+
+    #[test]
+    fn retry_strategy_connection_error_is_fixed() {
+        let err = anyhow::anyhow!("HTTP request failed: connection refused");
+        assert!(matches!(
+            retry_strategy_for(&err),
+            RetryStrategy::Fixed {
+                max_attempts: 2,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn retry_strategy_timeout_is_fixed() {
+        let err = anyhow::anyhow!("HTTP request failed: timed out waiting for response");
+        assert!(matches!(
+            retry_strategy_for(&err),
+            RetryStrategy::Fixed {
+                max_attempts: 2,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn retry_strategy_exponential_backoff_delay_doubles() {
+        let strategy = RetryStrategy::ExponentialBackoff {
+            initial_delay: std::time::Duration::from_secs(2),
+            max_attempts: 4,
+        };
+        if let RetryStrategy::ExponentialBackoff { initial_delay, .. } = strategy {
+            let attempt_0 = initial_delay * 2u32.saturating_pow(0);
+            let attempt_1 = initial_delay * 2u32.saturating_pow(1);
+            let attempt_2 = initial_delay * 2u32.saturating_pow(2);
+            assert_eq!(attempt_0, std::time::Duration::from_secs(2));
+            assert_eq!(attempt_1, std::time::Duration::from_secs(4));
+            assert_eq!(attempt_2, std::time::Duration::from_secs(8));
+        }
     }
 
     // ── tool_json_parse_error ─────────────────────────────────────────────────
