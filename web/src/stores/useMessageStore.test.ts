@@ -852,3 +852,155 @@ describe("concurrency", () => {
     });
   });
 });
+
+describe("cancelRun", () => {
+  beforeEach(() => {
+    useMessageStore.setState({ threads: {} });
+    vi.clearAllMocks();
+    mockMessagesApi.cancel.mockResolvedValue({});
+  });
+
+  it("immediately transitions streaming phase to idle", async () => {
+    useMessageStore.setState({
+      threads: {
+        t1: {
+          messages: [makeMessage("m1", "t1", "user", "hello")],
+          phase: { status: "streaming", content: "partial response" },
+        },
+      },
+    });
+
+    // Fire but don't await — we want to assert the synchronous state change
+    void useMessageStore.getState().cancelRun("t1");
+
+    const phase = getThread("t1").phase;
+    expect(phase.status).toBe("idle");
+  });
+
+  it("immediately transitions sending phase to idle", async () => {
+    useMessageStore.setState({
+      threads: {
+        t1: {
+          messages: [makeMessage("optimistic-123", "t1", "user", "hello")],
+          phase: { status: "sending", optimisticId: "optimistic-123" },
+        },
+      },
+    });
+
+    void useMessageStore.getState().cancelRun("t1");
+
+    const phase = getThread("t1").phase;
+    expect(phase.status).toBe("idle");
+  });
+
+  it("strips optimistic messages when clearing the phase", async () => {
+    const realMsg = makeMessage("real-1", "t1", "user", "hello");
+    const optimistic = makeMessage("optimistic-999", "t1", "user", "hello");
+
+    useMessageStore.setState({
+      threads: {
+        t1: {
+          messages: [realMsg, optimistic],
+          phase: { status: "streaming", content: "..." },
+        },
+      },
+    });
+
+    void useMessageStore.getState().cancelRun("t1");
+
+    const { messages } = getThread("t1");
+    expect(messages.some((m) => m.id === "real-1")).toBe(true);
+    expect(messages.some((m) => m.id === "optimistic-999")).toBe(false);
+  });
+
+  it("calls cancelTokenBuffer with the correct threadId", async () => {
+    useMessageStore.setState({
+      threads: {
+        t1: {
+          messages: [],
+          phase: { status: "streaming", content: "hello" },
+        },
+      },
+    });
+
+    void useMessageStore.getState().cancelRun("t1");
+
+    expect(cancelTokenBuffer).toHaveBeenCalledWith("t1");
+  });
+
+  it("is a no-op on idle phase — does not stomp state", async () => {
+    const msg = makeMessage("m1", "t1", "user", "hello");
+    useMessageStore.setState({
+      threads: {
+        t1: { messages: [msg], phase: { status: "idle" } },
+      },
+    });
+
+    void useMessageStore.getState().cancelRun("t1");
+
+    const { phase, messages } = getThread("t1");
+    expect(phase.status).toBe("idle");
+    expect(messages).toHaveLength(1);
+  });
+
+  it("sends the cancel POST request to the server", async () => {
+    useMessageStore.setState({
+      threads: {
+        t1: {
+          messages: [],
+          phase: { status: "streaming", content: "..." },
+        },
+      },
+    });
+
+    await useMessageStore.getState().cancelRun("t1");
+
+    expect(mockMessagesApi.cancel).toHaveBeenCalledWith("t1");
+  });
+
+  it("silently swallows a failed cancel POST without reverting phase", async () => {
+    mockMessagesApi.cancel.mockRejectedValue(new Error("network error"));
+
+    useMessageStore.setState({
+      threads: {
+        t1: {
+          messages: [],
+          phase: { status: "streaming", content: "partial" },
+        },
+      },
+    });
+
+    await expect(
+      useMessageStore.getState().cancelRun("t1"),
+    ).resolves.toBeUndefined();
+
+    // Phase was already set to idle optimistically; the POST failure must not
+    // push it back to streaming or any other state.
+    expect(getThread("t1").phase.status).toBe("idle");
+  });
+
+  it("finalizeStream after cancel is idempotent — appends message without re-entering streaming", async () => {
+    useMessageStore.setState({
+      threads: {
+        t1: {
+          messages: [makeMessage("u1", "t1", "user", "hi")],
+          phase: { status: "streaming", content: "partial" },
+        },
+      },
+    });
+
+    // Cancel clears streaming immediately.
+    void useMessageStore.getState().cancelRun("t1");
+    expect(getThread("t1").phase.status).toBe("idle");
+
+    // message_complete SSE arrives after cancel (stopped=true from server).
+    const stoppedMsg = makeMessage("a1", "t1", "assistant", "partial");
+    useMessageStore
+      .getState()
+      .finalizeStream("t1", { ...stoppedMsg, stopped: true });
+
+    // Phase stays idle, message is committed.
+    expect(getThread("t1").phase.status).toBe("idle");
+    expect(getThread("t1").messages.some((m) => m.id === "a1")).toBe(true);
+  });
+});

@@ -282,15 +282,49 @@ const storeCreator: StateCreator<MessageStore> = (set, get) => ({
   },
 
   // ── cancelRun ────────────────────────────────────────────────────────────────
-  // Sends a cancellation request to the server for the currently running
-  // agent run on the given thread.  The server will set the cancellation token;
-  // the streaming response will end and a stopped=true message will be emitted.
+  // Sends a cancellation request to the server and immediately clears the
+  // streaming state so the UI stops showing the streaming bubble.  We don't
+  // wait for the server's message_complete event to drive phase back to idle
+  // because the run may already be complete (cancel arrived too late) or the
+  // SSE event may take a moment — either way the user pressed stop and expects
+  // the UI to respond instantly.
+  //
+  // finalizeStream is idempotent, so if a message_complete SSE arrives later
+  // (stopped=true from the server, or the natural completion if the run
+  // finished before cancel landed) it will just commit the final message text
+  // without re-entering streaming phase.
 
   cancelRun: async (threadId) => {
+    // Optimistically flush the token buffer and collapse the streaming bubble.
+    cancelTokenBuffer(threadId);
+    set((state) => {
+      const thread = getThread(state.threads, threadId);
+      // Only act if we are actually in a streaming/sending state — do not
+      // stomp an idle or error phase if cancel is called spuriously.
+      if (
+        thread.phase.status !== "streaming" &&
+        thread.phase.status !== "sending"
+      ) {
+        return state;
+      }
+      // Strip optimistic messages (they haven't been confirmed by the server)
+      // and return to idle so the input is immediately re-enabled.
+      const messages = thread.messages.filter(
+        (m) => !m.id.startsWith("optimistic-"),
+      );
+      return {
+        threads: setThread(state.threads, threadId, {
+          messages,
+          phase: IDLE,
+        }),
+      };
+    });
+
     try {
       await messagesApi.cancel(threadId);
     } catch {
-      // Silently swallow — if the request fails the run will complete normally
+      // Silently swallow — if the POST fails the run will complete naturally
+      // and message_complete will arrive over SSE, which is fine.
     }
   },
 });

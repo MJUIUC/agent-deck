@@ -144,13 +144,21 @@ export interface SseErrorEvent {
   message: string;
 }
 
+export interface SseRetryEvent {
+  event: "retry";
+  attempt: number;
+  max_attempts: number;
+  reason: string;
+}
+
 export type SseThreadEvent =
   | SseTokenEvent
   | SseMessageCompleteEvent
   | SseRoutineMessageEvent
   | SseErrorEvent
   | SseSystemEventEvent
-  | SseCancelledEvent;
+  | SseCancelledEvent
+  | SseRetryEvent;
 
 // Global SSE event from copilot.rs GlobalEvent
 export interface SseThreadUpdatedEvent {
