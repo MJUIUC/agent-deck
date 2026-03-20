@@ -6,12 +6,12 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::sync::atomic::Ordering;
+use std::sync::{atomic::Ordering, Arc};
 
 use crate::{
     error::{AppError, AppResult},
     models::message::{CreateMessage, Message, MessageResponse},
-    routes::{AppState, RunPhase, RunProgress},
+    routes::{AppState, RunningTurn},
 };
 
 /// Helper: get the single user id from the DB.
@@ -56,7 +56,7 @@ pub struct ListMessagesQuery {
 /// Supports cursor-based pagination via the `before` message ID.
 /// Hidden messages (visibility = 'hidden') are excluded by default.
 pub async fn list(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(thread_id): Path<String>,
     Query(query): Query<ListMessagesQuery>,
 ) -> AppResult<impl IntoResponse> {
@@ -136,7 +136,7 @@ pub async fn list(
 /// Depth enforcement (max 3 queued runs per thread) happens before spawning
 /// so the queue depth is visible immediately to the HTTP handler.
 pub async fn send(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(thread_id): Path<String>,
     Json(payload): Json<CreateMessage>,
 ) -> AppResult<impl IntoResponse> {
@@ -206,58 +206,50 @@ pub async fn send(
     let state_clone = state.clone();
     let tid = thread_id.clone();
     let content = payload.content.clone();
-    let user_message_id = message.id.clone();
 
-    // Reset progress for this new run BEFORE spawning so that cancel_run
-    // always has a valid RunProgress to read, even if the task hasn't started.
-    {
-        let mut progress = run_state.progress.lock().await;
-        *progress = RunProgress::new(thread_id.clone(), Some(user_message_id));
-    }
+    let (cancellation_tx, cancellation_rx) = tokio::sync::watch::channel(false);
+    let turn_id = uuid::Uuid::new_v4();
 
-    let progress = run_state.progress.clone();
-    let persist_lock = run_state.persist_lock.clone();
-
-    // Clone the Arc so the closure owns one ref and we keep one ref for
-    // storing the JoinHandle after spawn returns.
-    let run_state_for_task = run_state.clone();
-
-    // ── Race-free handle storage ───────────────────────────────────────────────
-    // We lock task_handle BEFORE spawning and hold the lock until after we
-    // have stored the handle inside it.  The spawned task acquires the same
-    // lock as its very first action before doing any real work, so it blocks
-    // until we have finished storing.  This closes the window where cancel_run
-    // could read task_handle, find None, skip the abort, fire the stopped
-    // event, and then have the task wake up and stream anyway.
-    let mut handle_lock = run_state.task_handle.lock().await;
-
-    let handle = tokio::spawn(async move {
-        // Block here until the HTTP handler has stored our handle.  This is
-        // the critical ordering guarantee: no real work starts until the handle
-        // is visible to cancel_run.
-        {
-            let _ = run_state_for_task.task_handle.lock().await;
-        }
-
-        // Acquire semaphore — queues behind any in-progress run on this thread.
-        let _permit = run_state_for_task.semaphore.acquire().await.unwrap();
-
-        // Wait for the SSE subscriber immediately before streaming begins so
-        // tokens are not fired into the void.
-        state_clone
-            .wait_for_subscriber(&tid, std::time::Duration::from_secs(3))
+    let handle = tokio::spawn({
+        let run_state = run_state.clone();
+        let state = state_clone.clone();
+        let tid = tid.clone();
+        let content = content.clone();
+        async move {
+            let _permit = run_state.semaphore.acquire().await.unwrap();
+            state
+                .wait_for_subscriber(&tid, std::time::Duration::from_secs(3))
+                .await;
+            crate::services::agent::run(
+                state,
+                tid,
+                content,
+                cancellation_rx,
+                run_state.clone(),
+                turn_id,
+            )
             .await;
-
-        crate::services::agent::run(state_clone, tid, content, progress, persist_lock).await;
-
-        run_state_for_task.depth.fetch_sub(1, Ordering::SeqCst);
+            run_state.depth.fetch_sub(1, Ordering::SeqCst);
+        }
     });
 
-    // Store the handle while still holding the lock, then release.
-    // The spawned task is blocked on acquiring this same lock, so it cannot
-    // proceed until we drop handle_lock here.
-    *handle_lock = Some(handle);
-    drop(handle_lock);
+    let old_handle = {
+        let mut slot = run_state.running_turn.lock().await;
+        let old_handle = slot.take().map(|t| t.cancel());
+        *slot = Some(RunningTurn {
+            task: handle,
+            cancellation_tx,
+            thread_id: thread_id.clone(),
+            turn_id,
+        });
+        old_handle
+    };
+
+    if let Some(old) = old_handle {
+        // Drain the old turn outside the lock to avoid a deadlock
+        // (the old task also acquires running_turn when it clears its slot).
+        let _ = old.await;
+    }
 
     let response = MessageResponse::from(message);
     Ok((StatusCode::CREATED, Json(json!({ "data": response }))))
@@ -265,225 +257,33 @@ pub async fn send(
 
 /// POST /api/threads/:id/cancel
 ///
-/// Immediately aborts the running agent task for this thread, then performs
-/// phase-appropriate cleanup:
-///   - Deletes any orphaned hidden tool messages created after the user message.
-///   - Persists any partial assistant content as a stopped message (under
-///     `persist_lock` to prevent a double-insert race with the run-loop).
-///   - Fires `MessageComplete { stopped: true }` so the client exits its
-///     "generating" state.
+/// Signals the running agent task to stop cooperatively via a watch channel,
+/// then awaits its completion. The generation loop handles persisting any
+/// partial state and firing the `MessageComplete { stopped: true }` SSE event.
 pub async fn cancel_run(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(thread_id): Path<String>,
 ) -> AppResult<impl IntoResponse> {
-    let user_id = get_user_id(&state).await?;
-    let _ = verify_thread_ownership(&state, &thread_id, &user_id).await?;
-
     let run_state = state.get_run_state(&thread_id);
 
-    // ── Step 1: Abort the task handle and wait for it to fully stop ───────────
-    // We take the handle out of the mutex, call abort(), then await the handle
-    // to completion.  Awaiting after abort() is safe and important: it blocks
-    // until the task's Future is actually dropped, which means all in-flight
-    // .await points have unwound and any final writes to RunProgress are
-    // committed before we read them below.  Without this wait, abort() merely
-    // schedules the cancellation and we can race ahead to read stale progress —
-    // seeing empty content even though many tokens were streamed.
-    //
     let handle = {
-        let mut handle_lock = run_state.task_handle.lock().await;
-        handle_lock.take()
+        let mut slot = run_state.running_turn.lock().await;
+        slot.take().map(|t| t.cancel())
     };
 
-    if let Some(h) = handle {
-        h.abort();
-        // JoinError on abort is expected; ignore it.
-        let _ = h.await;
-        tracing::info!(thread_id = %thread_id, "cancel_run: task aborted and joined");
-    } else {
-        tracing::info!(thread_id = %thread_id, "cancel_run: no active task to abort");
-    }
-
-    // ── Step 2: Read progress to understand what cleanup is needed ─────────────
-    // The task is now fully stopped, so RunProgress reflects the last state it
-    // reached before the abort unwound.
-    let (phase, user_message_id, assistant_content_so_far) = {
-        let progress = run_state.progress.lock().await;
-        (
-            progress.phase.clone(),
-            progress.user_message_id.clone(),
-            progress.assistant_content_so_far.clone(),
-        )
+    let Some(handle) = handle else {
+        tracing::info!(thread_id = %thread_id, "cancel_run: no active run to cancel");
+        return Ok(Json(json!({ "data": { "cancelled": false } })));
     };
 
-    tracing::info!(
-        thread_id = %thread_id,
-        phase = ?phase,
-        "cancel_run: run was in this phase at abort time"
-    );
-
-    // If the run already completed normally, there is nothing to do.
-    if phase == RunPhase::Complete {
-        tracing::info!(thread_id = %thread_id, "cancel_run: run already complete, no-op");
-        return Ok(Json(json!({ "data": { "cancelled": true } })));
-    }
-
-    // ── Step 3: Delete orphaned hidden tool messages ───────────────────────────
-    // Applies when the abort happened during a tool round (Streaming with
-    // round > 0, or ExecutingTool).  We delete all hidden messages created
-    // after the user message to avoid dangling tool-call/result pairs in the
-    // LLM context on the next run.
-    let needs_tool_cleanup = match &phase {
-        RunPhase::Streaming { round } if *round > 0 => true,
-        RunPhase::ExecutingTool { .. } => true,
-        _ => false,
-    };
-
-    if needs_tool_cleanup {
-        if let Some(ref user_msg_id) = user_message_id {
-            // Get the timestamp of the user message so we can delete everything after it.
-            let user_msg_created_at: Option<(String,)> =
-                sqlx::query_as("SELECT created_at FROM messages WHERE id = ?")
-                    .bind(user_msg_id)
-                    .fetch_optional(&state.pool)
-                    .await?;
-
-            if let Some((user_created_at,)) = user_msg_created_at {
-                let deleted = sqlx::query(
-                    "DELETE FROM messages WHERE thread_id = ? AND visibility = 'hidden' AND created_at > ?",
-                )
-                .bind(&thread_id)
-                .bind(&user_created_at)
-                .execute(&state.pool)
-                .await?;
-
-                tracing::info!(
-                    thread_id = %thread_id,
-                    rows_deleted = deleted.rows_affected(),
-                    "cancel_run: deleted orphaned hidden tool messages"
-                );
-            }
-        }
-    }
-
-    // ── Step 4: Persist partial assistant message (under persist_lock) ─────────
-    // Acquire the lock before checking/inserting so we don't race with the
-    // run-loop's own INSERT (which also holds persist_lock during the write).
-    let assistant_msg = {
-        let _lock = run_state.persist_lock.lock().await;
-
-        // Check whether the run-loop already committed an assistant message for
-        // this thread newer than the user message.  If so, the run-loop won the
-        // race and we must not insert a duplicate.
-        let existing: Option<(String,)> = if let Some(ref user_msg_id) = user_message_id {
-            let user_msg_created_at: Option<(String,)> =
-                sqlx::query_as("SELECT created_at FROM messages WHERE id = ?")
-                    .bind(user_msg_id)
-                    .fetch_optional(&state.pool)
-                    .await?;
-
-            if let Some((user_created_at,)) = user_msg_created_at {
-                sqlx::query_as(
-                    "SELECT id FROM messages
-                     WHERE thread_id = ? AND role = 'assistant' AND created_at > ?
-                     LIMIT 1",
-                )
-                .bind(&thread_id)
-                .bind(&user_created_at)
-                .fetch_optional(&state.pool)
-                .await?
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        if existing.is_some() {
-            tracing::info!(
-                thread_id = %thread_id,
-                "cancel_run: assistant message already persisted by run-loop, skipping insert"
-            );
-            None
-        } else {
-            // Insert partial content as a stopped message.
-            let content = if assistant_content_so_far.is_empty() {
-                "[Response cancelled before any content was generated]".to_string()
-            } else {
-                assistant_content_so_far
-            };
-
-            let msg = Message::new_assistant_stopped(&thread_id, &content);
-
-            sqlx::query(
-                "INSERT INTO messages (id, thread_id, role, content, source, routine_id,
-                                       visibility, execution_id, event_type, stopped, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            )
-            .bind(&msg.id)
-            .bind(&msg.thread_id)
-            .bind(&msg.role)
-            .bind(&msg.content)
-            .bind(&msg.source)
-            .bind(&msg.routine_id)
-            .bind(&msg.visibility)
-            .bind(&msg.execution_id)
-            .bind(&msg.event_type)
-            .bind(msg.stopped)
-            .bind(&msg.created_at)
-            .execute(&state.pool)
-            .await?;
-
-            tracing::info!(
-                thread_id = %thread_id,
-                message_id = %msg.id,
-                content_len = msg.content.len(),
-                "cancel_run: persisted stopped assistant message"
-            );
-
-            Some(msg)
-        }
-    };
-
-    // ── Step 5: Fire MessageComplete SSE event ─────────────────────────────────
-    if let Some(msg) = assistant_msg {
-        state.send_thread_event(
-            &thread_id,
-            crate::routes::sse::ThreadEvent::MessageComplete {
-                id: msg.id.clone(),
-                thread_id: thread_id.clone(),
-                role: msg.role.clone(),
-                content: msg.content.clone(),
-                created_at: msg.created_at.clone(),
-                stopped: true,
-            },
-        );
-    } else {
-        // The run-loop already persisted and fired its own event, but the
-        // client may still be in a "generating" state if it missed the event.
-        // Re-fire a stopped event using whatever the run-loop left in the DB.
-        let last_assistant: Option<(String, String, String, String)> = sqlx::query_as(
-            "SELECT id, role, content, created_at FROM messages
-             WHERE thread_id = ? AND role = 'assistant'
-             ORDER BY created_at DESC LIMIT 1",
-        )
-        .bind(&thread_id)
-        .fetch_optional(&state.pool)
-        .await?;
-
-        if let Some((id, role, content, created_at)) = last_assistant {
-            state.send_thread_event(
-                &thread_id,
-                crate::routes::sse::ThreadEvent::MessageComplete {
-                    id,
-                    thread_id: thread_id.clone(),
-                    role,
-                    content,
-                    created_at,
-                    stopped: true,
-                },
-            );
-        }
+    // Await cooperative shutdown with a safety-net timeout.
+    match tokio::time::timeout(std::time::Duration::from_secs(30), handle).await {
+        Ok(_) => tracing::info!(thread_id = %thread_id, "cancel_run: task exited cooperatively"),
+        Err(_) => tracing::error!(
+            thread_id = %thread_id,
+            "cancel_run: task did not exit within 30s — this indicates a missing \
+             cancellation checkpoint in the run-loop"
+        ),
     }
 
     Ok(Json(json!({ "data": { "cancelled": true } })))
@@ -509,7 +309,7 @@ pub struct SlashCommandData {
 /// Handles slash commands (e.g. /model, /routine, /memory).
 /// Returns a structured response describing what was done.
 pub async fn slash_command(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(thread_id): Path<String>,
     Json(payload): Json<SlashCommandRequest>,
 ) -> AppResult<impl IntoResponse> {
@@ -887,439 +687,250 @@ mod tests {
 
     // ── cancel_run unit tests ─────────────────────────────────────────────────
 
-    /// When the run was in `Queued` phase at abort time, no assistant message
-    /// should be inserted — only the SSE fired event matters, which is tested
-    /// by verifying the DB stays empty.
+    /// When there is no active run, `cancel_run` should report `cancelled: false`.
+    /// This test verifies the None-branch behavior of the cooperative cancel model.
     #[tokio::test]
-    async fn cancel_run_with_queued_phase_fires_stopped_event() {
-        use crate::routes::{RunPhase, RunProgress, RunState};
-        use sqlx::SqlitePool;
+    async fn cancel_run_with_no_active_turn_returns_not_cancelled() {
+        use crate::routes::RunState;
         use std::sync::Arc;
 
-        let pool = SqlitePool::connect("sqlite::memory:")
-            .await
-            .expect("test db");
-        sqlx::migrate!("src/db/migrations")
-            .run(&pool)
-            .await
-            .expect("migrations");
-
-        // Set up a thread and user message so the DB queries in cancel_run
-        // have a valid anchor.
-        let thread_id = "thread-cancel-queued";
-        let user_msg_id = "user-msg-queued";
-        sqlx::query("INSERT INTO users (id, display_name, created_at) VALUES ('user-1', 'Test User', '2024-01-01T00:00:00.000Z')")
-            .execute(&pool)
-            .await
-            .expect("insert user");
-        sqlx::query(
-            "INSERT INTO agent_personas (id, user_id, name, emoji, system_prompt, created_at, updated_at)
-             VALUES ('persona-1', 'user-1', 'Test', '🤖', 'You are helpful.', '2024-01-01T00:00:00.000Z', '2024-01-01T00:00:00.000Z')",
-        )
-        .execute(&pool)
-        .await
-        .expect("insert persona");
-        sqlx::query(
-            "INSERT INTO threads (id, user_id, persona_id, title, status, created_at, updated_at)
-             VALUES (?, 'user-1', 'persona-1', 'Test Thread', 'active', '2024-01-01T00:00:00.000Z', '2024-01-01T00:00:00.000Z')",
-        )
-        .bind(thread_id)
-        .execute(&pool)
-        .await
-        .expect("insert thread");
-        sqlx::query(
-            "INSERT INTO messages (id, thread_id, role, content, source, routine_id, visibility,
-                                   execution_id, event_type, stopped, created_at)
-             VALUES (?, ?, 'user', 'hello', 'user', NULL, 'visible', NULL, NULL, 0, '2024-01-01T00:00:00.000Z')",
-        )
-        .bind(user_msg_id)
-        .bind(thread_id)
-        .execute(&pool)
-        .await
-        .expect("insert user message");
-
-        // Build a RunState with progress in Queued phase.
         let run_state = Arc::new(RunState::new());
+
+        // Verify the slot is empty initially.
         {
-            let mut progress = run_state.progress.lock().await;
-            *progress = RunProgress::new(thread_id.to_string(), Some(user_msg_id.to_string()));
-            // Phase is already Queued by default.
-            assert_eq!(progress.phase, RunPhase::Queued);
+            let slot = run_state.running_turn.lock().await;
+            assert!(
+                slot.is_none(),
+                "running_turn must be None on a freshly created RunState"
+            );
         }
 
-        // Acquire persist_lock and query: no assistant message should exist.
+        // Simulate the None branch of cancel_run: take() returns None.
+        let handle = {
+            let mut slot = run_state.running_turn.lock().await;
+            slot.take().map(|t| t.cancel())
+        };
+
+        // None means cancel_run would return { cancelled: false }.
+        assert!(
+            handle.is_none(),
+            "no handle means cancel returns false when there is no active turn"
+        );
+    }
+
+    /// When there is an active run, `cancel_run` should signal it to stop
+    /// cooperatively and await its completion.
+    #[tokio::test]
+    async fn cancel_run_with_active_turn_signals_and_awaits() {
+        use crate::routes::{RunState, RunningTurn};
+        use std::sync::Arc;
+
+        let run_state = Arc::new(RunState::new());
+        let (cancellation_tx, cancellation_rx) = tokio::sync::watch::channel(false);
+
+        // Spawn a task that exits cooperatively when it receives the cancel signal.
+        let task = tokio::spawn(async move {
+            let mut rx = cancellation_rx;
+            loop {
+                if *rx.borrow() {
+                    break;
+                }
+                match rx.changed().await {
+                    Ok(()) => { /* value changed — loop and re-check */ }
+                    Err(_) => break, // sender dropped
+                }
+            }
+        });
+
+        let turn_id = uuid::Uuid::new_v4();
+
+        // Store the RunningTurn in the slot.
         {
-            let _lock = run_state.persist_lock.lock().await;
-            let existing: Option<(String,)> = sqlx::query_as(
-                "SELECT id FROM messages WHERE thread_id = ? AND role = 'assistant' LIMIT 1",
-            )
-            .bind(thread_id)
-            .fetch_optional(&pool)
-            .await
-            .expect("query");
-            assert!(
-                existing.is_none(),
-                "no assistant message should exist before cancel"
+            let mut slot = run_state.running_turn.lock().await;
+            *slot = Some(RunningTurn {
+                task,
+                cancellation_tx,
+                thread_id: "thread-test".to_string(),
+                turn_id,
+            });
+        }
+
+        // Simulate cancel_run: take the RunningTurn and call cancel().
+        let handle = {
+            let mut slot = run_state.running_turn.lock().await;
+            slot.take().map(|t| t.cancel())
+        };
+
+        assert!(
+            handle.is_some(),
+            "cancel should return a handle when there is an active turn"
+        );
+
+        // Await with a short timeout to prove cooperative shutdown works.
+        match tokio::time::timeout(std::time::Duration::from_secs(5), handle.unwrap()).await {
+            Ok(Ok(())) => {} // task completed cleanly
+            Ok(Err(e)) => panic!("task panicked: {}", e),
+            Err(_) => panic!("task did not exit within 5 seconds"),
+        }
+    }
+
+    /// When a new `send` comes in while a previous run is active, the old
+    /// RunningTurn should be cancelled and drained before the new one is stored.
+    #[tokio::test]
+    async fn send_drain_before_second_run() {
+        use crate::routes::{RunState, RunningTurn};
+        use std::sync::Arc;
+
+        let run_state = Arc::new(RunState::new());
+        let (old_tx, old_rx) = tokio::sync::watch::channel(false);
+        let old_turn_id = uuid::Uuid::new_v4();
+
+        // Spawn a task that blocks until the watch channel fires, then exits.
+        let old_task = tokio::spawn(async move {
+            let mut rx = old_rx;
+            loop {
+                if *rx.borrow() {
+                    break;
+                }
+                match rx.changed().await {
+                    Ok(()) => {}
+                    Err(_) => break,
+                }
+            }
+        });
+
+        // Store the old RunningTurn in the slot.
+        {
+            let mut slot = run_state.running_turn.lock().await;
+            *slot = Some(RunningTurn {
+                task: old_task,
+                cancellation_tx: old_tx,
+                thread_id: "thread-test".to_string(),
+                turn_id: old_turn_id,
+            });
+        }
+
+        // Create the new turn's components.
+        let (new_tx, _new_rx) = tokio::sync::watch::channel(false);
+        let new_turn_id = uuid::Uuid::new_v4();
+        let new_task = tokio::spawn(async move {});
+
+        // Simulate what send does: take the old RunningTurn, cancel it, store the new one.
+        let old_handle = {
+            let mut slot = run_state.running_turn.lock().await;
+            let old_handle = slot.take().map(|t| t.cancel());
+            *slot = Some(RunningTurn {
+                task: new_task,
+                cancellation_tx: new_tx,
+                thread_id: "thread-test".to_string(),
+                turn_id: new_turn_id,
+            });
+            old_handle
+        };
+
+        // Await the old handle — it should complete because it received the cancel signal.
+        match old_handle {
+            Some(old) => match tokio::time::timeout(std::time::Duration::from_secs(5), old).await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => panic!("old task panicked: {}", e),
+                Err(_) => panic!("old task did not exit within 5 seconds"),
+            },
+            None => panic!("expected an old handle to be returned"),
+        }
+
+        // Assert the slot now holds the new RunningTurn (identified by new_turn_id).
+        {
+            let slot = run_state.running_turn.lock().await;
+            assert!(slot.is_some(), "slot should hold the new RunningTurn");
+            assert_eq!(
+                slot.as_ref().map(|t| t.turn_id),
+                Some(new_turn_id),
+                "slot should hold the new turn_id"
             );
         }
     }
 
-    /// When the run was in `Streaming { round: 0 }` phase with accumulated
-    /// content, the cancel handler must insert a stopped assistant message
-    /// containing that partial content.
+    /// Verifies the turn_id comparison logic used when clearing the running_turn slot
+    /// on normal completion. A run must only clear the slot when it still holds its
+    /// own turn_id, preventing a finishing run from clobbering a newer run.
     #[tokio::test]
-    async fn cancel_run_with_streaming_phase_persists_partial_message() {
-        use crate::models::message::Message;
-        use crate::routes::{RunPhase, RunProgress, RunState};
-        use sqlx::SqlitePool;
+    async fn slot_cleared_on_normal_completion() {
+        use crate::routes::{RunState, RunningTurn};
         use std::sync::Arc;
 
-        let pool = SqlitePool::connect("sqlite::memory:")
-            .await
-            .expect("test db");
-        sqlx::migrate!("src/db/migrations")
-            .run(&pool)
-            .await
-            .expect("migrations");
-
-        let thread_id = "thread-cancel-streaming";
-        let user_msg_id = "user-msg-streaming";
-        sqlx::query("INSERT INTO users (id, display_name, created_at) VALUES ('user-1', 'Test User', '2024-01-01T00:00:00.000Z')")
-            .execute(&pool)
-            .await
-            .expect("insert user");
-        sqlx::query(
-            "INSERT INTO agent_personas (id, user_id, name, emoji, system_prompt, created_at, updated_at)
-             VALUES ('persona-1', 'user-1', 'Test', '🤖', 'You are helpful.', '2024-01-01T00:00:00.000Z', '2024-01-01T00:00:00.000Z')",
-        )
-        .execute(&pool)
-        .await
-        .expect("insert persona");
-        sqlx::query(
-            "INSERT INTO threads (id, user_id, persona_id, title, status, created_at, updated_at)
-             VALUES (?, 'user-1', 'persona-1', 'Test Thread', 'active', '2024-01-01T00:00:00.000Z', '2024-01-01T00:00:00.000Z')",
-        )
-        .bind(thread_id)
-        .execute(&pool)
-        .await
-        .expect("insert thread");
-        sqlx::query(
-            "INSERT INTO messages (id, thread_id, role, content, source, routine_id, visibility,
-                                   execution_id, event_type, stopped, created_at)
-             VALUES (?, ?, 'user', 'hello', 'user', NULL, 'visible', NULL, NULL, 0, '2024-01-01T00:00:00.000Z')",
-        )
-        .bind(user_msg_id)
-        .bind(thread_id)
-        .execute(&pool)
-        .await
-        .expect("insert user message");
-
-        let partial_content = "I was in the middle of responding when";
-
-        // Build RunState with progress in Streaming phase with partial content.
         let run_state = Arc::new(RunState::new());
+        let turn_id = uuid::Uuid::new_v4();
+        let (tx, _rx) = tokio::sync::watch::channel(false);
+        let task = tokio::spawn(async move {});
+
+        // Store a fake RunningTurn with our turn_id.
         {
-            let mut progress = run_state.progress.lock().await;
-            *progress = RunProgress::new(thread_id.to_string(), Some(user_msg_id.to_string()));
-            progress.phase = RunPhase::Streaming { round: 0 };
-            progress.assistant_content_so_far = partial_content.to_string();
+            let mut slot = run_state.running_turn.lock().await;
+            *slot = Some(RunningTurn {
+                task,
+                cancellation_tx: tx,
+                thread_id: "thread-test".to_string(),
+                turn_id,
+            });
         }
 
-        // Simulate what cancel_run does: acquire persist_lock, check for
-        // existing assistant message, insert stopped message if none.
-        let inserted_msg = {
-            let _lock = run_state.persist_lock.lock().await;
-
-            let user_created_at: Option<(String,)> =
-                sqlx::query_as("SELECT created_at FROM messages WHERE id = ?")
-                    .bind(user_msg_id)
-                    .fetch_optional(&pool)
-                    .await
-                    .expect("query user msg time");
-
-            let existing: Option<(String,)> = if let Some((ts,)) = user_created_at {
-                sqlx::query_as(
-                    "SELECT id FROM messages WHERE thread_id = ? AND role = 'assistant' AND created_at > ? LIMIT 1",
-                )
-                .bind(thread_id)
-                .bind(&ts)
-                .fetch_optional(&pool)
-                .await
-                .expect("query existing")
-            } else {
-                None
-            };
-
-            assert!(existing.is_none(), "no assistant message should exist yet");
-
-            let msg = Message::new_assistant_stopped(thread_id, partial_content);
-            sqlx::query(
-                "INSERT INTO messages (id, thread_id, role, content, source, routine_id,
-                                       visibility, execution_id, event_type, stopped, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            )
-            .bind(&msg.id)
-            .bind(&msg.thread_id)
-            .bind(&msg.role)
-            .bind(&msg.content)
-            .bind(&msg.source)
-            .bind(&msg.routine_id)
-            .bind(&msg.visibility)
-            .bind(&msg.execution_id)
-            .bind(&msg.event_type)
-            .bind(msg.stopped)
-            .bind(&msg.created_at)
-            .execute(&pool)
-            .await
-            .expect("insert stopped msg");
-
-            msg
-        };
-
-        // Verify the stopped message was inserted with the right content.
-        let row: Option<(String, i64)> = sqlx::query_as(
-            "SELECT content, stopped FROM messages WHERE id = ?",
-        )
-        .bind(&inserted_msg.id)
-        .fetch_optional(&pool)
-        .await
-        .expect("fetch inserted msg");
-
-        let (content, stopped) = row.expect("inserted message must exist");
-        assert_eq!(content, partial_content);
-        assert_eq!(stopped, 1, "stopped flag must be set");
-    }
-
-    /// When the run was in `PersistingMessage` phase and the run-loop already
-    /// committed the assistant row, the cancel handler must detect the existing
-    /// row and skip the duplicate insert.
-    #[tokio::test]
-    async fn cancel_run_with_persisting_phase_checks_for_existing_row() {
-        use crate::models::message::Message;
-        use crate::routes::{RunPhase, RunProgress, RunState};
-        use sqlx::SqlitePool;
-        use std::sync::Arc;
-
-        let pool = SqlitePool::connect("sqlite::memory:")
-            .await
-            .expect("test db");
-        sqlx::migrate!("src/db/migrations")
-            .run(&pool)
-            .await
-            .expect("migrations");
-
-        let thread_id = "thread-cancel-persisting";
-        let user_msg_id = "user-msg-persisting";
-        sqlx::query("INSERT INTO users (id, display_name, created_at) VALUES ('user-1', 'Test User', '2024-01-01T00:00:00.000Z')")
-            .execute(&pool)
-            .await
-            .expect("insert user");
-        sqlx::query(
-            "INSERT INTO agent_personas (id, user_id, name, emoji, system_prompt, created_at, updated_at)
-             VALUES ('persona-1', 'user-1', 'Test', '🤖', 'You are helpful.', '2024-01-01T00:00:00.000Z', '2024-01-01T00:00:00.000Z')",
-        )
-        .execute(&pool)
-        .await
-        .expect("insert persona");
-        sqlx::query(
-            "INSERT INTO threads (id, user_id, persona_id, title, status, created_at, updated_at)
-             VALUES (?, 'user-1', 'persona-1', 'Test Thread', 'active', '2024-01-01T00:00:00.000Z', '2024-01-01T00:00:00.000Z')",
-        )
-        .bind(thread_id)
-        .execute(&pool)
-        .await
-        .expect("insert thread");
-        sqlx::query(
-            "INSERT INTO messages (id, thread_id, role, content, source, routine_id, visibility,
-                                   execution_id, event_type, stopped, created_at)
-             VALUES (?, ?, 'user', 'hello', 'user', NULL, 'visible', NULL, NULL, 0, '2024-01-01T00:00:00.000Z')",
-        )
-        .bind(user_msg_id)
-        .bind(thread_id)
-        .execute(&pool)
-        .await
-        .expect("insert user message");
-
-        // Pre-insert the assistant message as the run-loop would have done.
-        let run_loop_msg = Message::new_assistant(thread_id, "Full completed response.");
-        sqlx::query(
-            "INSERT INTO messages (id, thread_id, role, content, source, routine_id, visibility,
-                                   execution_id, event_type, stopped, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(&run_loop_msg.id)
-        .bind(&run_loop_msg.thread_id)
-        .bind(&run_loop_msg.role)
-        .bind(&run_loop_msg.content)
-        .bind(&run_loop_msg.source)
-        .bind(&run_loop_msg.routine_id)
-        .bind(&run_loop_msg.visibility)
-        .bind(&run_loop_msg.execution_id)
-        .bind(&run_loop_msg.event_type)
-        .bind(run_loop_msg.stopped)
-        .bind(&run_loop_msg.created_at)
-        .execute(&pool)
-        .await
-        .expect("insert run-loop assistant msg");
-
-        let run_state = Arc::new(RunState::new());
+        // Verify the comparison matches and clear the slot.
         {
-            let mut progress = run_state.progress.lock().await;
-            *progress = RunProgress::new(thread_id.to_string(), Some(user_msg_id.to_string()));
-            progress.phase = RunPhase::PersistingMessage;
-            progress.assistant_content_so_far = "Full completed response.".to_string();
+            let mut slot = run_state.running_turn.lock().await;
+            assert_eq!(
+                slot.as_ref().map(|t| t.turn_id),
+                Some(turn_id),
+                "slot should contain our turn_id before clearing"
+            );
+            if slot.as_ref().map(|t| t.turn_id) == Some(turn_id) {
+                *slot = None;
+            }
         }
 
-        // Simulate the cancel handler's persist_lock section.
-        let inserted_duplicate = {
-            let _lock = run_state.persist_lock.lock().await;
+        // The slot should now be None after normal completion.
+        {
+            let slot = run_state.running_turn.lock().await;
+            assert!(
+                slot.is_none(),
+                "slot should be cleared after normal completion"
+            );
+        }
 
-            let user_created_at: Option<(String,)> =
-                sqlx::query_as("SELECT created_at FROM messages WHERE id = ?")
-                    .bind(user_msg_id)
-                    .fetch_optional(&pool)
-                    .await
-                    .expect("query user msg time");
+        // Verify: if a DIFFERENT turn_id is now in the slot, the stale run must NOT clear it.
+        let other_turn_id = uuid::Uuid::new_v4();
+        let (tx2, _rx2) = tokio::sync::watch::channel(false);
+        let task2 = tokio::spawn(async move {});
 
-            if let Some((ts,)) = user_created_at {
-                let existing: Option<(String,)> = sqlx::query_as(
-                    "SELECT id FROM messages WHERE thread_id = ? AND role = 'assistant' AND created_at > ? LIMIT 1",
-                )
-                .bind(thread_id)
-                .bind(&ts)
-                .fetch_optional(&pool)
-                .await
-                .expect("query existing");
+        {
+            let mut slot = run_state.running_turn.lock().await;
+            *slot = Some(RunningTurn {
+                task: task2,
+                cancellation_tx: tx2,
+                thread_id: "thread-test".to_string(),
+                turn_id: other_turn_id,
+            });
+        }
 
-                // Row exists — cancel handler must NOT insert.
-                existing.is_none()
-            } else {
-                true
+        // A stale run with the old turn_id attempts to clear the slot — it must not.
+        {
+            let mut slot = run_state.running_turn.lock().await;
+            if slot.as_ref().map(|t| t.turn_id) == Some(turn_id) {
+                *slot = None;
             }
-        };
+        }
 
-        assert!(
-            !inserted_duplicate,
-            "cancel handler must skip insert when run-loop already committed the row"
-        );
-
-        // Confirm exactly one assistant message row exists.
-        let count: (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM messages WHERE thread_id = ? AND role = 'assistant'")
-                .bind(thread_id)
-                .fetch_one(&pool)
-                .await
-                .expect("count");
-        assert_eq!(count.0, 1, "exactly one assistant message must exist");
-    }
-
-    /// Two concurrent callers holding `persist_lock` in sequence must result
-    /// in exactly one message row — whichever caller wins the lock first inserts;
-    /// the second caller finds the row and skips.
-    #[tokio::test]
-    async fn persist_lock_prevents_double_insert() {
-        use crate::models::message::Message;
-        use crate::routes::RunState;
-        use sqlx::SqlitePool;
-        use std::sync::Arc;
-
-        let pool = SqlitePool::connect("sqlite::memory:")
-            .await
-            .expect("test db");
-        sqlx::migrate!("src/db/migrations")
-            .run(&pool)
-            .await
-            .expect("migrations");
-
-        let thread_id = "thread-double-insert";
-        let user_msg_id = "user-msg-double";
-        sqlx::query("INSERT INTO users (id, display_name, created_at) VALUES ('user-1', 'Test User', '2024-01-01T00:00:00.000Z')")
-            .execute(&pool)
-            .await
-            .expect("insert user");
-        sqlx::query(
-            "INSERT INTO agent_personas (id, user_id, name, emoji, system_prompt, created_at, updated_at)
-             VALUES ('persona-1', 'user-1', 'Test', '🤖', 'You are helpful.', '2024-01-01T00:00:00.000Z', '2024-01-01T00:00:00.000Z')",
-        )
-        .execute(&pool)
-        .await
-        .expect("insert persona");
-        sqlx::query(
-            "INSERT INTO threads (id, user_id, persona_id, title, status, created_at, updated_at)
-             VALUES (?, 'user-1', 'persona-1', 'Test Thread', 'active', '2024-01-01T00:00:00.000Z', '2024-01-01T00:00:00.000Z')",
-        )
-        .bind(thread_id)
-        .execute(&pool)
-        .await
-        .expect("insert thread");
-        sqlx::query(
-            "INSERT INTO messages (id, thread_id, role, content, source, routine_id, visibility,
-                                   execution_id, event_type, stopped, created_at)
-             VALUES (?, ?, 'user', 'hello', 'user', NULL, 'visible', NULL, NULL, 0, '2024-01-01T00:00:00.000Z')",
-        )
-        .bind(user_msg_id)
-        .bind(thread_id)
-        .execute(&pool)
-        .await
-        .expect("insert user message");
-
-        let run_state = Arc::new(RunState::new());
-        let persist_lock = run_state.persist_lock.clone();
-
-        // Helper closure: attempt to insert an assistant message under the
-        // persist_lock, skipping if a row already exists.
-        let try_insert = |pool: SqlitePool, lock: Arc<tokio::sync::Mutex<()>>, content: String| async move {
-            let _guard = lock.lock().await;
-
-            let existing: Option<(String,)> = sqlx::query_as(
-                "SELECT id FROM messages WHERE thread_id = ? AND role = 'assistant' LIMIT 1",
-            )
-            .bind(thread_id)
-            .fetch_optional(&pool)
-            .await
-            .expect("query existing");
-
-            if existing.is_some() {
-                return false;
-            }
-
-            let msg = Message::new_assistant_stopped(thread_id, &content);
-            sqlx::query(
-                "INSERT INTO messages (id, thread_id, role, content, source, routine_id,
-                                       visibility, execution_id, event_type, stopped, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            )
-            .bind(&msg.id)
-            .bind(&msg.thread_id)
-            .bind(&msg.role)
-            .bind(&msg.content)
-            .bind(&msg.source)
-            .bind(&msg.routine_id)
-            .bind(&msg.visibility)
-            .bind(&msg.execution_id)
-            .bind(&msg.event_type)
-            .bind(msg.stopped)
-            .bind(&msg.created_at)
-            .execute(&pool)
-            .await
-            .expect("insert msg");
-
-            true
-        };
-
-        // Run both callers sequentially (lock serialises them).
-        let first_inserted = try_insert(pool.clone(), persist_lock.clone(), "partial content".to_string()).await;
-        let second_inserted = try_insert(pool.clone(), persist_lock.clone(), "partial content".to_string()).await;
-
-        assert!(first_inserted, "first caller must insert the row");
-        assert!(!second_inserted, "second caller must skip — row already exists");
-
-        let count: (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM messages WHERE thread_id = ? AND role = 'assistant'")
-                .bind(thread_id)
-                .fetch_one(&pool)
-                .await
-                .expect("count");
-        assert_eq!(count.0, 1, "exactly one assistant message must exist");
+        // The slot should still hold the newer turn because turn_ids differed.
+        {
+            let slot = run_state.running_turn.lock().await;
+            assert!(
+                slot.is_some(),
+                "slot should NOT be cleared when turn_ids differ"
+            );
+            assert_eq!(
+                slot.as_ref().map(|t| t.turn_id),
+                Some(other_turn_id),
+                "slot should still hold the new (other) turn_id"
+            );
+        }
     }
 }

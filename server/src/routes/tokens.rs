@@ -5,6 +5,7 @@ use axum::{
     Json,
 };
 use serde_json::json;
+use std::sync::Arc;
 
 use crate::{
     error::{AppError, AppResult},
@@ -28,7 +29,7 @@ async fn get_user_id(state: &AppState) -> AppResult<String> {
 }
 
 /// GET /api/mcp-servers
-pub async fn list_mcp(State(state): State<AppState>) -> AppResult<impl IntoResponse> {
+pub async fn list_mcp(State(state): State<Arc<AppState>>) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
 
     let servers: Vec<McpServer> = sqlx::query_as(
@@ -46,7 +47,7 @@ pub async fn list_mcp(State(state): State<AppState>) -> AppResult<impl IntoRespo
 
 /// GET /api/mcp-servers/:id
 pub async fn get_mcp(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
@@ -69,7 +70,7 @@ pub async fn get_mcp(
 
 /// POST /api/mcp-servers
 pub async fn create_mcp(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Json(payload): Json<CreateMcpServer>,
 ) -> AppResult<impl IntoResponse> {
     if payload.name.trim().is_empty() {
@@ -130,7 +131,7 @@ pub async fn create_mcp(
 
 /// PUT /api/mcp-servers/:id
 pub async fn update_mcp(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Json(payload): Json<UpdateMcpServer>,
 ) -> AppResult<impl IntoResponse> {
@@ -237,7 +238,7 @@ pub async fn update_mcp(
 /// populated after the connection manager completes the `tools/list`
 /// handshake.  Returns an empty array when the server is not yet connected.
 pub async fn list_mcp_tools(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
@@ -260,7 +261,7 @@ pub async fn list_mcp_tools(
 
 /// DELETE /api/mcp-servers/:id
 pub async fn delete_mcp(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
@@ -302,7 +303,7 @@ pub async fn delete_mcp(
 /// Register an FCM device token for push notifications.
 /// If the token already exists it is updated (platform may change).
 pub async fn register_device(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Json(payload): Json<RegisterDeviceToken>,
 ) -> AppResult<impl IntoResponse> {
     if payload.token.trim().is_empty() {
@@ -337,7 +338,7 @@ pub async fn register_device(
 /// Unregister a device token. Body: `{ "token": "<fcm_token>" }`.
 /// Returns 404 if the token was not registered.
 pub async fn unregister_device(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Json(payload): Json<DeleteDeviceToken>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
@@ -365,10 +366,10 @@ pub async fn unregister_device(
 ///
 /// The pairing token IS the auth token — the mobile app stores it in MMKV
 /// and sends it as a Bearer header on subsequent requests.
-pub async fn generate_pairing(State(state): State<AppState>) -> AppResult<impl IntoResponse> {
+pub async fn generate_pairing(State(state): State<Arc<AppState>>) -> AppResult<impl IntoResponse> {
     // The pairing payload is just the auth token + server metadata.
     // The mobile app will scan the QR, store the token, and use it for all requests.
-    let auth_token = state.auth_token.clone();
+    let auth_token = state.auth_token.read().unwrap().clone();
 
     // Try to determine the local server URL for the QR code.
     // In practice the UI knows its own URL and can embed it, but we provide
@@ -396,7 +397,7 @@ pub async fn generate_pairing(State(state): State<AppState>) -> AppResult<impl I
 /// Called by the mobile app after scanning the QR code to confirm pairing.
 /// Validates the token and returns success so the app knows it's connected.
 pub async fn complete_pairing(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Json(payload): Json<serde_json::Value>,
 ) -> AppResult<impl IntoResponse> {
     let token = payload

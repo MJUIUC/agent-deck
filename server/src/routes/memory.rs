@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -56,7 +58,7 @@ pub struct ListMemoryQuery {
 /// List all memories for a persona, newest first. Supports pagination via
 /// `limit` and `offset` query params.
 pub async fn list(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(persona_id): Path<String>,
     Query(query): Query<ListMemoryQuery>,
 ) -> AppResult<impl IntoResponse> {
@@ -77,7 +79,7 @@ pub async fn list(
 /// Manually create a memory entry for a persona. The `thread_id` is optional
 /// — manual entries don't have a source thread.
 pub async fn create(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(persona_id): Path<String>,
     Json(payload): Json<CreateMemory>,
 ) -> AppResult<impl IntoResponse> {
@@ -107,7 +109,7 @@ pub async fn create(
 /// Delete a single memory entry. Returns 404 if not found or not owned by
 /// the current user.
 pub async fn delete(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path((persona_id, memory_id)): Path<(String, String)>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
@@ -136,7 +138,7 @@ pub struct MemorySearchRequest {
 /// Full-text search over memories for a persona using SQLite FTS5.
 /// Returns results ordered by relevance (FTS rank).
 pub async fn search(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(persona_id): Path<String>,
     Json(payload): Json<MemorySearchRequest>,
 ) -> AppResult<impl IntoResponse> {

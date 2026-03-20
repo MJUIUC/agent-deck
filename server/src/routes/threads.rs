@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -31,7 +33,7 @@ pub struct ListThreadsQuery {
 /// GET /api/threads
 /// Optional query param: ?status=archived (default: active)
 pub async fn list(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Query(query): Query<ListThreadsQuery>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
@@ -118,7 +120,7 @@ pub async fn list(
 
 /// GET /api/threads/:id
 pub async fn get(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
@@ -143,7 +145,7 @@ pub async fn get(
 
 /// POST /api/threads
 pub async fn create(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Json(payload): Json<CreateThread>,
 ) -> AppResult<impl IntoResponse> {
     if payload.persona_id.trim().is_empty() {
@@ -222,7 +224,7 @@ pub async fn create(
 
 /// PUT /api/threads/:id
 pub async fn update(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Json(payload): Json<UpdateThread>,
 ) -> AppResult<impl IntoResponse> {
@@ -317,7 +319,7 @@ pub async fn update(
 /// this prevents accidental data loss and is the intended guard for the pending
 /// thread discard flow (which only calls this on zero-message threads).
 pub async fn delete(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
@@ -364,7 +366,7 @@ pub async fn delete(
 /// The underlying logic still lives in `services/title.rs` and is called by
 /// `agent::run_inner`.
 pub async fn generate_title(
-    State(_state): State<AppState>,
+    State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
 ) -> AppResult<impl IntoResponse> {
     Ok((
@@ -380,7 +382,7 @@ pub async fn generate_title(
 
 /// POST /api/threads/:id/archive
 pub async fn archive(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
@@ -389,7 +391,7 @@ pub async fn archive(
 
 /// POST /api/threads/:id/unarchive
 pub async fn unarchive(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
@@ -432,7 +434,7 @@ async fn set_thread_status(
 
 /// GET /api/threads/:id/mcp-servers
 pub async fn list_mcp_servers(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(thread_id): Path<String>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
@@ -452,7 +454,7 @@ pub async fn list_mcp_servers(
 
 /// POST /api/threads/:id/mcp-servers
 pub async fn attach_mcp(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(thread_id): Path<String>,
     Json(payload): Json<AttachMcpServer>,
 ) -> AppResult<impl IntoResponse> {
@@ -492,7 +494,7 @@ pub async fn attach_mcp(
 
 /// DELETE /api/threads/:id/mcp-servers/:mcp_id
 pub async fn detach_mcp(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path((thread_id, mcp_id)): Path<(String, String)>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;

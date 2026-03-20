@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -23,7 +25,7 @@ pub struct CompleteSetupRequest {
 /// Returns whether the first-run setup wizard has been completed.
 /// This endpoint is public (no auth required) so the setup wizard can
 /// check state before any token is configured.
-pub async fn get_status(State(state): State<AppState>) -> AppResult<impl IntoResponse> {
+pub async fn get_status(State(state): State<Arc<AppState>>) -> AppResult<impl IntoResponse> {
     let user_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users")
         .fetch_one(&state.pool)
         .await?;
@@ -44,7 +46,7 @@ pub async fn get_status(State(state): State<AppState>) -> AppResult<impl IntoRes
 /// setup as done in app_config. Idempotent — calling it again after setup
 /// is already complete returns an error rather than creating a second user.
 pub async fn complete(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Json(payload): Json<CompleteSetupRequest>,
 ) -> AppResult<impl IntoResponse> {
     if payload.display_name.trim().is_empty() {

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -45,7 +47,7 @@ async fn verify_thread_ownership(
 
 /// GET /api/threads/:id/routines
 pub async fn list(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(thread_id): Path<String>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
@@ -67,7 +69,7 @@ pub async fn list(
 
 /// GET /api/threads/:thread_id/routines/:routine_id
 pub async fn get(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path((thread_id, routine_id)): Path<(String, String)>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
@@ -95,7 +97,7 @@ pub async fn get(
 
 /// POST /api/threads/:id/routines
 pub async fn create(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(thread_id): Path<String>,
     Json(payload): Json<CreateRoutine>,
 ) -> AppResult<impl IntoResponse> {
@@ -151,7 +153,7 @@ pub async fn create(
 
 /// PUT /api/threads/:thread_id/routines/:routine_id
 pub async fn update(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path((thread_id, routine_id)): Path<(String, String)>,
     Json(payload): Json<UpdateRoutine>,
 ) -> AppResult<impl IntoResponse> {
@@ -235,7 +237,7 @@ pub async fn update(
 
 /// DELETE /api/threads/:thread_id/routines/:routine_id
 pub async fn delete(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path((thread_id, routine_id)): Path<(String, String)>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;

@@ -21,7 +21,7 @@ use axum::{
     },
 };
 use futures::stream::{Stream, StreamExt};
-use std::{convert::Infallible, time::Duration};
+use std::{convert::Infallible, sync::Arc, time::Duration};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::{BroadcastStream, ReceiverStream};
 
@@ -183,7 +183,7 @@ impl AppState {
 ///
 /// Per-thread SSE stream.  Each connected client gets its own mpsc channel.
 pub async fn thread_stream(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(thread_id): Path<String>,
 ) -> AppResult<impl IntoResponse> {
     let (tx, rx) = state.subscribe_thread(&thread_id);
@@ -223,7 +223,7 @@ pub async fn thread_stream(
 /// `GET /api/events`
 ///
 /// Global SSE stream backed by a `broadcast` channel.
-pub async fn global_stream(State(state): State<AppState>) -> AppResult<impl IntoResponse> {
+pub async fn global_stream(State(state): State<Arc<AppState>>) -> AppResult<impl IntoResponse> {
     let rx = state.subscribe_global();
 
     // Wrap the broadcast receiver as a Stream using tokio_stream's BroadcastStream,
@@ -273,7 +273,7 @@ pub async fn global_stream(State(state): State<AppState>) -> AppResult<impl Into
 /// dropped (i.e., when the SSE connection is closed by the client or the server).
 struct CleanupStream<S> {
     inner: S,
-    cleanup: Option<(AppState, String, mpsc::Sender<ThreadEvent>)>,
+    cleanup: Option<(Arc<AppState>, String, mpsc::Sender<ThreadEvent>)>,
 }
 
 impl<S> Drop for CleanupStream<S> {
@@ -306,7 +306,7 @@ mod tests {
     use crate::routes::AppState;
     use crate::services::copilot::GlobalEvent;
     use std::collections::HashMap;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, Mutex, RwLock};
     use tokio::sync::broadcast;
 
     fn make_state() -> AppState {
@@ -332,7 +332,7 @@ mod tests {
             },
             machine_secret: "test-secret".to_string(),
             credential_master_key: "test-master-key".to_string(),
-            auth_token: "test-token".to_string(),
+            auth_token: Arc::new(RwLock::new("test-token".to_string())),
             global_tx,
             thread_senders: Arc::new(Mutex::new(HashMap::new())),
             run_states: dashmap::DashMap::new(),

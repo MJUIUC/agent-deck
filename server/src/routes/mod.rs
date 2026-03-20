@@ -11,7 +11,7 @@ use dashmap::DashMap;
 use sqlx::SqlitePool;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicUsize;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
@@ -51,90 +51,42 @@ pub struct AgentJob {
     pub content: String,
 }
 
-// ─── Run-phase tracking ────────────────────────────────────────────────────────
+// ─── RunningTurn ──────────────────────────────────────────────────────────────
 
-/// Tracks exactly where in the run-loop execution is at any given moment.
-/// Written by the run-loop and read by `cancel_run` after an abort to
-/// determine what cleanup is needed and what partial state to persist.
-#[derive(Debug, Clone, PartialEq)]
-pub enum RunPhase {
-    /// Task has been spawned but is queued behind the semaphore.
-    Queued,
-
-    /// Semaphore acquired; assembling context, loading thread/persona/provider.
-    BuildingContext,
-
-    /// Actively streaming from the LLM. `round` is 0-indexed tool-call round number.
-    /// On round 0 this is the initial generation; round N > 0 means tool results
-    /// have been fed back and the model is generating again.
-    Streaming { round: usize },
-
-    /// A tool call has been dispatched and we are waiting for its result.
-    ExecutingTool { round: usize, tool_name: String },
-
-    /// Generation loop is done; the assistant message is being written to the DB.
-    PersistingMessage,
-
-    /// All work is complete. The task has exited normally.
-    Complete,
-}
-
-/// Live progress of the current run. Held in an `Arc<tokio::sync::Mutex<RunProgress>>`
-/// so both the run-loop (writer) and the cancel handler (reader) can access it safely
-/// across threads.
-pub struct RunProgress {
-    /// Current phase. Updated at every major transition.
-    pub phase: RunPhase,
-
-    /// The thread this run belongs to.
+/// Holds the handle and cancellation channel for a single active agent turn.
+pub struct RunningTurn {
+    pub task: JoinHandle<()>,
+    pub cancellation_tx: tokio::sync::watch::Sender<bool>,
     pub thread_id: String,
-
-    /// Set once the user message has been persisted to the DB (happens in the
-    /// HTTP handler before spawn, so this is always Some by the time the task starts).
-    pub user_message_id: Option<String>,
-
-    /// Accumulates the assistant's text content as tokens arrive. Updated on
-    /// every token chunk so the cancel handler always has the latest partial
-    /// content available to persist.
-    pub assistant_content_so_far: String,
-
-    /// The current tool-call round number, mirroring the loop counter inside
-    /// `generation_loop`. Kept here so the cancel handler can reason about
-    /// whether orphaned hidden tool messages might exist.
-    pub tool_round: usize,
+    pub turn_id: uuid::Uuid,
 }
 
-impl RunProgress {
-    pub fn new(thread_id: String, user_message_id: Option<String>) -> Self {
-        Self {
-            phase: RunPhase::Queued,
-            thread_id,
-            user_message_id,
-            assistant_content_so_far: String::new(),
-            tool_round: 0,
-        }
+impl RunningTurn {
+    /// Signal the task to cancel cooperatively and return the JoinHandle
+    /// so the caller can await its completion.
+    pub fn cancel(self) -> JoinHandle<()> {
+        // Harmless if the receiver was already dropped (task already done).
+        let _ = self.cancellation_tx.send(true);
+        self.task
     }
 }
 
-/// Per-thread run state.  Controls concurrency and task lifecycle for agent
+// ─── Per-thread run state ─────────────────────────────────────────────────────
+
+/// Per-thread run state. Controls concurrency and task lifecycle for agent
 /// runs on a single thread.
 ///
 /// - `semaphore`: capacity-1 semaphore that serialises concurrent runs.
 ///   The second run waits behind the first rather than being rejected.
 /// - `depth`: count of tasks that have been spawned and not yet completed.
 ///   Used to reject sends that would exceed `MAX_DEPTH`.
-/// - `task_handle`: handle to the currently running task; `cancel_run` calls
-///   `.abort()` on this to immediately stop the run at the next `.await`.
-/// - `progress`: live progress written by the run-loop so `cancel_run` knows
-///   what cleanup to perform after the abort.
-/// - `persist_lock`: mutex held during the assistant-message INSERT by both the
-///   run-loop and `cancel_run`, preventing double-insert races.
+/// - `running_turn`: the currently active `RunningTurn`, if any. `cancel_run`
+///   takes this slot and calls `cancel()` to send the cooperative shutdown
+///   signal, then awaits the handle.
 pub struct RunState {
     pub semaphore: tokio::sync::Semaphore,
     pub depth: AtomicUsize,
-    pub task_handle: tokio::sync::Mutex<Option<JoinHandle<()>>>,
-    pub progress: Arc<tokio::sync::Mutex<RunProgress>>,
-    pub persist_lock: Arc<tokio::sync::Mutex<()>>,
+    pub running_turn: tokio::sync::Mutex<Option<RunningTurn>>,
 }
 
 impl RunState {
@@ -142,12 +94,7 @@ impl RunState {
         Self {
             semaphore: tokio::sync::Semaphore::new(1),
             depth: AtomicUsize::new(0),
-            task_handle: tokio::sync::Mutex::new(None),
-            progress: Arc::new(tokio::sync::Mutex::new(RunProgress::new(
-                String::new(),
-                None,
-            ))),
-            persist_lock: Arc::new(tokio::sync::Mutex::new(())),
+            running_turn: tokio::sync::Mutex::new(None),
         }
     }
 }
@@ -159,7 +106,7 @@ pub struct AppState {
     pub config: Config,
     pub machine_secret: String,
     pub credential_master_key: String,
-    pub auth_token: String,
+    pub auth_token: Arc<RwLock<String>>,
     /// Global SSE broadcast channel.  All connected global-stream clients
     /// subscribe via `global_tx.subscribe()`.
     pub global_tx: broadcast::Sender<GlobalEvent>,
@@ -226,19 +173,19 @@ pub async fn build_router(
         config.mcp_dir.clone(),
     );
 
-    let state = AppState {
+    let state = Arc::new(AppState {
         pool,
         config: config.clone(),
         machine_secret,
         credential_master_key: master_key.clone(),
-        auth_token,
+        auth_token: Arc::new(RwLock::new(auth_token)),
         global_tx,
         thread_senders: Arc::new(Mutex::new(HashMap::new())),
         run_states: DashMap::new(),
         copilot: Some(copilot_handle),
         mcp: mcp.clone(),
         built_in_tools: Arc::new(tools_service::built_in_tools()),
-    };
+    });
 
     // Start copilot-api supervision in the background.
     copilot.start();
@@ -454,7 +401,7 @@ pub async fn build_router(
 /// Auth middleware: validates Bearer token or session cookie.
 /// Localhost requests (127.0.0.1 / ::1) bypass auth entirely.
 async fn auth_middleware(
-    axum::extract::State(state): axum::extract::State<AppState>,
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
     request: Request<Body>,
     next: Next,
 ) -> Result<Response, AppError> {
@@ -475,7 +422,7 @@ async fn auth_middleware(
     if let Some(auth_header) = request.headers().get(header::AUTHORIZATION) {
         if let Ok(auth_str) = auth_header.to_str() {
             if let Some(token) = auth_str.strip_prefix("Bearer ") {
-                if token == state.auth_token {
+                if token == *state.auth_token.read().unwrap() {
                     return Ok(next.run(request).await);
                 } else {
                     warn!("Invalid Bearer token presented");
@@ -491,7 +438,7 @@ async fn auth_middleware(
             for cookie_part in cookie_str.split(';') {
                 let cookie_part = cookie_part.trim();
                 if let Some(value) = cookie_part.strip_prefix("agent_deck_session=") {
-                    if value == state.auth_token {
+                    if value == *state.auth_token.read().unwrap() {
                         return Ok(next.run(request).await);
                     } else {
                         warn!("Invalid session cookie presented");
@@ -687,83 +634,16 @@ mod tests {
         );
     }
 
-    // ── New RunState task-handle tests ────────────────────────────────────────
+    // ── RunningTurn initial state test ───────────────────────────────────────
 
     #[tokio::test]
-    async fn run_state_task_handle_is_none_initially() {
+    async fn run_state_running_turn_is_none_initially() {
         let state = RunState::new();
-        let handle = state.task_handle.lock().await;
+        let slot = state.running_turn.lock().await;
         assert!(
-            handle.is_none(),
-            "task_handle must be None on a freshly created RunState"
+            slot.is_none(),
+            "running_turn must be None on a freshly created RunState"
         );
-    }
-
-    #[tokio::test]
-    async fn run_state_abort_on_none_handle_is_noop() {
-        let state = RunState::new();
-        // Acquiring the lock and calling abort on a None handle must not panic.
-        let handle = state.task_handle.lock().await;
-        if let Some(h) = handle.as_ref() {
-            h.abort();
-        }
-        // If we reach here without panicking, the test passes.
-    }
-
-    // ── RunPhase / RunProgress tests ──────────────────────────────────────────
-
-    #[test]
-    fn run_phase_transitions_in_order() {
-        // Verify that all RunPhase variants are distinct and comparable via PartialEq.
-        assert_eq!(RunPhase::Queued, RunPhase::Queued);
-        assert_eq!(RunPhase::BuildingContext, RunPhase::BuildingContext);
-        assert_eq!(
-            RunPhase::Streaming { round: 0 },
-            RunPhase::Streaming { round: 0 }
-        );
-        assert_ne!(
-            RunPhase::Streaming { round: 0 },
-            RunPhase::Streaming { round: 1 }
-        );
-        assert_eq!(
-            RunPhase::ExecutingTool {
-                round: 1,
-                tool_name: "save_memory".to_string()
-            },
-            RunPhase::ExecutingTool {
-                round: 1,
-                tool_name: "save_memory".to_string()
-            },
-        );
-        assert_ne!(
-            RunPhase::ExecutingTool {
-                round: 0,
-                tool_name: "a".to_string()
-            },
-            RunPhase::ExecutingTool {
-                round: 0,
-                tool_name: "b".to_string()
-            },
-        );
-        assert_eq!(RunPhase::PersistingMessage, RunPhase::PersistingMessage);
-        assert_eq!(RunPhase::Complete, RunPhase::Complete);
-        // Cross-variant comparisons must not be equal.
-        assert_ne!(RunPhase::Queued, RunPhase::BuildingContext);
-        assert_ne!(
-            RunPhase::Streaming { round: 0 },
-            RunPhase::PersistingMessage
-        );
-        assert_ne!(RunPhase::PersistingMessage, RunPhase::Complete);
-    }
-
-    #[test]
-    fn run_progress_content_accumulates() {
-        let mut progress = RunProgress::new("thread-1".to_string(), Some("msg-1".to_string()));
-        assert!(progress.assistant_content_so_far.is_empty());
-
-        progress.assistant_content_so_far.push_str("Hello");
-        progress.assistant_content_so_far.push_str(", world");
-        assert_eq!(progress.assistant_content_so_far, "Hello, world");
     }
 
     #[tokio::test]
@@ -794,7 +674,7 @@ mod tests {
             },
             machine_secret: "test-secret".to_string(),
             credential_master_key: "test-master-key".to_string(),
-            auth_token: "test-token".to_string(),
+            auth_token: Arc::new(RwLock::new("test-token".to_string())),
             global_tx,
             thread_senders: Arc::new(Mutex::new(HashMap::new())),
             run_states: dashmap::DashMap::new(),
@@ -841,7 +721,7 @@ mod tests {
             },
             machine_secret: "test-secret".to_string(),
             credential_master_key: "test-master-key".to_string(),
-            auth_token: "test-token".to_string(),
+            auth_token: Arc::new(RwLock::new("test-token".to_string())),
             global_tx,
             thread_senders: Arc::new(Mutex::new(HashMap::new())),
             run_states: dashmap::DashMap::new(),

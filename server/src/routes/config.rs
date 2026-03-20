@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use serde_json::json;
 
@@ -9,7 +11,7 @@ use crate::{error::AppResult, routes::AppState};
 /// Currently returns whether setup is complete and the server port.
 /// Sensitive values (auth token) are never returned here — they are
 /// managed via the auth endpoints.
-pub async fn get_config(State(state): State<AppState>) -> AppResult<impl IntoResponse> {
+pub async fn get_config(State(state): State<Arc<AppState>>) -> AppResult<impl IntoResponse> {
     let user_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users")
         .fetch_one(&state.pool)
         .await?;

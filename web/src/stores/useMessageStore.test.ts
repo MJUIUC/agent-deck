@@ -253,6 +253,15 @@ describe("appendToken", () => {
   });
 
   it("accumulates tokens in streaming content", () => {
+    useMessageStore.setState({
+      threads: {
+        t1: {
+          messages: [],
+          phase: { status: "sending", optimisticId: "optimistic-1" },
+        },
+      },
+    });
+
     useMessageStore.getState().appendToken("t1", "Hello");
     useMessageStore.getState().appendToken("t1", " world");
 
@@ -264,6 +273,15 @@ describe("appendToken", () => {
   });
 
   it("ignores empty string tokens", () => {
+    useMessageStore.setState({
+      threads: {
+        t1: {
+          messages: [],
+          phase: { status: "sending", optimisticId: "optimistic-1" },
+        },
+      },
+    });
+
     useMessageStore.getState().appendToken("t1", "Hello");
     useMessageStore.getState().appendToken("t1", "");
 
@@ -282,6 +300,15 @@ describe("appendToken", () => {
   });
 
   it("does not affect other threads", () => {
+    useMessageStore.setState({
+      threads: {
+        t1: {
+          messages: [],
+          phase: { status: "sending", optimisticId: "optimistic-1" },
+        },
+      },
+    });
+
     useMessageStore.getState().appendToken("t1", "Hello");
 
     expect(getThread("t2")).toBeUndefined();
@@ -811,7 +838,7 @@ describe("concurrency", () => {
       }
     });
 
-    it("appendToken while phase is error transitions to streaming with content starting from empty", () => {
+    it("appendToken while phase is error is ignored — stale tokens do not reopen streaming", () => {
       useMessageStore.setState({
         threads: {
           t1: {
@@ -828,14 +855,10 @@ describe("concurrency", () => {
       useMessageStore.getState().appendToken("t1", "Recovery token");
 
       const phase = getThread("t1").phase;
-      expect(phase.status).toBe("streaming");
-      if (phase.status === "streaming") {
-        // Content starts from empty — error content is not carried over
-        expect(phase.content).toBe("Recovery token");
-      }
+      expect(phase.status).toBe("error");
     });
 
-    it("appendToken while phase is idle transitions to streaming", () => {
+    it("appendToken while phase is idle is ignored — stale tokens after cancel do not reopen streaming", () => {
       useMessageStore.setState({
         threads: {
           t1: { messages: [], phase: { status: "idle" } },
@@ -845,10 +868,7 @@ describe("concurrency", () => {
       useMessageStore.getState().appendToken("t1", "First token");
 
       const phase = getThread("t1").phase;
-      expect(phase.status).toBe("streaming");
-      if (phase.status === "streaming") {
-        expect(phase.content).toBe("First token");
-      }
+      expect(phase.status).toBe("idle");
     });
   });
 });

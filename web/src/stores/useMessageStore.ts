@@ -174,6 +174,16 @@ const storeCreator: StateCreator<MessageStore> = (set, get) => ({
     if (!token) return;
     set((state) => {
       const thread = getThread(state.threads, threadId);
+      // Only accept tokens when the phase expects them. After a cancel
+      // (phase = idle) stale SSE tokens may still arrive before the server
+      // task has seen the cancellation signal — ignore them so the streaming
+      // bubble doesn't reappear.
+      if (
+        thread.phase.status !== "sending" &&
+        thread.phase.status !== "streaming"
+      ) {
+        return state;
+      }
       const currentContent =
         thread.phase.status === "streaming" ? thread.phase.content : "";
       return {

@@ -5,6 +5,7 @@ use axum::{
     Json,
 };
 use serde_json::json;
+use std::sync::Arc;
 
 use crate::{
     error::{AppError, AppResult},
@@ -24,7 +25,7 @@ async fn get_user_id(state: &AppState) -> AppResult<String> {
 }
 
 /// GET /api/providers
-pub async fn list(State(state): State<AppState>) -> AppResult<impl IntoResponse> {
+pub async fn list(State(state): State<Arc<AppState>>) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
 
     let providers: Vec<Provider> = sqlx::query_as(
@@ -44,7 +45,7 @@ pub async fn list(State(state): State<AppState>) -> AppResult<impl IntoResponse>
 
 /// GET /api/providers/:id
 pub async fn get(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
@@ -70,7 +71,7 @@ pub async fn get(
 
 /// POST /api/providers
 pub async fn create(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Json(payload): Json<CreateProvider>,
 ) -> AppResult<impl IntoResponse> {
     if payload.name.trim().is_empty() {
@@ -135,7 +136,7 @@ pub async fn create(
 
 /// PUT /api/providers/:id
 pub async fn update(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Json(payload): Json<UpdateProvider>,
 ) -> AppResult<impl IntoResponse> {
@@ -215,7 +216,7 @@ pub async fn update(
 
 /// DELETE /api/providers/:id
 pub async fn delete(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
@@ -238,7 +239,7 @@ pub async fn delete(
 /// Tests the provider connection by calling its /v1/models endpoint.
 /// Returns the list of available models on success.
 pub async fn test_connection(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
@@ -314,7 +315,9 @@ async fn read_github_token() -> Option<String> {
 ///
 /// Returns whether a GitHub token is present in the copilot-api token file.
 /// Also reflects the sidecar process status when available.
-pub async fn copilot_auth_status(State(state): State<AppState>) -> AppResult<impl IntoResponse> {
+pub async fn copilot_auth_status(
+    State(state): State<Arc<AppState>>,
+) -> AppResult<impl IntoResponse> {
     let process_status = match state.copilot {
         Some(ref svc) => svc.status().await.as_str().to_string(),
         None => "unavailable".to_string(),
@@ -341,7 +344,7 @@ pub async fn copilot_auth_status(State(state): State<AppState>) -> AppResult<imp
 /// Calls GitHub's device-code endpoint directly and returns the user_code +
 /// verification_uri for the UI to display.  The device_code is also returned
 /// so the UI can poll /auth-poll to complete the flow.
-pub async fn copilot_auth_start(_state: State<AppState>) -> AppResult<impl IntoResponse> {
+pub async fn copilot_auth_start(_state: State<Arc<AppState>>) -> AppResult<impl IntoResponse> {
     // Same client_id and scopes used by copilot-api itself.
     let client_id = "Iv1.b507a08c87ecfe98";
     let scope = "read:user";
@@ -384,7 +387,7 @@ pub async fn copilot_auth_start(_state: State<AppState>) -> AppResult<impl IntoR
 /// On success the token is written to ~/.local/share/copilot-api/github_token
 /// and the copilot-api sidecar is restarted so it loads the new token.
 pub async fn copilot_auth_poll(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Json(body): Json<serde_json::Value>,
 ) -> AppResult<impl IntoResponse> {
     let device_code = body
@@ -459,7 +462,7 @@ pub async fn copilot_auth_poll(
 /// Public endpoint (no auth, no DB) — proxies the model list from the
 /// copilot-api sidecar. Used by the setup wizard before setup is complete
 /// so Step 4 can populate the model dropdown without a user row in the DB.
-pub async fn copilot_models(State(state): State<AppState>) -> AppResult<impl IntoResponse> {
+pub async fn copilot_models(State(state): State<Arc<AppState>>) -> AppResult<impl IntoResponse> {
     let base_url = match state.copilot {
         Some(ref svc) => svc.base_url(),
         None => {

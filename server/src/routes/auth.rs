@@ -6,6 +6,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::sync::Arc;
 
 use crate::{
     error::{AppError, AppResult},
@@ -34,7 +35,7 @@ pub struct LoginData {
 /// On success, sets an httpOnly session cookie and returns `{ "data": { "valid": true } }`.
 /// On failure, returns 401.
 pub async fn login(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Json(payload): Json<LoginRequest>,
 ) -> AppResult<impl IntoResponse> {
     let valid = auth_service::validate_token(&state.pool, &payload.token).await?;
@@ -99,8 +100,9 @@ pub async fn logout() -> impl IntoResponse {
 ///
 /// The new token is returned in the response body AND logged to the terminal.
 /// The caller is responsible for updating any connected devices.
-pub async fn rotate_token(State(state): State<AppState>) -> AppResult<impl IntoResponse> {
+pub async fn rotate_token(State(state): State<Arc<AppState>>) -> AppResult<impl IntoResponse> {
     let new_token = auth_service::rotate_auth_token(&state.pool).await?;
+    *state.auth_token.write().unwrap() = new_token.clone();
 
     tracing::info!(
         "Auth token rotated. New token: {}...{} (see full token in response)",

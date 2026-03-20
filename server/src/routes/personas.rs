@@ -5,6 +5,7 @@ use axum::{
     Json,
 };
 use serde_json::json;
+use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 
 use crate::{
@@ -24,7 +25,7 @@ async fn get_user_id(state: &AppState) -> AppResult<String> {
 }
 
 /// GET /api/personas
-pub async fn list(State(state): State<AppState>) -> AppResult<impl IntoResponse> {
+pub async fn list(State(state): State<Arc<AppState>>) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
 
     let personas: Vec<AgentPersona> = sqlx::query_as(
@@ -43,7 +44,7 @@ pub async fn list(State(state): State<AppState>) -> AppResult<impl IntoResponse>
 
 /// GET /api/personas/:id
 pub async fn get(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
@@ -67,7 +68,7 @@ pub async fn get(
 
 /// POST /api/personas
 pub async fn create(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Json(payload): Json<CreateAgentPersona>,
 ) -> AppResult<impl IntoResponse> {
     if payload.name.trim().is_empty() {
@@ -125,7 +126,7 @@ pub async fn create(
 
 /// PUT /api/personas/:id
 pub async fn update(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Json(payload): Json<UpdateAgentPersona>,
 ) -> AppResult<impl IntoResponse> {
@@ -225,7 +226,7 @@ pub async fn update(
 
 /// DELETE /api/personas/:id
 pub async fn delete(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
@@ -259,7 +260,7 @@ pub async fn delete(
 /// Stores it in `data/avatars/<persona_id>.<ext>` and updates the persona's
 /// `avatar_path` field. Returns a serveable URL for the uploaded avatar.
 pub async fn upload_avatar(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     mut multipart: Multipart,
 ) -> AppResult<impl IntoResponse> {

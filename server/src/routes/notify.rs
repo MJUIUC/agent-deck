@@ -18,6 +18,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 use crate::{
     error::{AppError, AppResult},
@@ -152,7 +153,7 @@ pub struct NotifyResponse {
 ///   2. Broadcast a `system_event` SSE event to connected clients.
 ///   3. Trigger the agent run-loop (for `routine_fired`).
 pub async fn notify(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(thread_id): Path<String>,
     Json(body): Json<NotifyRequest>,
 ) -> AppResult<impl IntoResponse> {
@@ -210,40 +211,38 @@ pub async fn notify(
         let tid = thread_id.clone();
         let trigger_content = content.clone();
 
-        // Reset progress BEFORE spawning so cancel_run always has a valid
-        // RunProgress to read, even if the task hasn't started yet.
-        {
-            let mut progress = run_state.progress.lock().await;
-            *progress = crate::routes::RunProgress::new(tid.clone(), None);
-        }
+        let (cancellation_tx, cancellation_rx) = tokio::sync::watch::channel(false);
+        let turn_id = uuid::Uuid::new_v4();
 
-        let progress = run_state.progress.clone();
-        let persist_lock = run_state.persist_lock.clone();
-
-        let run_state_for_task = run_state.clone();
-
-        // Lock task_handle BEFORE spawning and hold it until the handle is
-        // stored — the same race-free pattern used in the send handler.
-        let mut handle_lock = run_state.task_handle.lock().await;
-
-        let handle = tokio::spawn(async move {
-            // Block until the caller has stored our handle, guaranteeing
-            // cancel_run can always find and abort us.
-            {
-                let _ = run_state_for_task.task_handle.lock().await;
-            }
-
-            // Acquire semaphore — queues behind any in-progress run.
-            let _permit = run_state_for_task.semaphore.acquire().await.unwrap();
-
-            crate::services::agent::run(state_clone, tid, trigger_content, progress, persist_lock)
+        let handle = tokio::spawn({
+            let run_state = run_state.clone();
+            let state = state_clone.clone();
+            let tid = tid.clone();
+            let trigger_content = trigger_content.clone();
+            async move {
+                let _permit = run_state.semaphore.acquire().await.unwrap();
+                crate::services::agent::run(
+                    state,
+                    tid,
+                    trigger_content,
+                    cancellation_rx,
+                    run_state.clone(),
+                    turn_id,
+                )
                 .await;
-
-            run_state_for_task.depth.fetch_sub(1, Ordering::SeqCst);
+                run_state.depth.fetch_sub(1, Ordering::SeqCst);
+            }
         });
 
-        *handle_lock = Some(handle);
-        drop(handle_lock);
+        {
+            let mut slot = run_state.running_turn.lock().await;
+            *slot = Some(crate::routes::RunningTurn {
+                task: handle,
+                cancellation_tx,
+                thread_id: thread_id.clone(),
+                turn_id,
+            });
+        }
     }
 
     Ok(Json(json!({
