@@ -15,7 +15,7 @@ import type {
 const IDLE: ThreadPhase = { status: "idle" };
 
 function getThread(threads: ThreadMap, threadId: string): ThreadState {
-  return threads[threadId] ?? { messages: [], phase: IDLE };
+  return threads[threadId] ?? { messages: [], phase: IDLE, queuedCount: 0 };
 }
 
 function setThread(
@@ -99,13 +99,25 @@ const storeCreator: StateCreator<MessageStore> = (set, get) => ({
       created_at: new Date().toISOString(),
     };
 
-    // Transition: idle → sending, append optimistic message
+    // If a run is already active (streaming or in the optimistic sending
+    // window), don't overwrite the phase — just append the optimistic message
+    // and increment the queue counter so the UI can show "N queued".
+    // If idle (or error), transition normally to "sending".
+    let wasActive = false;
     set((state) => {
       const thread = getThread(state.threads, threadId);
+      wasActive =
+        thread.phase.status === "streaming" ||
+        thread.phase.status === "sending";
       return {
         threads: setThread(state.threads, threadId, {
           messages: [...thread.messages, optimisticUserMsg],
-          phase: { status: "sending", optimisticId },
+          ...(wasActive
+            ? { queuedCount: (thread.queuedCount ?? 0) + 1 }
+            : {
+                phase: { status: "sending", optimisticId },
+                queuedCount: thread.queuedCount ?? 0,
+              }),
         }),
       };
     });
@@ -130,14 +142,17 @@ const storeCreator: StateCreator<MessageStore> = (set, get) => ({
         };
       });
     } catch (err) {
-      // Transition: sending → idle, remove optimistic message
+      // Roll back: remove the optimistic message and undo the queue increment.
+      // If we were active (didn't change phase), leave the phase alone.
+      // If we were idle (set phase to sending), revert to idle.
       set((state) => {
         const thread = getThread(state.threads, threadId);
         const messages = thread.messages.filter((m) => m.id !== optimisticId);
         return {
           threads: setThread(state.threads, threadId, {
             messages,
-            phase: IDLE,
+            ...(wasActive ? {} : { phase: IDLE }),
+            queuedCount: Math.max(0, (thread.queuedCount ?? 0) - 1),
           }),
         };
       });
@@ -174,23 +189,34 @@ const storeCreator: StateCreator<MessageStore> = (set, get) => ({
     if (!token) return;
     set((state) => {
       const thread = getThread(state.threads, threadId);
-      // Only accept tokens when the phase expects them. After a cancel
-      // (phase = idle) stale SSE tokens may still arrive before the server
-      // task has seen the cancellation signal — ignore them so the streaming
-      // bubble doesn't reappear.
-      if (
-        thread.phase.status !== "sending" &&
-        thread.phase.status !== "streaming"
-      ) {
-        return state;
+      const phase = thread.phase;
+
+      if (phase.status === "sending" || phase.status === "streaming") {
+        // Normal case: active run is streaming.
+        const currentContent =
+          phase.status === "streaming" ? phase.content : "";
+        return {
+          threads: setThread(state.threads, threadId, {
+            phase: { status: "streaming", content: currentContent + token },
+          }),
+        };
       }
-      const currentContent =
-        thread.phase.status === "streaming" ? thread.phase.content : "";
-      return {
-        threads: setThread(state.threads, threadId, {
-          phase: { status: "streaming", content: currentContent + token },
-        }),
-      };
+
+      if (phase.status === "idle" && (thread.queuedCount ?? 0) > 0) {
+        // A queued message is now starting to stream. Transition to streaming
+        // and decrement the queue counter so the indicator updates immediately.
+        return {
+          threads: setThread(state.threads, threadId, {
+            phase: { status: "streaming", content: token },
+            queuedCount: Math.max(0, (thread.queuedCount ?? 0) - 1),
+          }),
+        };
+      }
+
+      // Any other phase (error, or idle with no queue) — ignore stale tokens.
+      // After a cancel (phase = idle, queuedCount = 0) stale SSE tokens from
+      // the cancelled run must not reopen the streaming bubble.
+      return state;
     });
   },
 

@@ -217,6 +217,8 @@ export type ThreadPhase =
 export interface ThreadState {
   messages: Message[];
   phase: ThreadPhase;
+  /** Number of messages queued behind the currently active run. */
+  queuedCount?: number;
 }
 
 export type ThreadMap = Record<string, ThreadState>;

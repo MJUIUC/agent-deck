@@ -1024,3 +1024,259 @@ describe("cancelRun", () => {
     expect(getThread("t1").messages.some((m) => m.id === "a1")).toBe(true);
   });
 });
+
+// ── queuedCount ───────────────────────────────────────────────────────────────
+
+describe("queuedCount — sending while active", () => {
+  beforeEach(() => {
+    useMessageStore.setState({ threads: {} });
+    vi.clearAllMocks();
+    mockMessagesApi.send.mockResolvedValue({
+      data: makeMessage("real-queued", "t1", "user", "queued msg"),
+    });
+    mockMessagesApi.cancel.mockResolvedValue({});
+  });
+
+  it("sendMessage while streaming does not overwrite the streaming phase", async () => {
+    useMessageStore.setState({
+      threads: {
+        t1: {
+          messages: [makeMessage("m1", "t1", "user", "first")],
+          phase: { status: "streaming", content: "partial response" },
+        },
+      },
+    });
+
+    const sendPromise = useMessageStore
+      .getState()
+      .sendMessage("t1", "queued msg");
+
+    // Phase must still be streaming — not overwritten to "sending"
+    const phase = getThread("t1").phase;
+    expect(phase.status).toBe("streaming");
+    if (phase.status === "streaming") {
+      expect(phase.content).toBe("partial response");
+    }
+
+    await sendPromise;
+  });
+
+  it("sendMessage while streaming increments queuedCount", async () => {
+    useMessageStore.setState({
+      threads: {
+        t1: {
+          messages: [],
+          phase: { status: "streaming", content: "hello" },
+        },
+      },
+    });
+
+    const sendPromise = useMessageStore
+      .getState()
+      .sendMessage("t1", "queued msg");
+
+    expect(getThread("t1").queuedCount).toBe(1);
+
+    await sendPromise;
+  });
+
+  it("sendMessage while sending increments queuedCount without overwriting phase", async () => {
+    useMessageStore.setState({
+      threads: {
+        t1: {
+          messages: [],
+          phase: { status: "sending", optimisticId: "optimistic-old" },
+        },
+      },
+    });
+
+    const sendPromise = useMessageStore
+      .getState()
+      .sendMessage("t1", "queued msg");
+
+    const phase = getThread("t1").phase;
+    expect(phase.status).toBe("sending");
+    if (phase.status === "sending") {
+      expect(phase.optimisticId).toBe("optimistic-old");
+    }
+    expect(getThread("t1").queuedCount).toBe(1);
+
+    await sendPromise;
+  });
+
+  it("two queued messages accumulate queuedCount correctly", async () => {
+    useMessageStore.setState({
+      threads: {
+        t1: {
+          messages: [],
+          phase: { status: "streaming", content: "streaming…" },
+        },
+      },
+    });
+
+    const p1 = useMessageStore.getState().sendMessage("t1", "msg B");
+    expect(getThread("t1").queuedCount).toBe(1);
+
+    const p2 = useMessageStore.getState().sendMessage("t1", "msg C");
+    expect(getThread("t1").queuedCount).toBe(2);
+
+    await Promise.all([p1, p2]);
+  });
+
+  it("sendMessage from idle sets queuedCount to 0 (normal path)", async () => {
+    // No pre-existing active run — queuedCount stays 0.
+    const sendPromise = useMessageStore
+      .getState()
+      .sendMessage("t1", "first msg");
+
+    expect(getThread("t1").queuedCount ?? 0).toBe(0);
+
+    await sendPromise;
+  });
+
+  it("sendMessage error while queued decrements queuedCount and leaves phase alone", async () => {
+    mockMessagesApi.send.mockRejectedValue(new Error("network"));
+
+    useMessageStore.setState({
+      threads: {
+        t1: {
+          messages: [],
+          phase: { status: "streaming", content: "active" },
+        },
+      },
+    });
+
+    await useMessageStore
+      .getState()
+      .sendMessage("t1", "queued msg")
+      .catch(() => {});
+
+    // queuedCount should be back to 0 and phase should be unchanged
+    expect(getThread("t1").queuedCount ?? 0).toBe(0);
+    expect(getThread("t1").phase.status).toBe("streaming");
+  });
+
+  it("sendMessage error from idle decrements queuedCount to 0 and reverts phase to idle", async () => {
+    mockMessagesApi.send.mockRejectedValue(new Error("network"));
+
+    await useMessageStore
+      .getState()
+      .sendMessage("t1", "first msg")
+      .catch(() => {});
+
+    expect(getThread("t1").queuedCount ?? 0).toBe(0);
+    expect(getThread("t1").phase.status).toBe("idle");
+  });
+});
+
+describe("queuedCount — appendToken starts next queued run", () => {
+  beforeEach(() => {
+    useMessageStore.setState({ threads: {} });
+    vi.clearAllMocks();
+  });
+
+  it("appendToken in idle with queuedCount > 0 transitions to streaming", () => {
+    useMessageStore.setState({
+      threads: {
+        t1: {
+          messages: [],
+          phase: { status: "idle" },
+          queuedCount: 1,
+        },
+      },
+    });
+
+    useMessageStore.getState().appendToken("t1", "first token");
+
+    const phase = getThread("t1").phase;
+    expect(phase.status).toBe("streaming");
+    if (phase.status === "streaming") {
+      expect(phase.content).toBe("first token");
+    }
+  });
+
+  it("appendToken in idle with queuedCount > 0 decrements queuedCount", () => {
+    useMessageStore.setState({
+      threads: {
+        t1: {
+          messages: [],
+          phase: { status: "idle" },
+          queuedCount: 2,
+        },
+      },
+    });
+
+    useMessageStore.getState().appendToken("t1", "tok");
+
+    expect(getThread("t1").queuedCount).toBe(1);
+  });
+
+  it("appendToken in idle with queuedCount = 0 ignores token — stale-token guard", () => {
+    useMessageStore.setState({
+      threads: {
+        t1: {
+          messages: [],
+          phase: { status: "idle" },
+          queuedCount: 0,
+        },
+      },
+    });
+
+    useMessageStore.getState().appendToken("t1", "stale token");
+
+    expect(getThread("t1").phase.status).toBe("idle");
+  });
+
+  it("appendToken in idle without queuedCount field ignores token", () => {
+    // Simulates a thread that was never assigned a queuedCount (undefined).
+    useMessageStore.setState({
+      threads: {
+        t1: { messages: [], phase: { status: "idle" } },
+      },
+    });
+
+    useMessageStore.getState().appendToken("t1", "stale token");
+
+    expect(getThread("t1").phase.status).toBe("idle");
+  });
+
+  it("full queue cycle: send while streaming → A finishes → B starts streaming", async () => {
+    mockMessagesApi.send.mockResolvedValue({
+      data: makeMessage("b-real", "t1", "user", "msg B"),
+    });
+
+    // A is already streaming.
+    useMessageStore.setState({
+      threads: {
+        t1: {
+          messages: [makeMessage("u1", "t1", "user", "msg A")],
+          phase: { status: "streaming", content: "A partial" },
+        },
+      },
+    });
+
+    // User sends B while A is streaming.
+    await useMessageStore.getState().sendMessage("t1", "msg B");
+    expect(getThread("t1").phase.status).toBe("streaming"); // A still going
+    expect(getThread("t1").queuedCount).toBe(1);
+
+    // A finishes.
+    useMessageStore
+      .getState()
+      .finalizeStream("t1", makeMessage("a1", "t1", "assistant", "A done"));
+    expect(getThread("t1").phase.status).toBe("idle");
+    expect(getThread("t1").queuedCount).toBe(1); // B still queued
+
+    // B's first token arrives from the server.
+    useMessageStore.getState().appendToken("t1", "B token");
+    expect(getThread("t1").phase.status).toBe("streaming");
+    if (getThread("t1").phase.status === "streaming") {
+      const p = getThread("t1").phase as {
+        status: "streaming";
+        content: string;
+      };
+      expect(p.content).toBe("B token");
+    }
+    expect(getThread("t1").queuedCount).toBe(0); // consumed
+  });
+});

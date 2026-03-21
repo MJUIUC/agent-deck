@@ -57,6 +57,9 @@ export function ChatView({
   const isStreaming = phase.status === "streaming";
   const isSending = phase.status === "sending";
   const cancelRun = useMessageStore((s) => s.cancelRun);
+  const queuedCount = useMessageStore(
+    (s) => s.threads[thread.id]?.queuedCount ?? 0,
+  );
   const streamingContent = phase.status === "streaming" ? phase.content : "";
   const messageError = phase.status === "error" ? phase.message : null;
 
@@ -203,6 +206,7 @@ export function ChatView({
         isStreaming={isStreaming}
         onSend={handleSend}
         onCancel={handleCancel}
+        queuedCount={queuedCount}
       />
 
       {/* ── Config pane — hidden in draft mode ── */}
