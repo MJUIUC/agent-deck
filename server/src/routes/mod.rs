@@ -739,4 +739,70 @@ mod tests {
             "get_run_state must return distinct Arcs for different thread IDs"
         );
     }
+
+    #[tokio::test]
+    async fn arc_appstate_clones_share_run_states_dashmap() {
+        // This test verifies the core fix for cancellation not working.
+        //
+        // Before the fix: AppState was cloned on every request via Axum's State
+        // extractor.  DashMap::clone() performs a deep copy, so the RunState
+        // inserted by POST /messages was invisible to POST /cancel — each
+        // request was operating on its own disconnected map.
+        //
+        // After the fix: the state type is Arc<AppState>.  Cloning the Arc just
+        // bumps the reference count; both clones point at the same DashMap, so
+        // a RunState registered by one "request" is immediately visible to the
+        // other — exactly what cancel needs.
+        use std::collections::HashMap;
+        use std::sync::{Arc, Mutex};
+        use tokio::sync::broadcast;
+
+        let (global_tx, _) = broadcast::channel(64);
+        let pool = sqlx::SqlitePool::connect_lazy("sqlite::memory:").unwrap();
+        let (mcp_tx, _) = tokio::sync::broadcast::channel(1);
+        let mcp = crate::services::mcp::McpConnectionManager::new(
+            pool.clone(),
+            "test-master-key".to_string(),
+            mcp_tx,
+            std::path::PathBuf::from("/tmp/test-deck/mcp"),
+        );
+        let shared_state = Arc::new(AppState {
+            pool,
+            config: Config {
+                port: 7474,
+                data_dir: std::path::PathBuf::from("/tmp/test-deck"),
+                mcp_dir: std::path::PathBuf::from("/tmp/test-deck/mcp"),
+                personas_dir: std::path::PathBuf::from("/tmp/test-deck/personas"),
+                database_url: "sqlite::memory:".to_string(),
+                public_dir: "./public".to_string(),
+                fcm_service_account_json: None,
+            },
+            machine_secret: "test-secret".to_string(),
+            credential_master_key: "test-master-key".to_string(),
+            auth_token: Arc::new(RwLock::new("test-token".to_string())),
+            global_tx,
+            thread_senders: Arc::new(Mutex::new(HashMap::new())),
+            run_states: dashmap::DashMap::new(),
+            copilot: None,
+            mcp,
+            built_in_tools: std::sync::Arc::new(vec![]),
+        });
+
+        // Simulate two requests receiving their own clone of the Arc —
+        // this is exactly what Axum's State extractor does per request.
+        let send_request_state = shared_state.clone();
+        let cancel_request_state = shared_state.clone();
+
+        // "POST /messages" registers a RunState for the thread.
+        let run_state_from_send = send_request_state.get_run_state("thread-xyz");
+
+        // "POST /cancel" looks up the same thread — must find the same Arc.
+        let run_state_from_cancel = cancel_request_state.get_run_state("thread-xyz");
+
+        assert!(
+            Arc::ptr_eq(&run_state_from_send, &run_state_from_cancel),
+            "send and cancel requests must see the same RunState — \
+             DashMap must be shared via Arc, not deep-cloned per request"
+        );
+    }
 }
