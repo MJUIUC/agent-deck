@@ -228,6 +228,7 @@ pub async fn notify(
                     cancellation_rx,
                     run_state.clone(),
                     turn_id,
+                    true,
                 )
                 .await;
                 run_state.depth.fetch_sub(1, Ordering::SeqCst);

@@ -11,7 +11,8 @@
 //!    (combined into one system message so the persona voice is seamless)
 //! 2. **System message** — thread addendum, only when `Some`
 //! 3. **History** — last N visible messages from the thread (oldest-first)
-//! 4. **User message** — the new message just sent by the user
+//! 4. **System message** — routine context notice, only when `is_routine_triggered`
+//! 5. **User message** — the new message, from the user or a system routine
 //!
 //! # Tool array
 //!
@@ -70,6 +71,11 @@ pub struct AssemblyInput {
     pub history_limit: Option<usize>,
     /// The new user message content.
     pub user_message: String,
+    /// Whether this turn was triggered by an automated system routine rather
+    /// than a real user typing a message.  When `true`, a system message is
+    /// injected immediately before the user turn so the LLM understands the
+    /// message is system-initiated and should not be treated as user input.
+    pub is_routine_triggered: bool,
     /// Whether the active provider supports function calling.
     /// When `false`, the tool array is returned empty.
     pub supports_tools: bool,
@@ -187,7 +193,25 @@ pub fn assemble(input: AssemblyInput) -> AssembledContext {
         }
     }
 
-    // ── 4. New user message ───────────────────────────────────────────────────
+    // ── 4. Routine context notice ─────────────────────────────────────────────
+    // Injected only for system-routine-triggered turns so the LLM understands
+    // the message did not come from a real user.
+    if input.is_routine_triggered {
+        messages.push(
+            ChatCompletionRequestSystemMessageArgs::default()
+                .content(
+                    "The following message was not sent by the user. \
+                     It was triggered by an automated system routine. \
+                     Interpret and respond to it as a system-initiated event, \
+                     not as a direct message from the user.",
+                )
+                .build()
+                .expect("routine context message build")
+                .into(),
+        );
+    }
+
+    // ── 5. New user message ───────────────────────────────────────────────────
     messages.push(
         ChatCompletionRequestUserMessageArgs::default()
             .content(input.user_message.as_str())
@@ -303,6 +327,7 @@ mod tests {
             history: vec![],
             history_limit: None,
             user_message: user_message.to_string(),
+            is_routine_triggered: false,
             supports_tools: true,
             built_in_tool_defs: built_in_tool_defs_for_test(),
             mcp_tools: vec![],
@@ -670,6 +695,40 @@ mod tests {
     }
 
     #[test]
+    fn routine_triggered_injects_system_message_before_user_turn() {
+        let input = AssemblyInput {
+            is_routine_triggered: true,
+            ..basic_input("Run the morning report.")
+        };
+        let ctx = assemble(input);
+
+        // [system(persona+memory), system(routine notice), user]
+        assert_eq!(ctx.messages.len(), 3);
+
+        // Second-to-last message must be the routine context system message.
+        let notice = &ctx.messages[ctx.messages.len() - 2];
+        assert!(is_system(notice));
+        let content = system_content(notice).unwrap();
+        assert!(
+            content.contains("automated system routine"),
+            "routine notice should mention automated system routine, got: {content}"
+        );
+
+        // Last message is still the user turn.
+        assert!(is_user(ctx.messages.last().unwrap()));
+    }
+
+    #[test]
+    fn non_routine_turn_does_not_inject_routine_system_message() {
+        let ctx = assemble(basic_input("Hello!"));
+
+        // [system(persona+memory), user] — no extra system message
+        assert_eq!(ctx.messages.len(), 2);
+        assert!(is_system(&ctx.messages[0]));
+        assert!(is_user(&ctx.messages[1]));
+    }
+
+    #[test]
     fn full_assembly_with_all_components() {
         let input = AssemblyInput {
             persona_system_prompt: "You are a coding assistant.".to_string(),
@@ -680,6 +739,7 @@ mod tests {
             ],
             history_limit: None,
             user_message: "Show me an example.".to_string(),
+            is_routine_triggered: false,
             supports_tools: true,
             built_in_tool_defs: built_in_tool_defs_for_test(),
             mcp_tools: vec![],

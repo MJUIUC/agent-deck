@@ -194,6 +194,7 @@ pub async fn run(
     cancellation_rx: tokio::sync::watch::Receiver<bool>,
     run_state: Arc<RunState>,
     turn_id: uuid::Uuid,
+    is_routine: bool,
 ) {
     if let Err(e) = run_inner(
         &state,
@@ -202,6 +203,7 @@ pub async fn run(
         cancellation_rx,
         run_state,
         turn_id,
+        is_routine,
     )
     .await
     {
@@ -230,6 +232,7 @@ async fn run_inner(
     cancellation_rx: tokio::sync::watch::Receiver<bool>,
     run_state: Arc<RunState>,
     turn_id: uuid::Uuid,
+    is_routine: bool,
 ) -> Result<()> {
     // ── 1. Fetch the thread and its persona ────────────────────────────────────
     let thread: crate::models::thread::Thread = sqlx::query_as(
@@ -433,6 +436,7 @@ async fn run_inner(
         history,
         history_limit: None,
         user_message: user_message.to_string(),
+        is_routine_triggered: is_routine,
         supports_tools: true,
         built_in_tool_defs,
         mcp_tools: mcp_tool_defs,

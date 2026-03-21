@@ -227,6 +227,7 @@ pub async fn send(
                 cancellation_rx,
                 run_state.clone(),
                 turn_id,
+                false,
             )
             .await;
             run_state.depth.fetch_sub(1, Ordering::SeqCst);
