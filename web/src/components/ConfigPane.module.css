@@ -957,3 +957,209 @@
     opacity: 0.5;
     cursor: default;
 }
+
+/* ── Routines ── */
+.routineList {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.routineCard {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.routineCardTop {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.routineCardInfo {
+    flex: 1;
+    min-width: 0;
+}
+
+.routineName {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.routineCron {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    font-family: "SF Mono", "Fira Code", monospace;
+    margin-top: 2px;
+}
+
+.routineCardActions {
+    display: flex;
+    gap: 4px;
+}
+
+.routineEditBtn,
+.routineDeleteBtn {
+    background: none;
+    border: 1px solid var(--border-subtle);
+    border-radius: 5px;
+    color: var(--text-tertiary);
+    font-size: 12px;
+    width: 26px;
+    height: 26px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition:
+        background 0.15s,
+        color 0.15s;
+}
+
+.routineEditBtn:hover {
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+}
+
+.routineDeleteBtn:hover {
+    background: rgba(196, 90, 90, 0.15);
+    color: var(--error);
+    border-color: rgba(196, 90, 90, 0.3);
+}
+
+.routineDeleteBtn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.routinePromptPreview {
+    font-size: 11.5px;
+    color: var(--text-secondary);
+    line-height: 1.45;
+}
+
+/* ── Routine form ── */
+.routineForm {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-default);
+    border-radius: 8px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.routineFormTitle {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 2px;
+}
+
+.routineFormLabel {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.routineFormInput {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-default);
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-size: 13px;
+    color: var(--text-primary);
+    outline: none;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.routineFormInput:focus {
+    border-color: var(--accent-primary);
+}
+
+.routineFormTextarea {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-default);
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-size: 13px;
+    color: var(--text-primary);
+    outline: none;
+    width: 100%;
+    resize: vertical;
+    box-sizing: border-box;
+    font-family: inherit;
+    line-height: 1.5;
+}
+
+.routineFormTextarea:focus {
+    border-color: var(--accent-primary);
+}
+
+.routineFormCronRow {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.routineFormError {
+    font-size: 12px;
+    color: var(--error);
+    padding: 6px 10px;
+    background: rgba(196, 90, 90, 0.08);
+    border-radius: 5px;
+    border: 1px solid rgba(196, 90, 90, 0.2);
+}
+
+.routineFormActions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 4px;
+}
+
+.routineFormCancel {
+    background: none;
+    border: 1px solid var(--border-default);
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.routineFormCancel:hover {
+    background: var(--bg-elevated);
+}
+
+.routineFormSave {
+    background: var(--accent-primary);
+    border: none;
+    border-radius: 6px;
+    padding: 6px 16px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-inverse);
+    cursor: pointer;
+}
+
+.routineFormSave:hover:not(:disabled) {
+    opacity: 0.88;
+}
+
+.routineFormSave:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}

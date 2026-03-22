@@ -8,6 +8,7 @@ import type {
   Model,
   McpServer,
   McpTool,
+  Routine,
   SlashCommandResponse,
 } from "@/types";
 
@@ -521,6 +522,57 @@ export const credentialsApi = {
 
   delete(id: string): Promise<{ deleted: boolean; warnings?: string[] }> {
     return apiFetch(`/api/credentials/${id}`, { method: "DELETE" });
+  },
+};
+
+// ── Routines ──────────────────────────────────────────────────────────────────
+
+export const routinesApi = {
+  list(threadId: string): Promise<{ data: Routine[] }> {
+    return apiFetch(`/api/threads/${threadId}/routines`);
+  },
+  get(threadId: string, routineId: string): Promise<{ data: Routine }> {
+    return apiFetch(`/api/threads/${threadId}/routines/${routineId}`);
+  },
+  create(
+    threadId: string,
+    payload: { name: string; prompt: string; cron_expr: string },
+  ): Promise<{ data: Routine }> {
+    return apiFetch(`/api/threads/${threadId}/routines`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  update(
+    threadId: string,
+    routineId: string,
+    payload: {
+      name?: string;
+      prompt?: string;
+      cron_expr?: string;
+      enabled?: boolean;
+    },
+  ): Promise<{ data: Routine }> {
+    return apiFetch(`/api/threads/${threadId}/routines/${routineId}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+  delete(
+    threadId: string,
+    routineId: string,
+  ): Promise<{ data: { deleted: boolean } }> {
+    return apiFetch(`/api/threads/${threadId}/routines/${routineId}`, {
+      method: "DELETE",
+    });
+  },
+  toggle(
+    threadId: string,
+    routineId: string,
+  ): Promise<{ data: { id: string; enabled: boolean } }> {
+    return apiFetch(`/api/threads/${threadId}/routines/${routineId}/toggle`, {
+      method: "PATCH",
+    });
   },
 };
 

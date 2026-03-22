@@ -347,6 +347,28 @@ export const useSseStore = create<SseStore>((set, get) => ({
         }
       };
 
+      const handleRoutineFired = (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data) as {
+            thread_id: string;
+            routine_id: string;
+            routine_name: string;
+          };
+          if (data.thread_id) {
+            // Refresh the thread's updated_at so the sidebar re-renders
+            useThreadStore
+              .getState()
+              .updateThreadPreview(
+                data.thread_id,
+                "",
+                new Date().toISOString(),
+              );
+          }
+        } catch {
+          // ignore
+        }
+      };
+
       const handleConnError = () => {
         set({
           globalConnected: false,
@@ -371,6 +393,7 @@ export const useSseStore = create<SseStore>((set, get) => ({
 
       es.addEventListener("thread_updated", handleThreadUpdated);
       es.addEventListener("title_updated", handleTitleUpdated);
+      es.addEventListener("routine_fired", handleRoutineFired);
 
       es.addEventListener("open", () => {
         set({
@@ -385,6 +408,7 @@ export const useSseStore = create<SseStore>((set, get) => ({
       const cleanup = () => {
         es.removeEventListener("thread_updated", handleThreadUpdated);
         es.removeEventListener("title_updated", handleTitleUpdated);
+        es.removeEventListener("routine_fired", handleRoutineFired);
         es.close();
       };
 

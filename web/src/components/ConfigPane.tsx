@@ -1,13 +1,22 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import type { Thread, McpServer, McpTool, Provider, Model } from "@/types";
+import type {
+  Thread,
+  McpServer,
+  McpTool,
+  Provider,
+  Model,
+  Routine,
+} from "@/types";
 import {
   threadsApi,
   mcpServersApi,
   providersApi,
   modelsApi,
+  routinesApi,
 } from "@/api/client";
 import { X, ChevronRight, Settings } from "lucide-react";
 import styles from "./ConfigPane.module.css";
+import { CronPicker } from "./CronPicker";
 
 // ─── Sub-types ────────────────────────────────────────────────────────────────
 
@@ -522,6 +531,21 @@ export function ConfigPane({
   const [showAttachPicker, setShowAttachPicker] = useState(false);
   const [mcpLoading, setMcpLoading] = useState(false);
 
+  // ── Routines ──
+  const [routines, setRoutines] = useState<Routine[]>([]);
+  const [routinesLoading, setRoutinesLoading] = useState(false);
+  const [showRoutineForm, setShowRoutineForm] = useState(false);
+  const [editingRoutine, setEditingRoutine] = useState<Routine | null>(null);
+  // Routine form state
+  const [routineFormName, setRoutineFormName] = useState("");
+  const [routineFormPrompt, setRoutineFormPrompt] = useState("");
+  const [routineFormCron, setRoutineFormCron] = useState("0 9 * * *");
+  const [routineFormSaving, setRoutineFormSaving] = useState(false);
+  const [routineFormError, setRoutineFormError] = useState<string | null>(null);
+  const [deletingRoutineId, setDeletingRoutineId] = useState<string | null>(
+    null,
+  );
+
   // Sync local state when thread prop changes (different thread selected)
   useEffect(() => {
     setAddendum(thread.system_prompt_addendum ?? "");
@@ -529,6 +553,11 @@ export function ConfigPane({
     setShowSystemEvents(thread.show_system_events ?? false);
     setShowAttachPicker(false);
     setShowArchiveConfirm(false);
+    // Reset routines form state on thread switch
+    setRoutines([]);
+    setShowRoutineForm(false);
+    setEditingRoutine(null);
+    setRoutineFormError(null);
   }, [
     thread.id,
     thread.system_prompt_addendum,
@@ -565,6 +594,29 @@ export function ConfigPane({
     }
 
     loadMcp();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, thread.id]);
+
+  // Load routines whenever the pane opens or thread changes
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+
+    async function loadRoutines() {
+      setRoutinesLoading(true);
+      try {
+        const res = await routinesApi.list(thread.id);
+        if (!cancelled) setRoutines(res.data);
+      } catch {
+        /* non-critical */
+      } finally {
+        if (!cancelled) setRoutinesLoading(false);
+      }
+    }
+
+    loadRoutines();
     return () => {
       cancelled = true;
     };
@@ -700,6 +752,100 @@ export function ConfigPane({
     }
   };
 
+  // ── Routine helpers ──
+
+  function openAddForm() {
+    setEditingRoutine(null);
+    setRoutineFormName("");
+    setRoutineFormPrompt("");
+    setRoutineFormCron("0 9 * * *");
+    setRoutineFormError(null);
+    setShowRoutineForm(true);
+  }
+
+  function openEditForm(r: Routine) {
+    setEditingRoutine(r);
+    setRoutineFormName(r.name);
+    setRoutineFormPrompt(r.prompt);
+    setRoutineFormCron(r.cron_expr);
+    setRoutineFormError(null);
+    setShowRoutineForm(true);
+  }
+
+  function closeRoutineForm() {
+    setShowRoutineForm(false);
+    setEditingRoutine(null);
+    setRoutineFormError(null);
+  }
+
+  async function handleRoutineSave() {
+    if (!routineFormName.trim()) {
+      setRoutineFormError("Name is required");
+      return;
+    }
+    if (!routineFormPrompt.trim()) {
+      setRoutineFormError("Prompt is required");
+      return;
+    }
+    if (!routineFormCron.trim()) {
+      setRoutineFormError("Schedule is required");
+      return;
+    }
+    setRoutineFormSaving(true);
+    setRoutineFormError(null);
+    try {
+      if (editingRoutine) {
+        const res = await routinesApi.update(thread.id, editingRoutine.id, {
+          name: routineFormName.trim(),
+          prompt: routineFormPrompt.trim(),
+          cron_expr: routineFormCron.trim(),
+        });
+        setRoutines((rs) =>
+          rs.map((r) => (r.id === editingRoutine.id ? res.data : r)),
+        );
+      } else {
+        const res = await routinesApi.create(thread.id, {
+          name: routineFormName.trim(),
+          prompt: routineFormPrompt.trim(),
+          cron_expr: routineFormCron.trim(),
+        });
+        setRoutines((rs) => [...rs, res.data]);
+      }
+      closeRoutineForm();
+    } catch (e) {
+      setRoutineFormError(
+        e instanceof Error ? e.message : "Failed to save routine",
+      );
+    } finally {
+      setRoutineFormSaving(false);
+    }
+  }
+
+  async function handleRoutineToggle(routineId: string) {
+    try {
+      const res = await routinesApi.toggle(thread.id, routineId);
+      setRoutines((rs) =>
+        rs.map((r) =>
+          r.id === routineId ? { ...r, enabled: res.data.enabled } : r,
+        ),
+      );
+    } catch {
+      /* non-critical */
+    }
+  }
+
+  async function handleRoutineDelete(routineId: string) {
+    setDeletingRoutineId(routineId);
+    try {
+      await routinesApi.delete(thread.id, routineId);
+      setRoutines((rs) => rs.filter((r) => r.id !== routineId));
+    } catch {
+      /* non-critical */
+    } finally {
+      setDeletingRoutineId(null);
+    }
+  }
+
   const handleArchiveClick = () => setShowArchiveConfirm(true);
 
   const handleArchiveConfirm = async () => {
@@ -807,15 +953,127 @@ export function ConfigPane({
           <div className={styles.section}>
             <div className={styles.sectionHeader}>
               <span className={styles.sectionTitle}>Routines</span>
-              <button className={styles.addBtn} disabled title="Coming soon">
-                ＋ Add
-              </button>
+              {!showRoutineForm && (
+                <button className={styles.addBtn} onClick={openAddForm}>
+                  ＋ Add
+                </button>
+              )}
             </div>
-            <div className={styles.emptyState}>
-              <p className={styles.emptyStateText}>
-                No routines yet. Add one to schedule automated messages.
-              </p>
-            </div>
+
+            {routinesLoading ? (
+              <div className={styles.emptyHint}>Loading…</div>
+            ) : (
+              <div className={styles.routineList}>
+                {routines.length === 0 && !showRoutineForm && (
+                  <div className={styles.emptyHint}>No routines yet.</div>
+                )}
+
+                {routines.map((r) => (
+                  <div key={r.id} className={styles.routineCard}>
+                    <div className={styles.routineCardTop}>
+                      <Toggle
+                        checked={r.enabled}
+                        onChange={() => handleRoutineToggle(r.id)}
+                      />
+                      <div className={styles.routineCardInfo}>
+                        <div className={styles.routineName}>{r.name}</div>
+                        <div className={styles.routineCron}>{r.cron_expr}</div>
+                      </div>
+                      <div className={styles.routineCardActions}>
+                        <button
+                          className={styles.routineEditBtn}
+                          onClick={() => openEditForm(r)}
+                          title="Edit"
+                        >
+                          ✎
+                        </button>
+                        <button
+                          className={styles.routineDeleteBtn}
+                          onClick={() => handleRoutineDelete(r.id)}
+                          disabled={deletingRoutineId === r.id}
+                          title="Delete"
+                        >
+                          {deletingRoutineId === r.id ? "…" : "✕"}
+                        </button>
+                      </div>
+                    </div>
+                    <div className={styles.routinePromptPreview}>
+                      {r.prompt.length > 80
+                        ? r.prompt.slice(0, 80) + "…"
+                        : r.prompt}
+                    </div>
+                  </div>
+                ))}
+
+                {/* ── Inline add/edit form ── */}
+                {showRoutineForm && (
+                  <div className={styles.routineForm}>
+                    <div className={styles.routineFormTitle}>
+                      {editingRoutine ? "Edit Routine" : "New Routine"}
+                    </div>
+
+                    <label className={styles.routineFormLabel}>Name</label>
+                    <input
+                      className={styles.routineFormInput}
+                      placeholder="e.g. Morning Briefing"
+                      value={routineFormName}
+                      onChange={(e) => setRoutineFormName(e.target.value)}
+                      disabled={routineFormSaving}
+                    />
+
+                    <label className={styles.routineFormLabel}>Prompt</label>
+                    <textarea
+                      className={styles.routineFormTextarea}
+                      placeholder="What should the agent do when this fires?"
+                      value={routineFormPrompt}
+                      onChange={(e) => setRoutineFormPrompt(e.target.value)}
+                      disabled={routineFormSaving}
+                      rows={3}
+                    />
+
+                    <label className={styles.routineFormLabel}>Schedule</label>
+                    <div className={styles.routineFormCronRow}>
+                      <input
+                        className={styles.routineFormInput}
+                        style={{ flex: 1, fontFamily: "monospace" }}
+                        placeholder="0 9 * * *"
+                        value={routineFormCron}
+                        onChange={(e) => setRoutineFormCron(e.target.value)}
+                        disabled={routineFormSaving}
+                      />
+                      <CronPicker
+                        value={routineFormCron}
+                        onChange={setRoutineFormCron}
+                        disabled={routineFormSaving}
+                      />
+                    </div>
+
+                    {routineFormError && (
+                      <div className={styles.routineFormError}>
+                        {routineFormError}
+                      </div>
+                    )}
+
+                    <div className={styles.routineFormActions}>
+                      <button
+                        className={styles.routineFormCancel}
+                        onClick={closeRoutineForm}
+                        disabled={routineFormSaving}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        className={styles.routineFormSave}
+                        onClick={handleRoutineSave}
+                        disabled={routineFormSaving}
+                      >
+                        {routineFormSaving ? "Saving…" : "Save"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className={styles.divider} />

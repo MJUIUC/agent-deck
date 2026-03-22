@@ -1,0 +1,246 @@
+/* ── CronPicker ──────────────────────────────────────────────────────────── */
+
+/* Wrapper — anchors the popover */
+.wrap {
+    position: relative;
+    display: inline-block;
+}
+
+/* ── Trigger button ─────────────────────────────────────────────────────── */
+
+.triggerBtn {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition:
+        background 0.15s,
+        border-color 0.15s,
+        color 0.15s;
+}
+
+.triggerBtn:hover {
+    background: var(--bg-elevated);
+    border-color: var(--border-default);
+    color: var(--text-primary);
+}
+
+.triggerBtnOpen {
+    background: var(--bg-elevated);
+    border-color: var(--border-default);
+    color: var(--text-primary);
+}
+
+/* ── Popover card ───────────────────────────────────────────────────────── */
+
+.popover {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 200;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-default);
+    border-radius: 10px;
+    min-width: 280px;
+    padding: 12px 12px 10px;
+    box-shadow:
+        0 4px 12px rgba(0, 0, 0, 0.3),
+        0 12px 32px rgba(0, 0, 0, 0.25);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    /* Pop-in animation */
+    animation: cronPopoverIn 0.12s cubic-bezier(0.2, 0, 0.2, 1);
+}
+
+@keyframes cronPopoverIn {
+    from {
+        opacity: 0;
+        transform: translateY(-4px) scale(0.98);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+/* ── Frequency pills row ────────────────────────────────────────────────── */
+
+.frequencyRow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+
+.freqPill {
+    padding: 4px 11px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 500;
+    font-family: inherit;
+    white-space: nowrap;
+    cursor: pointer;
+    border: 1px solid var(--border-default);
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    transition:
+        background 0.15s,
+        border-color 0.15s,
+        color 0.15s;
+}
+
+.freqPill:hover {
+    border-color: var(--accent-primary);
+    color: var(--text-primary);
+}
+
+.freqPillActive {
+    background: var(--accent-primary);
+    border-color: var(--accent-primary);
+    color: var(--text-inverse);
+}
+
+.freqPillActive:hover {
+    background: var(--accent-secondary);
+    border-color: var(--accent-secondary);
+    color: var(--text-inverse);
+}
+
+/* ── Day toggles row ────────────────────────────────────────────────────── */
+
+.daysRow {
+    display: flex;
+    gap: 4px;
+}
+
+.dayPill {
+    width: 32px;
+    height: 28px;
+    padding: 0;
+    border-radius: 6px;
+    border: 1px solid var(--border-default);
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition:
+        background 0.15s,
+        border-color 0.15s,
+        color 0.15s;
+    user-select: none;
+}
+
+.dayPill:not(.dayPillDisabled):hover {
+    border-color: var(--accent-primary);
+    color: var(--text-primary);
+}
+
+.dayPillActive {
+    background: var(--accent-primary);
+    border-color: var(--accent-primary);
+    color: var(--text-inverse);
+}
+
+.dayPillDisabled {
+    opacity: 0.45;
+    cursor: default;
+    pointer-events: none;
+}
+
+/* ── Time row ───────────────────────────────────────────────────────────── */
+
+.timeRow {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.timeSelect {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-default);
+    border-radius: 6px;
+    font-size: 13px;
+    font-family: inherit;
+    padding: 4px 6px;
+    cursor: pointer;
+    outline: none;
+    /* Remove default arrow on some browsers */
+    appearance: none;
+    -webkit-appearance: none;
+    text-align: center;
+    transition: border-color 0.15s;
+}
+
+.timeSelect:focus {
+    border-color: var(--accent-primary);
+}
+
+.colon {
+    color: var(--text-secondary);
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1;
+    user-select: none;
+    flex-shrink: 0;
+}
+
+.ampmBtn {
+    padding: 4px 9px;
+    border-radius: 6px;
+    border: 1px solid var(--border-default);
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 600;
+    font-family: inherit;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    transition:
+        background 0.15s,
+        border-color 0.15s,
+        color 0.15s;
+}
+
+.ampmBtn:hover {
+    border-color: var(--accent-primary);
+    color: var(--text-primary);
+}
+
+.ampmBtnActive {
+    background: var(--accent-primary);
+    border-color: var(--accent-primary);
+    color: var(--text-inverse);
+}
+
+.ampmBtnActive:hover {
+    background: var(--accent-secondary);
+    border-color: var(--accent-secondary);
+    color: var(--text-inverse);
+}
+
+/* ── Human-readable description ─────────────────────────────────────────── */
+
+.description {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    font-style: italic;
+    line-height: 1.45;
+    padding-top: 8px;
+    border-top: 1px solid var(--border-subtle);
+    margin: 0;
+}
