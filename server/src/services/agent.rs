@@ -261,6 +261,53 @@ async fn run_inner(
 
     let is_default_persona = persona.is_default;
 
+    // ── Routine execution tracking ────────────────────────────────────────────────
+    // When is_routine=true, parse the routine_id from the JSON trigger content,
+    // generate an execution_id (shared by all messages in this run), and create
+    // a routine_executions row.
+    let routine_id_opt: Option<String> = if is_routine {
+        serde_json::from_str::<serde_json::Value>(user_message)
+            .ok()
+            .and_then(|v| {
+                v.get("routine_id")
+                    .and_then(|r| r.as_str())
+                    .map(|s| s.to_string())
+            })
+    } else {
+        None
+    };
+
+    let execution_id: Option<String> = if is_routine {
+        Some(uuid::Uuid::new_v4().to_string())
+    } else {
+        None
+    };
+
+    // Create the routine_executions row (best-effort — log on failure, don't abort)
+    if let (Some(ref rid), Some(ref exec_id)) = (&routine_id_opt, &execution_id) {
+        let fired_at = chrono::Utc::now()
+            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+            .to_string();
+        if let Err(e) = sqlx::query(
+            "INSERT INTO routine_executions (id, routine_id, thread_id, fired_at, status)
+             VALUES (?, ?, ?, ?, 'running')",
+        )
+        .bind(exec_id)
+        .bind(rid)
+        .bind(thread_id)
+        .bind(&fired_at)
+        .execute(&state.pool)
+        .await
+        {
+            warn!(
+                thread_id = %thread_id,
+                routine_id = %rid,
+                error = %e,
+                "Failed to create routine_executions row; continuing anyway"
+            );
+        }
+    }
+
     // ── 2. Resolve the active provider and model ───────────────────────────────
     // Priority: thread overrides > persona defaults.
     let provider_id = thread
@@ -459,6 +506,8 @@ async fn run_inner(
         &cancellation_rx,
         run_state,
         turn_id,
+        execution_id.as_deref(),
+        routine_id_opt.as_deref(),
     )
     .await?;
 
@@ -526,6 +575,56 @@ async fn run_inner(
         }
     }
 
+    // ── Routine completion ────────────────────────────────────────────────────────
+    if let (Some(ref rid), Some(ref exec_id)) = (&routine_id_opt, &execution_id) {
+        let now = chrono::Utc::now()
+            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+            .to_string();
+
+        if let Err(e) = sqlx::query(
+            "UPDATE routine_executions
+             SET status = 'completed', output_message_id = ?, completed_at = ?
+             WHERE id = ?",
+        )
+        .bind(&gen_result.message_id)
+        .bind(&now)
+        .bind(exec_id)
+        .execute(&state.pool)
+        .await
+        {
+            warn!(
+                thread_id = %thread_id,
+                execution_id = %exec_id,
+                error = %e,
+                "Failed to update routine_executions after completion"
+            );
+        }
+
+        // Fetch the routine name for the global event
+        let routine_name: String =
+            sqlx::query_as::<_, (String,)>("SELECT name FROM routines WHERE id = ?")
+                .bind(rid)
+                .fetch_optional(&state.pool)
+                .await
+                .ok()
+                .flatten()
+                .map(|(n,)| n)
+                .unwrap_or_default();
+
+        // Emit global RoutineFired event
+        if let Err(e) = state.send_global_event(GlobalEvent::RoutineFired {
+            thread_id: thread_id.to_string(),
+            routine_id: rid.clone(),
+            routine_name,
+        }) {
+            tracing::debug!(
+                thread_id = %thread_id,
+                error = %e,
+                "RoutineFired global broadcast had no receivers"
+            );
+        }
+    }
+
     // ── 7. Emit ThreadUpdated SSE event ────────────────────────────────────────
     // MessageComplete is now fired inside generation_loop; only ThreadUpdated
     // is emitted here (skipped when cancelled).
@@ -565,6 +664,8 @@ async fn generation_loop(
     cancellation_rx: &tokio::sync::watch::Receiver<bool>,
     run_state: Arc<RunState>,
     turn_id: uuid::Uuid,
+    execution_id: Option<&str>,
+    routine_id: Option<&str>,
 ) -> Result<GenerationResult> {
     let mut run_context = RunContext {
         hidden_message_ids: Vec::new(),
@@ -639,6 +740,7 @@ async fn generation_loop(
             attached_mcp,
             cancellation_rx,
             &mut run_context,
+            execution_id,
         )
         .await;
 
@@ -681,7 +783,10 @@ async fn generation_loop(
             final_content.clone()
         };
 
-        let assistant_msg = Message::new_assistant_stopped(thread_id, &content);
+        let mut assistant_msg = Message::new_assistant_stopped(thread_id, &content);
+        if let Some(eid) = execution_id {
+            assistant_msg.execution_id = Some(eid.to_string());
+        }
 
         sqlx::query(
             "INSERT INTO messages (id, thread_id, role, content, source, routine_id, visibility,
@@ -744,7 +849,14 @@ async fn generation_loop(
     }
 
     // ── Normal completion path ─────────────────────────────────────────────────
-    let assistant_msg = Message::new_assistant(thread_id, &final_content);
+    let mut assistant_msg = if let Some(rid) = routine_id {
+        Message::new_routine(thread_id, &final_content, rid)
+    } else {
+        Message::new_assistant(thread_id, &final_content)
+    };
+    if let Some(eid) = execution_id {
+        assistant_msg.execution_id = Some(eid.to_string());
+    }
 
     sqlx::query(
         "INSERT INTO messages (id, thread_id, role, content, source, routine_id, visibility,
@@ -771,17 +883,31 @@ async fn generation_loop(
         .execute(&state.pool)
         .await?;
 
-    state.send_thread_event(
-        thread_id,
-        ThreadEvent::MessageComplete {
-            id: assistant_msg.id.clone(),
-            thread_id: thread_id.to_string(),
-            role: assistant_msg.role.clone(),
-            content: assistant_msg.content.clone(),
-            created_at: assistant_msg.created_at.clone(),
-            stopped: false,
-        },
-    );
+    if let Some(rid) = routine_id {
+        state.send_thread_event(
+            thread_id,
+            ThreadEvent::RoutineMessage {
+                id: assistant_msg.id.clone(),
+                thread_id: thread_id.to_string(),
+                role: assistant_msg.role.clone(),
+                content: assistant_msg.content.clone(),
+                routine_id: rid.to_string(),
+                created_at: assistant_msg.created_at.clone(),
+            },
+        );
+    } else {
+        state.send_thread_event(
+            thread_id,
+            ThreadEvent::MessageComplete {
+                id: assistant_msg.id.clone(),
+                thread_id: thread_id.to_string(),
+                role: assistant_msg.role.clone(),
+                content: assistant_msg.content.clone(),
+                created_at: assistant_msg.created_at.clone(),
+                stopped: false,
+            },
+        );
+    }
 
     // Clear the running_turn slot if it still belongs to this run.
     {
@@ -1109,6 +1235,7 @@ async fn execute_tool_calls(
     attached_mcp: &[AttachedMcpServer],
     cancellation_rx: &tokio::sync::watch::Receiver<bool>,
     run_context: &mut RunContext,
+    execution_id: Option<&str>,
 ) -> Vec<String> {
     use crate::services::tools::ToolContext;
 
@@ -1178,6 +1305,7 @@ async fn execute_tool_calls(
                 attached_mcp,
                 cancellation_rx,
                 run_context,
+                execution_id,
             )
             .await
             {
@@ -1223,6 +1351,7 @@ async fn execute_mcp_tool(
     attached_mcp: &[AttachedMcpServer],
     cancellation_rx: &tokio::sync::watch::Receiver<bool>,
     run_context: &mut RunContext,
+    execution_id: Option<&str>,
 ) -> Result<String> {
     if !tc.name.contains("__") {
         warn!(tool = %tc.name, "Unknown tool call requested by model");
@@ -1267,6 +1396,7 @@ async fn execute_mcp_tool(
                 thread_id,
                 "assistant",
                 &format!("**Tool call:** `{}`\n```json\n{}\n```", tc.name, tc.args),
+                execution_id,
             )
             .await
             {
@@ -1297,6 +1427,7 @@ async fn execute_mcp_tool(
                                 thread_id,
                                 "tool",
                                 &format!("**Tool result** (`{}`):\n{}", tc.name, text),
+                                execution_id,
                             )
                             .await
                             {
@@ -1351,6 +1482,7 @@ async fn persist_tool_message(
     thread_id: &str,
     role: &str,
     content: &str,
+    execution_id: Option<&str>,
 ) -> Option<String> {
     let msg = Message {
         id: uuid::Uuid::new_v4().to_string(),
@@ -1360,7 +1492,7 @@ async fn persist_tool_message(
         source: "tool".to_string(),
         routine_id: None,
         visibility: "hidden".to_string(),
-        execution_id: None,
+        execution_id: execution_id.map(|s| s.to_string()),
         event_type: None,
         stopped: false,
         created_at: chrono::Utc::now()
@@ -1881,5 +2013,41 @@ mod tests {
         if let Some(fragment) = args_fragment {
             pending[index].args.push_str(&fragment);
         }
+    }
+
+    // ── Routine trigger parsing ───────────────────────────────────────────────
+
+    #[test]
+    fn routine_trigger_content_parses_routine_id() {
+        let content = serde_json::json!({
+            "type": "routine_invocation",
+            "routine_id": "abc-123",
+            "routine_name": "Morning briefing",
+            "instructions": "Summarize the day",
+            "fired_at": "2025-01-01T09:00:00.000Z"
+        })
+        .to_string();
+
+        let parsed: Option<String> = serde_json::from_str::<serde_json::Value>(&content)
+            .ok()
+            .and_then(|v| {
+                v.get("routine_id")
+                    .and_then(|r| r.as_str())
+                    .map(|s| s.to_string())
+            });
+        assert_eq!(parsed, Some("abc-123".to_string()));
+    }
+
+    #[test]
+    fn non_routine_content_parses_no_routine_id() {
+        let content = "Hello, how are you?";
+        let parsed: Option<String> = serde_json::from_str::<serde_json::Value>(content)
+            .ok()
+            .and_then(|v| {
+                v.get("routine_id")
+                    .and_then(|r| r.as_str())
+                    .map(|s| s.to_string())
+            });
+        assert_eq!(parsed, None);
     }
 }
