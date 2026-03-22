@@ -518,7 +518,7 @@ Acceptance criteria:
 
 ---
 
-**Story 5.1 — Per-thread agent run management**
+**Story 5.1 — Per-thread agent run management** ✅
 Branch: `feature/phase5-run-management`
 
 This story is a prerequisite for all other Phase 5 stories. Routines, memory tools, and any future server-initiated agent trigger depend on the run lock, cancellation support, and the notify endpoint.
@@ -560,34 +560,34 @@ Add the toggle to the Thread Config pane (below the existing `show_tool_activity
 On server startup, before the routine scheduler registers any jobs, query `routine_executions WHERE status = 'running'` and update them to `status: 'failed'` with `error: 'server restarted during execution'`. This prevents stale `running` rows from accumulating after crashes or restarts. Chat-initiated agent runs are fire-and-forget — no recovery is attempted for those.
 
 Acceptance criteria:
-- [ ] Per-thread semaphore prevents concurrent agent runs on the same thread
-- [ ] Concurrent user messages queue and run after the current completes
-- [ ] Queue depth > 3 returns `429` for user-initiated requests
-- [ ] Routine-initiated runs always queue regardless of depth
-- [ ] Message input is not disabled during streaming; users can send while agent is responding
-- [ ] Queued message indicator appears when messages are waiting
-- [ ] `POST /api/threads/:id/cancel` stops an active run
-- [ ] Cancel during streaming persists partial response with `stopped = 1`
-- [ ] Cancel during tool execution stops before the next tool call
-- [ ] Cancel during in-flight MCP call does not wait for the call to finish
-- [ ] Stopped messages render with a visual "stopped" label in chat
-- [ ] Send button transforms to stop button during streaming, reverts after
-- [ ] `POST /api/threads/:id/notify` accepts all registered event types and rejects unknown ones with `400`
-- [ ] `persist: true` events insert a hidden system message and broadcast `system_event` SSE
-- [ ] `trigger: true` events invoke the agent run loop and produce a visible response
-- [ ] `persist: false, trigger: false` is rejected
-- [ ] `model_switched` event visible in message history (with `?include_hidden=true`)
-- [ ] Client calls notify after model switch; hidden message appears in DB
-- [ ] `show_system_events` toggle persists per-thread
-- [ ] On startup, any `routine_executions` rows with `status = 'running'` are set to `failed`
-- [ ] The orphan cleanup runs before the scheduler starts registering jobs
-- [ ] Unit tests for event registry (valid types, invalid type rejection, flag combinations)
-- [ ] Unit tests for cancellation (mid-stream, mid-tool, no active run)
-- [ ] `cargo sqlx prepare` run and `.sqlx/` committed
+- [x] Per-thread semaphore prevents concurrent agent runs on the same thread
+- [x] Concurrent user messages queue and run after the current completes
+- [x] Queue depth > 3 returns `429` for user-initiated requests
+- [x] Routine-initiated runs always queue regardless of depth
+- [x] Message input is not disabled during streaming; users can send while agent is responding
+- [x] Queued message indicator appears when messages are waiting
+- [x] `POST /api/threads/:id/cancel` stops an active run
+- [x] Cancel during streaming persists partial response with `stopped = 1`
+- [x] Cancel during tool execution stops before the next tool call
+- [x] Cancel during in-flight MCP call does not wait for the call to finish
+- [x] Stopped messages render with a visual "stopped" label in chat
+- [x] Send button transforms to stop button during streaming, reverts after
+- [x] `POST /api/threads/:id/notify` accepts all registered event types and rejects unknown ones with `400`
+- [x] `persist: true` events insert a hidden system message and broadcast `system_event` SSE
+- [x] `trigger: true` events invoke the agent run loop and produce a visible response
+- [x] `persist: false, trigger: false` is rejected
+- [x] `model_switched` event visible in message history (with `?include_hidden=true`)
+- [x] Client calls notify after model switch; hidden message appears in DB
+- [x] `show_system_events` toggle persists per-thread
+- [x] On startup, any `routine_executions` rows with `status = 'running'` are set to `failed`
+- [x] The orphan cleanup runs before the scheduler starts registering jobs
+- [x] Unit tests for event registry (valid types, invalid type rejection, flag combinations)
+- [x] Unit tests for cancellation (mid-stream, mid-tool, no active run)
+- [x] `cargo sqlx prepare` run and `.sqlx/` committed
 
 ---
 
-**Story 5.2 — Memory tools**
+**Story 5.2 — Memory tools** ✅
 Branch: `feature/phase5-memory-tools`
 
 **Prerequisite — Default persona:**
@@ -599,23 +599,39 @@ Implement the `save_memory` and `recall_memory` tool definitions per section 7.6
 **Iteration note:** Memory recall reliability depends on the quality of the system prompt instructions and varies by model. The prompt-only approach (no auto-injection of memories into context) is the v1 design. Expect iteration on the memory system prompt wording after dogfooding. Auto-injection of recent memories into context is a potential future enhancement if models prove unreliable at calling `recall_memory` proactively.
 
 Acceptance criteria:
-- [ ] Default persona exists after migration; has `is_default = 1`, empty system prompt
-- [ ] `DELETE /api/personas/:id` returns `403` for the Default persona
-- [ ] `PUT /api/personas/:id` returns `403` for the Default persona (name and delete protected)
-- [ ] Persona selector shows Default persona as "None" with memory hint text
-- [ ] New threads without a specified persona are assigned the Default persona
-- [ ] Memory tools are NOT included in tool list when thread uses Default persona
-- [ ] Memory system prompt is NOT appended when thread uses Default persona
-- [ ] Unit tests for FTS search returning correct results
-- [ ] Unit tests for memory insertion with correct persona scoping
-- [ ] Unit tests for the 500-character truncation
-- [ ] Memories saved in one thread are recallable from another thread with the same persona
-- [ ] Memories are NOT recalled when querying from a different persona
-- [ ] Recall results are capped at 10 and include date prefix and thread provenance
-- [ ] Empty recall returns the "no memories found" message
-- [ ] The memory system prompt is appended to every request for non-default personas (after persona prompt, before thread addendum)
-- [ ] The tools are included in LLM requests as function definitions (non-default personas only)
-- [ ] Integration test: save a memory, send a follow-up message in a different thread (same persona) that should trigger recall, verify the tool is called
+- [x] Default persona exists after migration; has `is_default = 1`, empty system prompt
+- [x] `DELETE /api/personas/:id` returns `403` for the Default persona
+- [x] `PUT /api/personas/:id` returns `403` for the Default persona (name and delete protected)
+- [x] Persona selector shows Default persona as "None" with memory hint text
+- [x] New threads without a specified persona are assigned the Default persona
+- [x] Memory tools are NOT included in tool list when thread uses Default persona
+- [x] Memory system prompt is NOT appended when thread uses Default persona
+- [x] Unit tests for FTS search returning correct results
+- [x] Unit tests for memory insertion with correct persona scoping
+- [x] Unit tests for the 500-character truncation
+- [x] Memories saved in one thread are recallable from another thread with the same persona
+- [x] Memories are NOT recalled when querying from a different persona
+- [x] Recall results are capped at 10 and include date prefix and thread provenance
+- [x] Empty recall returns the "no memories found" message
+- [x] The memory system prompt is appended to every request for non-default personas (after persona prompt, before thread addendum)
+- [x] The tools are included in LLM requests as function definitions (non-default personas only)
+- [ ] Integration test: save a memory, send a follow-up message in a different thread (same persona) that should trigger recall, verify the tool is called — deferred; covered by unit tests for each layer individually
+
+### As-built notes (Story 5.2)
+
+- **Migration 008** adds `is_default INTEGER NOT NULL DEFAULT 0` to `agent_personas` and seeds the Default persona for any existing users. Fresh installs get the Default persona created inside `POST /api/setup/complete` immediately after the user row is inserted, using a new `AgentPersona::new_default()` constructor.
+
+- **`is_default` guard coverage:** `DELETE`, `PUT`, and `POST /:id/avatar` all return `403 Forbidden` for the Default persona. The `Forbidden(String)` variant was added to `AppError` as part of this work.
+
+- **`persona_id` is now optional on thread creation:** `CreateThread.persona_id` is `Option<String>`. When absent or empty, the server resolves the user's Default persona automatically. `Thread::new()` signature updated to accept `persona_id` as a separate argument.
+
+- **Context assembly gating:** `AssemblyInput` gained an `include_memory: bool` field. When `false` (Default persona), both the `## Memory` system-prompt block and all built-in tool definitions are excluded. MCP tools are unaffected. The flag is set in `agent.rs` as `!persona.is_default`.
+
+- **`delete_memory` tool added** (beyond original spec, motivated by the memory cap design discussion): the model can now evict duplicate or stale entries by ID. `recall_memory` output was updated to prefix each result line with `[id:<uuid>]` so the model has a reference to pass to `delete_memory`. The `MEMORY_INSTRUCTIONS` system prompt was extended with a **When to delete** paragraph covering the dedup-before-save and store-full-cleanup workflows. Built-in tool count is now 3.
+
+- **Persona picker hint text:** rendered as "Long-term memory not available" (slightly shorter than the spec's "Without a persona, long-term memory is not available" — fits the card layout cleanly).
+
+- **Test count:** 228 passing (was 224 at end of Story 5.1). New tests cover FTS search, persona scoping, cross-thread recall, recall cap, empty recall, 500-char truncation, empty content guard, delete by ID, delete not-found, and recall output format.
 
 ---
 
@@ -696,6 +712,48 @@ Acceptance criteria:
 - [ ] `/memory list` command works and displays results as ephemeral message
 - [ ] `/memory list` in a Default persona thread returns explanatory message
 - [ ] Memory count badge visible in persona settings (non-default personas only)
+
+---
+
+**Story 5.7 — User profile**
+Branch: `feature/phase5-user-profile`
+
+Implement the user profile feature per section 7.11.
+
+**Part A — Migration and model:**
+Add a new migration that adds `pronouns`, `role`, `organization`, `location`, `timezone`, `about`, and `profile_updated_at` columns to the `users` table. Update the `User` model struct to include all new fields. Add a `UpdateUserProfile` request struct for the PUT endpoint.
+
+**Part B — API endpoints:**
+Implement `GET /api/profile` and `PUT /api/profile` per section 7.11.4. The PUT handler uses a partial-update pattern (only sent fields change; `null` explicitly clears a field). Update `profile_updated_at` on every successful PUT.
+
+**Part C — Context injection:**
+Add `user_profile_context: Option<String>` to `AssemblyInput` in `context.rs`. In `assemble()`, inject it as a system message at position 1.5 (after the persona system prompt, before the thread addendum) when the value is `Some` and non-empty. In `run_inner` in `agent.rs`, load the user profile, build the formatted context block (omitting empty fields, skipping entirely if only `display_name` is set), and pass it through. Do not inject for the Default persona.
+
+**Part D — Setup wizard step:**
+Add a new "About You" step to the setup wizard between the Name step and the Provider step. All fields are optional. The step auto-detects the user's timezone from `Intl.DateTimeFormat().resolvedOptions().timeZone` and pre-fills the timezone hint. Include a "Skip for now" link.
+
+**Part E — Settings UI:**
+Add a Profile section to Settings → General. All fields are edit-in-place (blur to save). The `about` field shows a 500-character counter. Timezone is an editable text input with the auto-detected value pre-filled on first open if the field is currently empty.
+
+**Part F — Persona settings hint:**
+Add the informational hint below the system prompt textarea in the persona form per section 7.11.7.
+
+Acceptance criteria:
+- [ ] Migration adds all profile columns to `users` with NULL defaults
+- [ ] `GET /api/profile` returns all fields; empty fields are `null`
+- [ ] `PUT /api/profile` updates only the provided fields; sending `null` clears the field
+- [ ] `profile_updated_at` is updated on every PUT
+- [ ] Context block is injected between persona prompt and thread addendum for non-default personas
+- [ ] Context block is NOT injected when only `display_name` is set (all other fields null/empty)
+- [ ] Context block is NOT injected for the Default persona
+- [ ] Only non-empty fields appear in the injected block
+- [ ] Timezone auto-detected from browser in setup wizard and settings
+- [ ] "About You" step is skippable from the setup wizard
+- [ ] Profile section appears in Settings → General
+- [ ] 500-character limit enforced on `about` field (server-side truncation, client-side counter)
+- [ ] Persona settings hint appears below the system prompt textarea
+- [ ] Unit tests for context block formatting (all fields, partial fields, no fields)
+- [ ] Unit tests for partial PUT update logic
 
 ---
 

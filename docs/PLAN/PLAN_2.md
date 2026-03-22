@@ -911,6 +911,149 @@ The React Native app has a first-launch screen where the user taps "Scan QR Code
 
 ---
 
+### 7.11 User Profile
+
+**Purpose:** Give every non-default persona a guaranteed baseline of context about who they are talking to — without requiring the user to have already told them in conversation or relying on memory to accumulate basic facts over time.
+
+The user profile is a single record per user containing a small set of structured fields and one free-form text area. Its content is injected as a system message on every agent turn (for non-default personas), sitting between the persona's own system prompt and the thread addendum. The agent sees it as read-only context about the person it is working with.
+
+---
+
+#### 7.11.1 Fields
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `display_name` | text | yes (existing) | Already stored on `users`. Pre-populated from setup. |
+| `pronouns` | text | no | e.g. "he/him", "she/her", "they/them". Free text — not a dropdown. |
+| `role` | text | no | e.g. "Senior Software Engineer", "Freelance Designer" |
+| `organization` | text | no | Company or team name |
+| `location` | text | no | City or region — used by agents to localise date formats, recommendations, etc. |
+| `timezone` | text | no | IANA timezone string, e.g. "America/Los_Angeles". Auto-detected from browser on first save, user can override. |
+| `about` | text | no | Free-form. 500-character limit. The user writes whatever baseline context they want every persona to know. Examples: "I prefer concise answers without unnecessary preamble", "I'm a night owl — don't assume my day starts at 9am", "I work primarily in TypeScript and Rust". |
+
+All fields except `display_name` default to empty/null. The profile is never required — a user who fills in nothing gets the current behaviour.
+
+---
+
+#### 7.11.2 Context Injection
+
+When the user has at least one non-empty profile field (beyond `display_name`), a `## About the User` system message is injected into every non-default persona's context. It sits at position **1.5** in the assembly order — after the persona system prompt (step 1) but before the thread addendum (step 2):
+
+```
+1.  System — persona prompt + memory instructions
+1.5 System — user profile context         ← new, only when profile is non-empty
+2.  System — thread addendum              (optional, unchanged)
+3.  History
+4.  System — routine context notice       (optional, unchanged)
+5.  User message
+```
+
+The injected block is formatted as:
+
+```
+## About the User
+
+Name: Marcus
+Role: Senior Software Engineer
+Organization: Acme Corp
+Location: San Francisco, CA
+Timezone: America/Los_Angeles
+About: I prefer concise answers without unnecessary preamble. I work primarily in TypeScript and Rust.
+```
+
+Only non-empty fields are included. If only `display_name` is filled in, the block is not injected (since the model already sees the user's name from conversation and this would be noise).
+
+**Default persona:** profile context is never injected for the Default persona, consistent with all other context enrichments.
+
+---
+
+#### 7.11.3 Storage
+
+Extend the existing `users` table with new nullable columns (added via migration):
+
+```sql
+ALTER TABLE users ADD COLUMN pronouns         TEXT;
+ALTER TABLE users ADD COLUMN role             TEXT;
+ALTER TABLE users ADD COLUMN organization     TEXT;
+ALTER TABLE users ADD COLUMN location         TEXT;
+ALTER TABLE users ADD COLUMN timezone         TEXT;
+ALTER TABLE users ADD COLUMN about            TEXT;
+ALTER TABLE users ADD COLUMN profile_updated_at TEXT;
+```
+
+No separate table — the profile is part of the user record. There is only ever one user row.
+
+---
+
+#### 7.11.4 API
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/profile` | Return the current user's profile fields |
+| `PUT` | `/api/profile` | Update one or more profile fields |
+
+`GET /api/profile` response:
+```json
+{
+  "data": {
+    "display_name": "Marcus",
+    "pronouns": null,
+    "role": "Senior Software Engineer",
+    "organization": null,
+    "location": "San Francisco, CA",
+    "timezone": "America/Los_Angeles",
+    "about": "I prefer concise answers without unnecessary preamble.",
+    "profile_updated_at": "2025-01-15T10:30:00.000Z"
+  }
+}
+```
+
+`PUT /api/profile` body (all fields optional — only sent fields are updated):
+```json
+{
+  "display_name": "Marcus",
+  "role": "Principal Engineer",
+  "timezone": "America/New_York"
+}
+```
+
+To clear a field, send it explicitly as `null`.
+
+---
+
+#### 7.11.5 Setup Wizard Integration
+
+A new **Step 2b — About You** step is inserted into the setup wizard between the current "Name" step and the "Provider" step. The step is explicitly marked as optional and skippable.
+
+The step shows:
+- A short explanation: *"This helps your agents understand who they're talking to from the first message. You can update this anytime in Settings."*
+- Fields: Role, Organization, Location
+- The `about` free-form field with a 500-character counter
+- Timezone is auto-detected and pre-filled silently (shown as a small hint below the Location field: "Detected timezone: America/Los_Angeles — change in Settings")
+- A "Skip for now" link (not a button — low visual weight to reduce friction)
+
+The `pronouns` field is available in Settings but intentionally omitted from the setup wizard to reduce friction on first run.
+
+---
+
+#### 7.11.6 Settings UI
+
+A **Profile** section is added to Settings → General (above the existing auth token section). It shows all profile fields in an edit-in-place form (same pattern as the thread addendum field — blur to save, no explicit save button). The timezone field is a text input with the auto-detected value pre-filled.
+
+The `about` field shows a character counter (e.g. "142 / 500") and a small hint below: *"Shown to all your personas as background context. Be direct — this is read by the model on every turn."*
+
+---
+
+#### 7.11.7 Persona System Prompt Hint
+
+When a user is editing a persona's system prompt in Settings → Personas, show a subtle informational hint below the textarea:
+
+> ℹ️ User profile context (role, location, timezone, about) is automatically included in every conversation with this persona. You don't need to repeat it here.
+
+This prevents users from manually duplicating information that is already being injected.
+
+---
+
 ## 8. UI/UX Specification
 
 ### 8.1 React SPA — Layout

@@ -148,30 +148,45 @@ pub async fn create(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<CreateThread>,
 ) -> AppResult<impl IntoResponse> {
-    if payload.persona_id.trim().is_empty() {
-        return Err(AppError::BadRequest(
-            "persona_id must not be empty".to_string(),
-        ));
-    }
-
     let user_id = get_user_id(&state).await?;
 
-    // Verify the persona exists and belongs to this user
-    let persona_exists: Option<(String,)> =
-        sqlx::query_as("SELECT id FROM agent_personas WHERE id = ? AND user_id = ?")
-            .bind(&payload.persona_id)
+    // Resolve the persona_id: use the provided one (with ownership check) or fall back to Default
+    let resolved_persona_id = match payload.persona_id.as_deref().filter(|s| !s.is_empty()) {
+        Some(id) => {
+            // Verify the persona exists and belongs to this user
+            let persona_exists: Option<(String,)> =
+                sqlx::query_as("SELECT id FROM agent_personas WHERE id = ? AND user_id = ?")
+                    .bind(id)
+                    .bind(&user_id)
+                    .fetch_optional(&state.pool)
+                    .await?;
+
+            if persona_exists.is_none() {
+                return Err(AppError::BadRequest(format!("Persona '{}' not found", id)));
+            }
+
+            id.to_string()
+        }
+        None => {
+            let default: Option<(String,)> = sqlx::query_as(
+                "SELECT id FROM agent_personas WHERE user_id = ? AND is_default = 1 LIMIT 1",
+            )
             .bind(&user_id)
             .fetch_optional(&state.pool)
             .await?;
 
-    if persona_exists.is_none() {
-        return Err(AppError::BadRequest(format!(
-            "Persona '{}' not found",
-            payload.persona_id
-        )));
-    }
+            match default {
+                Some((id,)) => id,
+                None => {
+                    return Err(AppError::Internal(anyhow::anyhow!(
+                        "No Default persona found for user — setup may be incomplete"
+                    )))
+                }
+            }
+        }
+    };
 
-    let thread = Thread::new(&user_id, payload);
+    let thread = Thread::new(&user_id, &resolved_persona_id, payload);
 
     sqlx::query(
         "INSERT INTO threads

@@ -74,6 +74,28 @@ pub async fn complete(
         .execute(&state.pool)
         .await?;
 
+    // Create the Default persona for this user.
+    let default_persona = crate::models::agent_persona::AgentPersona::new_default(&user.id);
+    sqlx::query(
+        "INSERT INTO agent_personas
+             (id, user_id, name, emoji, avatar_path, system_prompt,
+              is_default, default_model, default_provider, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(&default_persona.id)
+    .bind(&default_persona.user_id)
+    .bind(&default_persona.name)
+    .bind(&default_persona.emoji)
+    .bind(&default_persona.avatar_path)
+    .bind(&default_persona.system_prompt)
+    .bind(default_persona.is_default)
+    .bind(&default_persona.default_model)
+    .bind(&default_persona.default_provider)
+    .bind(&default_persona.created_at)
+    .bind(&default_persona.updated_at)
+    .execute(&state.pool)
+    .await?;
+
     // Mark setup complete in app_config
     let now = chrono::Utc::now()
         .format("%Y-%m-%dT%H:%M:%S%.3fZ")

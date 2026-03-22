@@ -19,7 +19,7 @@ pub struct Thread {
 
 #[derive(Debug, Deserialize)]
 pub struct CreateThread {
-    pub persona_id: String,
+    pub persona_id: Option<String>,
     pub title: Option<String>,
     pub active_model: Option<String>,
     pub active_provider: Option<String>,
@@ -51,14 +51,18 @@ pub struct AttachMcpServer {
 }
 
 impl Thread {
-    pub fn new(user_id: impl Into<String>, req: CreateThread) -> Self {
+    pub fn new(
+        user_id: impl Into<String>,
+        persona_id: impl Into<String>,
+        req: CreateThread,
+    ) -> Self {
         let now = chrono::Utc::now()
             .format("%Y-%m-%dT%H:%M:%S%.3fZ")
             .to_string();
         Self {
             id: Uuid::new_v4().to_string(),
             user_id: user_id.into(),
-            persona_id: req.persona_id,
+            persona_id: persona_id.into(),
             title: req.title.unwrap_or_else(|| "New Chat".to_string()),
             active_model: req.active_model,
             active_provider: req.active_provider,

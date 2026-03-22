@@ -9,6 +9,7 @@ export interface AgentPersona {
   system_prompt: string;
   default_model: string | null;
   default_provider: string | null;
+  is_default: boolean;
   created_at: string;
   updated_at: string;
 }

@@ -251,13 +251,15 @@ async fn run_inner(
 
     let persona: crate::models::agent_persona::AgentPersona = sqlx::query_as(
         "SELECT id, user_id, name, emoji, avatar_path, system_prompt, default_model,
-                default_provider, created_at, updated_at
+                default_provider, is_default, created_at, updated_at
          FROM agent_personas WHERE id = ?",
     )
     .bind(persona_id)
     .fetch_one(&state.pool)
     .await
     .map_err(|e| anyhow!("Failed to load persona {}: {}", persona_id, e))?;
+
+    let is_default_persona = persona.is_default;
 
     // ── 2. Resolve the active provider and model ───────────────────────────────
     // Priority: thread overrides > persona defaults.
@@ -414,22 +416,6 @@ async fn run_inner(
         }
     }
 
-    // Convert the built-in tool registry to ChatCompletionTool defs so the
-    // LLM knows which tools are available.  These appear before MCP tools.
-    let built_in_tool_defs: Vec<async_openai::types::ChatCompletionTool> = state
-        .built_in_tools
-        .iter()
-        .map(|t| async_openai::types::ChatCompletionTool {
-            r#type: async_openai::types::ChatCompletionToolType::Function,
-            function: async_openai::types::FunctionObject {
-                name: t.name().to_string(),
-                description: Some(t.description().to_string()),
-                parameters: Some(t.input_schema()),
-                strict: None,
-            },
-        })
-        .collect();
-
     let assembled = context::assemble(AssemblyInput {
         persona_system_prompt: persona.system_prompt.clone(),
         thread_addendum: thread.system_prompt_addendum.clone(),
@@ -438,7 +424,24 @@ async fn run_inner(
         user_message: user_message.to_string(),
         is_routine_triggered: is_routine,
         supports_tools: true,
-        built_in_tool_defs,
+        include_memory: !is_default_persona,
+        built_in_tool_defs: if is_default_persona {
+            vec![]
+        } else {
+            state
+                .built_in_tools
+                .iter()
+                .map(|t| async_openai::types::ChatCompletionTool {
+                    r#type: async_openai::types::ChatCompletionToolType::Function,
+                    function: async_openai::types::FunctionObject {
+                        name: t.name().to_string(),
+                        description: Some(t.description().to_string()),
+                        parameters: Some(t.input_schema()),
+                        strict: None,
+                    },
+                })
+                .collect()
+        },
         mcp_tools: mcp_tool_defs,
     });
 

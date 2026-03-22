@@ -43,7 +43,9 @@ You have persistent long-term memory that spans across all our conversations. Us
 
 **When to recall:** Before answering questions that might benefit from prior context, when I reference something from a past conversation, or when I seem to assume you know something — check your memory using recall_memory. Use specific keywords, not full sentences.
 
-**Do not** tell me every time you save or recall a memory. Use memory silently unless I specifically ask what you remember about something."#;
+**When to delete:** Before saving something you may already know, call recall_memory first to check. If you find a duplicate or outdated entry, delete the old one with delete_memory (using the id: value from the recall result) before saving the updated version. If save_memory reports the store is full, call recall_memory to review your memories and delete entries that are no longer relevant before retrying.
+
+**Do not** tell me every time you save, recall, or delete a memory. Use memory silently unless I specifically ask what you remember about something."#;
 
 // ─── Input types ──────────────────────────────────────────────────────────────
 
@@ -79,6 +81,9 @@ pub struct AssemblyInput {
     /// Whether the active provider supports function calling.
     /// When `false`, the tool array is returned empty.
     pub supports_tools: bool,
+    /// When true, memory tools and the memory system-prompt block are included.
+    /// Set to false when the thread's persona is the Default persona.
+    pub include_memory: bool,
     /// Built-in tool definitions from the `AgentTool` registry.
     /// These appear first in the tool list, before MCP tools.
     pub built_in_tool_defs: Vec<async_openai::types::ChatCompletionTool>,
@@ -116,11 +121,15 @@ pub fn assemble(input: AssemblyInput) -> AssembledContext {
     // We combine these into a single system message so the persona's voice
     // is not interrupted by a second system turn.  The memory instructions
     // are always appended — they are not user-editable.
-    let system_content = format!(
-        "{}{}",
-        input.persona_system_prompt.trim(),
-        MEMORY_INSTRUCTIONS
-    );
+    let system_content = if input.include_memory {
+        format!(
+            "{}{}",
+            input.persona_system_prompt.trim(),
+            MEMORY_INSTRUCTIONS
+        )
+    } else {
+        input.persona_system_prompt.trim().to_string()
+    };
 
     messages.push(
         ChatCompletionRequestSystemMessageArgs::default()
@@ -222,7 +231,12 @@ pub fn assemble(input: AssemblyInput) -> AssembledContext {
 
     // ── Tool definitions ──────────────────────────────────────────────────────
     let tools = if input.supports_tools {
-        build_tool_definitions(input.built_in_tool_defs, input.mcp_tools)
+        let built_ins = if input.include_memory {
+            input.built_in_tool_defs
+        } else {
+            vec![]
+        };
+        build_tool_definitions(built_ins, input.mcp_tools)
     } else {
         vec![]
     };
@@ -329,6 +343,7 @@ mod tests {
             user_message: user_message.to_string(),
             is_routine_triggered: false,
             supports_tools: true,
+            include_memory: true,
             built_in_tool_defs: built_in_tool_defs_for_test(),
             mcp_tools: vec![],
         }
@@ -658,8 +673,8 @@ mod tests {
         let defs = built_in_tool_defs_for_test();
         assert_eq!(
             defs.len(),
-            2,
-            "expected exactly save_memory and recall_memory in the built-in registry"
+            3,
+            "expected exactly save_memory, recall_memory, and delete_memory in the built-in registry"
         );
     }
 
@@ -741,6 +756,7 @@ mod tests {
             user_message: "Show me an example.".to_string(),
             is_routine_triggered: false,
             supports_tools: true,
+            include_memory: true,
             built_in_tool_defs: built_in_tool_defs_for_test(),
             mcp_tools: vec![],
         };
@@ -771,6 +787,77 @@ mod tests {
         );
 
         // Tools
-        assert_eq!(ctx.tools.len(), 2);
+        assert_eq!(ctx.tools.len(), 3);
+    }
+
+    #[test]
+    fn memory_excluded_for_default_persona() {
+        let input = AssemblyInput {
+            persona_system_prompt: "You are helpful.".to_string(),
+            thread_addendum: None,
+            history: vec![],
+            history_limit: None,
+            user_message: "Hello".to_string(),
+            is_routine_triggered: false,
+            supports_tools: true,
+            include_memory: false,
+            built_in_tool_defs: built_in_tool_defs_for_test(),
+            mcp_tools: vec![],
+        };
+        let ctx = assemble(input);
+        // System message must not contain memory instructions
+        let sys = ctx.messages.first().unwrap();
+        if let async_openai::types::ChatCompletionRequestMessage::System(s) = sys {
+            let content = match &s.content {
+                async_openai::types::ChatCompletionRequestSystemMessageContent::Text(t) => {
+                    t.clone()
+                }
+                _ => panic!("expected text content"),
+            };
+            assert!(
+                !content.contains("## Memory"),
+                "memory instructions must be absent for Default persona"
+            );
+        } else {
+            panic!("first message must be system");
+        }
+        // No built-in tools
+        assert!(
+            ctx.tools.is_empty(),
+            "tools must be empty for Default persona"
+        );
+    }
+
+    #[test]
+    fn mcp_tools_still_present_for_default_persona() {
+        // MCP tools are NOT gated on persona type — only built-in memory tools are.
+        let mcp_tool = async_openai::types::ChatCompletionTool {
+            r#type: async_openai::types::ChatCompletionToolType::Function,
+            function: async_openai::types::FunctionObject {
+                name: "fs__read_file".to_string(),
+                description: Some("Read a file".to_string()),
+                parameters: None,
+                strict: None,
+            },
+        };
+        let input = AssemblyInput {
+            persona_system_prompt: "".to_string(),
+            thread_addendum: None,
+            history: vec![],
+            history_limit: None,
+            user_message: "Hello".to_string(),
+            is_routine_triggered: false,
+            supports_tools: true,
+            include_memory: false,
+            built_in_tool_defs: built_in_tool_defs_for_test(),
+            mcp_tools: vec![mcp_tool],
+        };
+        let ctx = assemble(input);
+        assert_eq!(
+            ctx.tools.len(),
+            1,
+            "MCP tools must still be present for Default persona"
+        );
+        assert_eq!(ctx.tools[0].function.name, "fs__read_file");
     }
 }
