@@ -209,10 +209,21 @@ pub fn assemble(input: AssemblyInput) -> AssembledContext {
         messages.push(
             ChatCompletionRequestSystemMessageArgs::default()
                 .content(
-                    "The following message was not sent by the user. \
-                     It was triggered by an automated system routine. \
-                     Interpret and respond to it as a system-initiated event, \
-                     not as a direct message from the user.",
+                    "SYSTEM NOTICE — SCHEDULED ROUTINE\n\
+                     \n\
+                     The following message was NOT sent by the user. It was triggered \
+                     automatically by a scheduled routine running in the background.\n\
+                     \n\
+                     Behavioral guidelines for routine responses:\n\
+                     - Respond as if writing a report or briefing, not a conversation.\n\
+                     - Do NOT greet the user or open with phrases like \"Sure!\", \
+                       \"Of course!\", or \"Here's your summary:\".\n\
+                     - Do NOT ask follow-up questions or invite further input.\n\
+                     - Be direct and concise. Lead with the most important information.\n\
+                     - Use markdown formatting (headers, bullets, tables) where it aids \
+                       readability.\n\
+                     - The user will read this as a push notification or background \
+                       update, not as a reply to something they typed.",
                 )
                 .build()
                 .expect("routine context message build")
@@ -725,8 +736,12 @@ mod tests {
         assert!(is_system(notice));
         let content = system_content(notice).unwrap();
         assert!(
-            content.contains("automated system routine"),
-            "routine notice should mention automated system routine, got: {content}"
+            content.contains("SCHEDULED ROUTINE"),
+            "routine notice should mention SCHEDULED ROUTINE, got: {content}"
+        );
+        assert!(
+            content.contains("Do NOT greet"),
+            "routine notice should include behavioral guidance, got: {content}"
         );
 
         // Last message is still the user turn.
