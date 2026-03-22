@@ -24,6 +24,7 @@ use crate::services::auth as auth_service;
 use crate::services::copilot::{CopilotApiService, GlobalEvent};
 use crate::services::credentials as credentials_service;
 use crate::services::mcp::McpConnectionManager;
+use crate::services::scheduler::SchedulerCommand;
 use crate::services::tools::{self as tools_service, AgentTool};
 
 pub mod auth;
@@ -126,6 +127,11 @@ pub struct AppState {
     /// Statically-registered built-in tools available to every agent run.
     /// MCP tools are discovered dynamically and routed separately.
     pub built_in_tools: Arc<Vec<Arc<dyn AgentTool>>>,
+    /// Sender half of the scheduler command channel.
+    /// Route handlers send commands here; the background `SchedulerService`
+    /// task receives on the other end and reacts by registering or removing
+    /// cron jobs.
+    pub scheduler_tx: tokio::sync::mpsc::Sender<SchedulerCommand>,
 }
 
 impl AppState {
@@ -173,6 +179,9 @@ pub async fn build_router(
         config.mcp_dir.clone(),
     );
 
+    // ── Scheduler command channel ─────────────────────────────────────────────
+    let (scheduler_tx, scheduler_rx) = tokio::sync::mpsc::channel::<SchedulerCommand>(256);
+
     let state = Arc::new(AppState {
         pool,
         config: config.clone(),
@@ -185,6 +194,7 @@ pub async fn build_router(
         copilot: Some(copilot_handle),
         mcp: mcp.clone(),
         built_in_tools: Arc::new(tools_service::built_in_tools()),
+        scheduler_tx,
     });
 
     // Start copilot-api supervision in the background.
@@ -192,6 +202,15 @@ pub async fn build_router(
 
     // Connect all enabled MCP servers.
     mcp.start().await;
+
+    // Start the routine scheduler in the background.
+    let scheduler =
+        crate::services::scheduler::SchedulerService::new(state.pool.clone(), state.clone())
+            .await?;
+    let scheduler_arc = scheduler.clone();
+    tokio::spawn(async move {
+        scheduler_arc.start(scheduler_rx).await;
+    });
 
     // Public API routes (no auth required)
     let public_api = Router::new()
@@ -321,6 +340,10 @@ pub async fn build_router(
             get(routines::get)
                 .put(routines::update)
                 .delete(routines::delete),
+        )
+        .route(
+            "/api/threads/:thread_id/routines/:routine_id/toggle",
+            axum::routing::patch(routines::toggle),
         )
         // Memory
         .route(
@@ -681,6 +704,7 @@ mod tests {
             copilot: None,
             mcp,
             built_in_tools: std::sync::Arc::new(vec![]),
+            scheduler_tx: tokio::sync::mpsc::channel(1).0,
         };
 
         let rs1 = app_state.get_run_state("thread-abc");
@@ -728,6 +752,7 @@ mod tests {
             copilot: None,
             mcp,
             built_in_tools: std::sync::Arc::new(vec![]),
+            scheduler_tx: tokio::sync::mpsc::channel(1).0,
         };
 
         let rs_a = app_state.get_run_state("thread-aaa");
@@ -786,6 +811,7 @@ mod tests {
             copilot: None,
             mcp,
             built_in_tools: std::sync::Arc::new(vec![]),
+            scheduler_tx: tokio::sync::mpsc::channel(1).0,
         });
 
         // Simulate two requests receiving their own clone of the Arc —

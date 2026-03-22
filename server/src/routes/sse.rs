@@ -339,6 +339,7 @@ mod tests {
             copilot: None,
             mcp,
             built_in_tools: std::sync::Arc::new(vec![]),
+            scheduler_tx: tokio::sync::mpsc::channel(1).0,
         }
     }
 

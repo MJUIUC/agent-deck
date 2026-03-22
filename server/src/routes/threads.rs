@@ -10,6 +10,8 @@ use serde::Deserialize;
 use serde_json::json;
 use uuid::Uuid;
 
+use crate::services::scheduler::SchedulerCommand;
+
 use crate::{
     error::{AppError, AppResult},
     models::thread::{AttachMcpServer, CreateThread, Thread, ThreadMcpServer, UpdateThread},
@@ -437,6 +439,18 @@ async fn set_thread_status(
             "Thread '{}' not found",
             thread_id
         )));
+    }
+
+    if status == "archived" {
+        let _ = state
+            .scheduler_tx
+            .send(SchedulerCommand::PauseThread(thread_id.to_string()))
+            .await;
+    } else if status == "active" {
+        let _ = state
+            .scheduler_tx
+            .send(SchedulerCommand::ResumeThread(thread_id.to_string()))
+            .await;
     }
 
     Ok((

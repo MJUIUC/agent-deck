@@ -225,7 +225,7 @@ export function GeneralSettings() {
   // Server info state
   const [serverInfo, setServerInfo] = useState<{
     version: string;
-    port: number;
+    database_path: string;
   } | null>(null);
 
   // Preferences — local state only for now (no persistence endpoint yet)
@@ -238,7 +238,10 @@ export function GeneralSettings() {
   const loadServerInfo = useCallback(async () => {
     try {
       const res = await authApi.getConfig();
-      setServerInfo({ version: res.data.version, port: res.data.port });
+      setServerInfo({
+        version: res.data.version,
+        database_path: res.data.database_path,
+      });
     } catch {
       // non-critical — server info card will just not render
     }
@@ -503,8 +506,7 @@ export function GeneralSettings() {
             }}
           >
             <InfoRow label="Version" value={serverInfo.version} />
-            <InfoRow label="Port" value={String(serverInfo.port)} />
-            <InfoRow label="Database" value="./data/agent-deck.db" />
+            <InfoRow label="Database" value={serverInfo.database_path} />
           </div>
         </SectionCard>
       )}

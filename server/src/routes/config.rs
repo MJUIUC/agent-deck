@@ -18,13 +18,22 @@ pub async fn get_config(State(state): State<Arc<AppState>>) -> AppResult<impl In
 
     let setup_complete = user_count.0 > 0;
 
+    // Derive the absolute database path from the config's database_url by
+    // stripping the "sqlite:" scheme prefix.
+    let database_path = state
+        .config
+        .database_url
+        .strip_prefix("sqlite:")
+        .unwrap_or(&state.config.database_url)
+        .to_string();
+
     Ok((
         StatusCode::OK,
         Json(json!({
             "data": {
                 "setup_complete": setup_complete,
-                "port": state.config.port,
                 "version": env!("CARGO_PKG_VERSION"),
+                "database_path": database_path,
             }
         })),
     ))
