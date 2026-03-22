@@ -1054,6 +1054,161 @@ This prevents users from manually duplicating information that is already being 
 
 ---
 
+### 7.12 Context Window Summarization
+
+**Purpose:** Preserve conversational continuity when a thread grows beyond the active context window. Without this feature, messages older than `DEFAULT_HISTORY_LIMIT` (20) are silently excluded from every agent turn — the agent forgets early context with no warning. With summarization enabled, old messages are compressed into a rolling summary that is injected into every subsequent turn, and the working window resets cleanly after each rotation.
+
+---
+
+#### 7.12.1 Current Behaviour
+
+The context assembler always takes the **last 20 visible messages** from the thread (a sliding window). Older messages remain in the database and are visible to the user in the chat UI, but the agent never receives them. The thread never ends — the user can keep chatting indefinitely — but the agent silently loses awareness of anything older than 20 turns. If the 20 messages are themselves very large and exceed the model's token limit, the provider rejects the request with an HTTP 400 before any streaming begins. This currently surfaces as a user-visible error with no recovery.
+
+---
+
+#### 7.12.2 Design
+
+**Two triggers — proactive and reactive.**
+
+*Proactive (normal path):* After each successful agent turn, if the number of unsummarised visible messages since the last summarisation has grown past `DEFAULT_HISTORY_LIMIT` (20), a background summarisation task is fired. Summarisation completes quietly after the turn; the next turn already has the summary ready and the hard error is never reached.
+
+*Reactive (fallback):* If a context-length 400 error occurs anyway (e.g. a single message is very large, or the model has a small context window), the error is caught before being surfaced to the user. Summarisation runs synchronously, then the original request is retried with the new summary in place. The user sees a brief pause; no error is shown.
+
+**Window rotation, not sliding.** After summarisation the context changes structure:
+
+```
+Turns 1–20:   [persona prompt] [messages 1–20] [new message]
+              ← background summarisation fires after turn 20 →
+Turns 21–40:  [persona prompt] [summary of 1–20] [messages 21–N] [new message]
+              ← background summarisation fires after turn 40 →
+Turns 41+:    [persona prompt] [summary of 1–40] [messages 41–N] [new message]
+```
+
+The old messages stay in the database and remain visible in the chat UI. The agent's working memory resets to the compact summary. `summary_message_count` on the thread tracks the boundary between summarised and active messages.
+
+**One rolling summary per thread.** Each summarisation overwrites the previous summary. Old summaries are not retained — the new summary covers everything from the beginning of the thread up to the current rotation point.
+
+**`finish_reason: "length"` is not used.** That flag signals that the model's *output* was truncated by a `max_tokens` limit — it has nothing to do with the input context window. The correct reactive signal is an HTTP 400 with a context-length error in the message, which the provider returns before any streaming begins.
+
+---
+
+#### 7.12.3 Storage
+
+Three new columns on `threads`:
+
+```sql
+ALTER TABLE threads ADD COLUMN summary                TEXT;
+ALTER TABLE threads ADD COLUMN summary_updated_at     TEXT;
+ALTER TABLE threads ADD COLUMN summary_message_count  INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE threads ADD COLUMN auto_summarize         INTEGER NOT NULL DEFAULT 1;
+```
+
+- `summary` — the generated summary text, NULL until the first rotation
+- `summary_updated_at` — ISO timestamp of last summarisation
+- `summary_message_count` — total visible message count at the time of last summarisation; used both to locate the boundary and as a guard against redundant re-summarisation
+- `auto_summarize` — per-thread toggle, default on
+
+No separate table. The summary travels with the thread record.
+
+---
+
+#### 7.12.4 Context Injection
+
+When `summary` is non-null, it is injected as a system message at position **2.5** in the assembly order — after the thread addendum, before the message history:
+
+```
+1.   System — persona prompt + memory instructions
+1.5  System — user profile context             (§7.11, when set)
+2.   System — thread addendum                  (when set)
+2.5  System — conversation summary             ← new, when summary is non-null
+3.   History  ← only messages AFTER summary_message_count boundary
+4.   System — routine context notice           (when routine-triggered)
+5.   User message
+```
+
+The injected system message:
+```
+The following is a summary of the earlier conversation that has been rotated out of the active context window. Use it as background context.
+
+[summary text]
+```
+
+History loaded in step 3 changes from "last 20 messages" to "all visible messages after the `summary_message_count` boundary, capped at `DEFAULT_HISTORY_LIMIT`". When no summary exists, behaviour is identical to today.
+
+---
+
+#### 7.12.5 Summarisation Prompt
+
+The summarisation call is a minimal non-streaming completion using the thread's active provider and model. No tool definitions are included.
+
+**System message:**
+```
+You are a conversation summarizer. Produce a concise factual summary of the conversation below. The summary will be injected as context for the same conversation in future turns — write it as a neutral briefing. Preserve: decisions made, open questions, any concrete outputs (code, plans, lists), and key facts about the user's goals. Omit pleasantries and meta-commentary. Maximum 600 words.
+```
+
+**User message:**
+```
+Summarize the following conversation:
+
+[role: content pairs for all messages being summarised]
+```
+
+The response is stored verbatim as `threads.summary`.
+
+---
+
+#### 7.12.6 Reactive Retry on Context-Length Error
+
+In `retry_strategy_for` in `agent.rs`, add detection for context-length errors:
+
+```
+HTTP 400 + message contains "context_length_exceeded"
+  OR "context window"
+  OR "maximum context length"
+  OR "prompt is too long"
+```
+
+When detected:
+1. Run `summarize_thread` synchronously (awaited, not spawned)
+2. Reload the thread's updated summary from the database
+3. Rebuild `AssemblyInput` with the new summary and reduced history
+4. Retry the provider call once
+5. If it fails again, surface the error normally
+
+This handles models with small context windows where the proactive message-count threshold is never reached before the limit is hit.
+
+---
+
+#### 7.12.7 API
+
+`GET /api/threads/:id` already returns the full thread object. The new fields (`summary`, `summary_updated_at`, `summary_message_count`, `auto_summarize`) are included in the response automatically once the model is updated.
+
+`PUT /api/threads/:id` accepts `auto_summarize` as an updatable field. `summary` is not directly settable by the client.
+
+No new endpoints required.
+
+---
+
+#### 7.12.8 UI — Advanced Section in Thread Config Pane
+
+The current ConfigPane has two display toggles (Show tool activity, Show system events) sitting inside the MCP Servers section, and an Archive button in a "Danger Zone" section at the bottom. These are reorganised into a new collapsible **Advanced** section at the bottom of the pane.
+
+The Advanced section is collapsed by default. It contains:
+
+| Control | Notes |
+|---|---|
+| Auto-summarize toggle | "Automatically summarize earlier messages when the conversation grows long." Default on. |
+| Show tool activity toggle | Moved from MCP section |
+| Show system events toggle | Moved from MCP section |
+| Archive Thread button | Moved from Danger Zone |
+
+When a summary exists, a subtle read-only hint appears beneath the auto-summarize toggle:
+> *Last summarized · [relative date] · [N] messages covered*
+
+This gives the user visibility that summarisation has run without cluttering the main pane.
+
+---
+
 ## 8. UI/UX Specification
 
 ### 8.1 React SPA — Layout

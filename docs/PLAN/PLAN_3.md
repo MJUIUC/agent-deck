@@ -757,6 +757,67 @@ Acceptance criteria:
 
 ---
 
+**Story 5.8 — Context window summarization**
+Branch: `feature/phase5-summarization`
+
+Implement rolling context-window summarization per section 7.12. Replaces the current silent sliding-window discard with a two-trigger system: proactive (message count threshold) and reactive (context-length 400 error detection and retry).
+
+**Part A — Migration and model:**
+Add migration 009 with `summary TEXT`, `summary_updated_at TEXT`, `summary_message_count INTEGER NOT NULL DEFAULT 0`, and `auto_summarize INTEGER NOT NULL DEFAULT 1` columns on `threads`. Update `Thread` struct and `UpdateThread` to include `auto_summarize`. `summary` and `summary_message_count` are server-managed and not accepted on PUT.
+
+**Part B — Summarization service:**
+Add `services/summarization.rs`. Implement `pub async fn summarize_thread(state: &AppState, thread_id: &str) -> Result<()>` which:
+1. Loads the thread; checks `auto_summarize`; if false, returns immediately
+2. Counts total visible messages; if count equals `summary_message_count`, returns (already current)
+3. Loads all visible messages up to and including the current `summary_message_count + DEFAULT_HISTORY_LIMIT` boundary — these are the messages being summarised
+4. If fewer than `DEFAULT_HISTORY_LIMIT` messages would be summarised, returns early (not enough new content)
+5. Builds the summarisation prompt per §7.12.5, prepending any existing summary so the new summary covers the full history from the beginning
+6. Calls the thread's active provider with no tools and no streaming (regular completion)
+7. On success: writes result to `threads.summary`, updates `summary_updated_at` and `summary_message_count` to the current total visible message count
+8. On any failure: logs at WARN, returns — must never propagate or surface to the user
+
+**Part C — Proactive trigger:**
+At the end of `run_inner` in `agent.rs`, after the `ThreadUpdated` SSE event is emitted: count total visible messages for the thread. If `auto_summarize` is true and `(total_count - thread.summary_message_count) >= DEFAULT_HISTORY_LIMIT`, spawn a background task calling `summarize_thread`. Fire-and-forget — does not block the response.
+
+**Part D — Reactive trigger (context-length error):**
+In `retry_strategy_for`, add a new match arm that detects context-length errors (check for "context_length_exceeded", "context window", "maximum context length", "prompt is too long" in the error message). Return a new `RetryStrategy::SummarizeAndRetry` variant. In `stream_one_turn` (or its caller), handle this variant by: calling `summarize_thread` synchronously, rebuilding `AssemblyInput` with the updated summary and reduced history, and retrying the provider call once. If it fails again, fall through to the normal error path.
+
+**Part E — Context injection:**
+Add `conversation_summary: Option<String>` to `AssemblyInput` in `context.rs`. In `assemble()`, inject it at position 2.5 per §7.12.4 when `Some` and non-empty. The history query in `run_inner` changes from "last 20 visible messages" to "visible messages after the `summary_message_count` boundary, capped at `DEFAULT_HISTORY_LIMIT`". Update all existing `AssemblyInput` constructions in tests to include `conversation_summary: None`.
+
+**Part F — UI: Advanced section in ConfigPane:**
+Refactor the thread config pane per §7.12.8:
+- Add a collapsible Advanced section at the bottom (collapsed by default)
+- Move show-tool-activity and show-system-events toggles into it
+- Move Archive button into it (remove the Danger Zone section)
+- Add auto-summarize toggle
+- Show "Last summarized · [date] · [N] messages covered" hint when summary exists
+- Update `Thread` TypeScript type to include `summary`, `summary_updated_at`, `summary_message_count`, `auto_summarize`
+
+Acceptance criteria:
+- [ ] Migration adds all four columns with correct defaults
+- [ ] `GET /api/threads/:id` includes new fields
+- [ ] `PUT /api/threads/:id` accepts `auto_summarize`; ignores `summary` if sent
+- [ ] No summarization when `auto_summarize = 0`
+- [ ] No summarization when fewer than `DEFAULT_HISTORY_LIMIT` new messages since last summary
+- [ ] Re-summarization guard: no-op when `summary_message_count` already matches current count
+- [ ] Proactive trigger fires as background task after turn when threshold is reached
+- [ ] Proactive trigger does not block the user response
+- [ ] Reactive trigger detects context-length 400 and runs summarization synchronously before retry
+- [ ] After reactive summarization, the retry uses the new summary and succeeds (assuming summary reduces context sufficiently)
+- [ ] Summary is injected between thread addendum and history
+- [ ] History loaded is messages AFTER the summary boundary, not unconditional last-20
+- [ ] Summary injection is absent when `summary` is null
+- [ ] Summarization failure is logged at WARN and not surfaced to the user
+- [ ] `summary_message_count` reflects the message count at the time of summarization
+- [ ] Advanced section in ConfigPane collapsed by default; expands on click
+- [ ] Auto-summarize toggle persists; show-tool-activity and show-system-events toggles work from new location
+- [ ] Archive button works from new location
+- [ ] "Last summarized" hint visible when summary exists
+- [ ] Unit tests: summarization prompt construction, context injection (with/without summary), re-summarization guard, boundary query (messages after summary_message_count)
+
+---
+
 ### Phase 6 — React Native Mobile App
 
 **Goal:** A new React Native app is scaffolded from scratch and built to work with the agent-deck server API. Full chat experience on Android.
