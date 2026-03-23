@@ -541,6 +541,7 @@ export function ConfigPane({
   // ── Advanced collapsible ──
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [deletingMemoryId, setDeletingMemoryId] = useState<string | null>(null);
+  const [memoriesExpanded, setMemoriesExpanded] = useState(false);
 
   // Sync local state when thread prop changes (different thread selected)
   useEffect(() => {
@@ -559,6 +560,7 @@ export function ConfigPane({
     setPersonaMemoriesTotal(0);
     setAdvancedOpen(false);
     setDeletingMemoryId(null);
+    setMemoriesExpanded(false);
   }, [
     thread.id,
     thread.system_prompt_addendum,
@@ -1235,28 +1237,45 @@ export function ConfigPane({
                       </div>
                     ) : (
                       <div className={styles.memoryList}>
-                        {personaMemories.map((m) => (
-                          <div key={m.id} className={styles.memoryEntry}>
-                            <div className={styles.memoryEntryBody}>
-                              <div className={styles.memoryContent}>
-                                {m.content}
+                        {personaMemories
+                          .slice(
+                            0,
+                            memoriesExpanded
+                              ? personaMemories.length
+                              : SHOW_LIMIT,
+                          )
+                          .map((m) => (
+                            <div key={m.id} className={styles.memoryEntry}>
+                              <div className={styles.memoryEntryBody}>
+                                <div className={styles.memoryContent}>
+                                  {m.content}
+                                </div>
+                                <div className={styles.memoryMeta}>
+                                  {new Date(m.created_at).toLocaleDateString()}
+                                  {m.thread_title &&
+                                    ` · from "${m.thread_title}"`}
+                                </div>
                               </div>
-                              <div className={styles.memoryMeta}>
-                                {new Date(m.created_at).toLocaleDateString()}
-                                {m.thread_title &&
-                                  ` · from "${m.thread_title}"`}
-                              </div>
+                              <button
+                                className={styles.memoryDeleteBtn}
+                                onClick={() => handleMemoryDelete(m.id)}
+                                disabled={deletingMemoryId === m.id}
+                                title="Delete memory"
+                              >
+                                {deletingMemoryId === m.id ? "…" : "✕"}
+                              </button>
                             </div>
-                            <button
-                              className={styles.memoryDeleteBtn}
-                              onClick={() => handleMemoryDelete(m.id)}
-                              disabled={deletingMemoryId === m.id}
-                              title="Delete memory"
-                            >
-                              {deletingMemoryId === m.id ? "…" : "✕"}
-                            </button>
-                          </div>
-                        ))}
+                          ))}
+                        {personaMemories.length > SHOW_LIMIT && (
+                          <button
+                            className={styles.showMoreBtn}
+                            onClick={() => setMemoriesExpanded((e) => !e)}
+                          >
+                            {memoriesExpanded
+                              ? "Show less"
+                              : `Show ${personaMemories.length - SHOW_LIMIT} more`}
+                          </button>
+                        )}
                       </div>
                     )}
                     <div className={styles.advancedDivider} />
