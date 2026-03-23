@@ -15,14 +15,20 @@ function UserAvatar() {
   return <div className={`${styles.avatar} ${styles.avatarUser}`}>M</div>;
 }
 
-function AgentAvatar({ emoji }: { emoji: string }) {
+function AgentAvatar({
+  emoji,
+  className,
+}: {
+  emoji: string;
+  className?: string;
+}) {
   return (
-    <div className={`${styles.avatar} ${styles.avatarAgent}`}>{emoji}</div>
+    <div
+      className={`${styles.avatar} ${styles.avatarAgent} ${className ?? ""}`}
+    >
+      {emoji}
+    </div>
   );
-}
-
-function RoutineAvatar() {
-  return <div className={`${styles.avatar} ${styles.avatarRoutine}`}>⚡</div>;
 }
 
 export function MessageBubble({
@@ -55,7 +61,7 @@ export function MessageBubble({
       {isUser ? (
         <UserAvatar />
       ) : isRoutine ? (
-        <RoutineAvatar />
+        <AgentAvatar emoji={personaEmoji} className={styles.avatarRoutine} />
       ) : (
         <AgentAvatar emoji={personaEmoji} />
       )}

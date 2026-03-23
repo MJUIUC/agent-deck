@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
+import cronstrue from "cronstrue";
 import type {
   Thread,
   McpServer,
@@ -398,32 +399,19 @@ function ProviderModelSelector({
 function AttachServerPicker({
   attachedIds,
   onAttach,
-  onClose,
 }: {
   attachedIds: Set<string>;
   onAttach: (server: McpServer) => void;
-  onClose: () => void;
 }) {
   const [allServers, setAllServers] = useState<McpServer[]>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
-  const ref = useRef<HTMLDivElement>(null);
-
   useEffect(() => {
     mcpServersApi.list().then(({ data }) => {
       setAllServers(data);
       setLoading(false);
     });
   }, []);
-
-  // Click-outside to close
-  useEffect(() => {
-    function handler(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
-    }
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [onClose]);
 
   const available = allServers.filter(
     (s) =>
@@ -434,13 +422,8 @@ function AttachServerPicker({
   );
 
   return (
-    <div className={styles.pickerOverlay} ref={ref}>
-      <div className={styles.pickerHeader}>
-        <span className={styles.pickerTitle}>Attach MCP Server</span>
-        <button className={styles.pickerClose} onClick={onClose}>
-          <X size={12} />
-        </button>
-      </div>
+    <div className={styles.pickerOverlay}>
+      <div className={styles.pickerTitle}>Attach MCP Server</div>
       <input
         className={styles.pickerSearch}
         type="text"
@@ -545,6 +528,8 @@ export function ConfigPane({
   const [deletingRoutineId, setDeletingRoutineId] = useState<string | null>(
     null,
   );
+  const [routinesExpanded, setRoutinesExpanded] = useState(false);
+  const [mcpExpanded, setMcpExpanded] = useState(false);
 
   // Sync local state when thread prop changes (different thread selected)
   useEffect(() => {
@@ -863,6 +848,8 @@ export function ConfigPane({
 
   const handleArchiveCancel = () => setShowArchiveConfirm(false);
 
+  const SHOW_LIMIT = 2;
+
   const persona = thread.persona;
   const attachedIds = new Set(attachedEntries.map((e) => e.mcp_server_id));
 
@@ -953,11 +940,13 @@ export function ConfigPane({
           <div className={styles.section}>
             <div className={styles.sectionHeader}>
               <span className={styles.sectionTitle}>Routines</span>
-              {!showRoutineForm && (
-                <button className={styles.addBtn} onClick={openAddForm}>
-                  ＋ Add
-                </button>
-              )}
+              <button
+                className={showRoutineForm ? styles.cancelBtn : styles.addBtn}
+                onClick={showRoutineForm ? closeRoutineForm : openAddForm}
+                disabled={routineFormSaving}
+              >
+                {showRoutineForm ? "✕ Cancel" : "＋ Add"}
+              </button>
             </div>
 
             {routinesLoading ? (
@@ -968,42 +957,63 @@ export function ConfigPane({
                   <div className={styles.emptyHint}>No routines yet.</div>
                 )}
 
-                {routines.map((r) => (
-                  <div key={r.id} className={styles.routineCard}>
-                    <div className={styles.routineCardTop}>
-                      <Toggle
-                        checked={r.enabled}
-                        onChange={() => handleRoutineToggle(r.id)}
-                      />
-                      <div className={styles.routineCardInfo}>
-                        <div className={styles.routineName}>{r.name}</div>
-                        <div className={styles.routineCron}>{r.cron_expr}</div>
+                {routines
+                  .slice(0, routinesExpanded ? routines.length : SHOW_LIMIT)
+                  .map((r) => (
+                    <div key={r.id} className={styles.routineCard}>
+                      <div className={styles.routineCardTop}>
+                        <Toggle
+                          checked={r.enabled}
+                          onChange={() => handleRoutineToggle(r.id)}
+                        />
+                        <div className={styles.routineCardInfo}>
+                          <div className={styles.routineName}>{r.name}</div>
+                          <div className={styles.routineCron}>
+                            {(() => {
+                              try {
+                                return cronstrue.toString(r.cron_expr);
+                              } catch {
+                                return r.cron_expr;
+                              }
+                            })()}
+                          </div>
+                        </div>
+                        <div className={styles.routineCardActions}>
+                          <button
+                            className={styles.routineEditBtn}
+                            onClick={() => openEditForm(r)}
+                            title="Edit"
+                          >
+                            ✎
+                          </button>
+                          <button
+                            className={styles.routineDeleteBtn}
+                            onClick={() => handleRoutineDelete(r.id)}
+                            disabled={deletingRoutineId === r.id}
+                            title="Delete"
+                          >
+                            {deletingRoutineId === r.id ? "…" : "✕"}
+                          </button>
+                        </div>
                       </div>
-                      <div className={styles.routineCardActions}>
-                        <button
-                          className={styles.routineEditBtn}
-                          onClick={() => openEditForm(r)}
-                          title="Edit"
-                        >
-                          ✎
-                        </button>
-                        <button
-                          className={styles.routineDeleteBtn}
-                          onClick={() => handleRoutineDelete(r.id)}
-                          disabled={deletingRoutineId === r.id}
-                          title="Delete"
-                        >
-                          {deletingRoutineId === r.id ? "…" : "✕"}
-                        </button>
+                      <div className={styles.routinePromptPreview}>
+                        {r.prompt.length > 80
+                          ? r.prompt.slice(0, 80) + "…"
+                          : r.prompt}
                       </div>
                     </div>
-                    <div className={styles.routinePromptPreview}>
-                      {r.prompt.length > 80
-                        ? r.prompt.slice(0, 80) + "…"
-                        : r.prompt}
-                    </div>
-                  </div>
-                ))}
+                  ))}
+
+                {routines.length > SHOW_LIMIT && !showRoutineForm && (
+                  <button
+                    className={styles.showMoreBtn}
+                    onClick={() => setRoutinesExpanded((e) => !e)}
+                  >
+                    {routinesExpanded
+                      ? "Show less"
+                      : `Show ${routines.length - SHOW_LIMIT} more`}
+                  </button>
+                )}
 
                 {/* ── Inline add/edit form ── */}
                 {showRoutineForm && (
@@ -1053,13 +1063,6 @@ export function ConfigPane({
 
                     <div className={styles.routineFormActions}>
                       <button
-                        className={styles.routineFormCancel}
-                        onClick={closeRoutineForm}
-                        disabled={routineFormSaving}
-                      >
-                        Cancel
-                      </button>
-                      <button
                         className={styles.routineFormSave}
                         onClick={handleRoutineSave}
                         disabled={routineFormSaving}
@@ -1079,6 +1082,12 @@ export function ConfigPane({
           <div className={styles.section}>
             <div className={styles.sectionHeader}>
               <span className={styles.sectionTitle}>MCP Servers</span>
+              <button
+                className={showAttachPicker ? styles.cancelBtn : styles.addBtn}
+                onClick={() => setShowAttachPicker((o) => !o)}
+              >
+                {showAttachPicker ? "✕ Cancel" : "＋ Add"}
+              </button>
             </div>
 
             {mcpLoading ? (
@@ -1088,36 +1097,39 @@ export function ConfigPane({
                 {attachedEntries.length === 0 && (
                   <div className={styles.emptyHint}>No servers attached.</div>
                 )}
-                {attachedEntries.map((entry) => {
-                  const server = mcpServersMap[entry.mcp_server_id];
-                  if (!server) return null;
-                  return (
-                    <McpServerCard
-                      key={entry.id}
-                      server={server}
-                      tools={toolsMap[server.id] ?? null}
-                      onRemove={() => handleDetachServer(server.id)}
-                      onLoadTools={() => handleLoadTools(server.id)}
-                    />
-                  );
-                })}
+                {attachedEntries
+                  .slice(0, mcpExpanded ? attachedEntries.length : SHOW_LIMIT)
+                  .map((entry) => {
+                    const server = mcpServersMap[entry.mcp_server_id];
+                    if (!server) return null;
+                    return (
+                      <McpServerCard
+                        key={entry.id}
+                        server={server}
+                        tools={toolsMap[server.id] ?? null}
+                        onRemove={() => handleDetachServer(server.id)}
+                        onLoadTools={() => handleLoadTools(server.id)}
+                      />
+                    );
+                  })}
 
-                {/* Attach button */}
-                <div className={styles.mcpAttachWrap}>
+                {attachedEntries.length > SHOW_LIMIT && !showAttachPicker && (
                   <button
-                    className={styles.mcpAttachBtn}
-                    onClick={() => setShowAttachPicker((o) => !o)}
+                    className={styles.showMoreBtn}
+                    onClick={() => setMcpExpanded((e) => !e)}
                   >
-                    ＋ Attach server
+                    {mcpExpanded
+                      ? "Show less"
+                      : `Show ${attachedEntries.length - SHOW_LIMIT} more`}
                   </button>
-                  {showAttachPicker && (
-                    <AttachServerPicker
-                      attachedIds={attachedIds}
-                      onAttach={handleAttachServer}
-                      onClose={() => setShowAttachPicker(false)}
-                    />
-                  )}
-                </div>
+                )}
+
+                {showAttachPicker && (
+                  <AttachServerPicker
+                    attachedIds={attachedIds}
+                    onAttach={handleAttachServer}
+                  />
+                )}
               </div>
             )}
 

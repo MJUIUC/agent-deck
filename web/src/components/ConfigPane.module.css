@@ -358,6 +358,30 @@
     cursor: not-allowed;
 }
 
+.cancelBtn {
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    background: transparent;
+    color: var(--text-tertiary);
+    border: 1px solid transparent;
+    transition:
+        background 0.15s,
+        color 0.15s;
+}
+
+.cancelBtn:hover:not(:disabled) {
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+}
+
+.cancelBtn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
 /* ── Empty states ── */
 .emptyState {
     background: var(--bg-tertiary);
@@ -580,81 +604,23 @@
     line-height: 1.3;
 }
 
-/* ── Attach button + picker ── */
-.mcpAttachWrap {
-    position: relative;
-}
-
-.mcpAttachBtn {
-    background: none;
-    border: 1px dashed var(--border-default);
-    border-radius: 8px;
-    color: var(--text-tertiary);
-    font-size: 12px;
-    cursor: pointer;
-    padding: 8px 12px;
-    width: 100%;
-    text-align: center;
-    transition:
-        border-color 0.15s,
-        color 0.15s;
-}
-
-.mcpAttachBtn:hover {
-    border-color: var(--accent-primary);
-    color: var(--accent-secondary);
-}
-
 /* ── Attach picker overlay ── */
 .pickerOverlay {
-    position: absolute;
-    bottom: calc(100% + 6px);
-    left: 0;
-    right: 0;
     background: var(--bg-elevated);
-    border: 1px solid var(--border-default);
+    border: 1px solid var(--border-subtle);
     border-radius: 10px;
-    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
-    z-index: 30;
     display: flex;
     flex-direction: column;
     overflow: hidden;
     max-height: 300px;
-}
-
-.pickerHeader {
-    padding: 10px 12px 6px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-shrink: 0;
+    margin-top: 6px;
 }
 
 .pickerTitle {
     font-size: 12px;
     font-weight: 600;
     color: var(--text-primary);
-}
-
-.pickerClose {
-    width: 22px;
-    height: 22px;
-    border-radius: 4px;
-    background: transparent;
-    border: none;
-    color: var(--text-tertiary);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition:
-        background 0.15s,
-        color 0.15s;
-}
-
-.pickerClose:hover {
-    background: var(--bg-secondary);
-    color: var(--text-primary);
+    padding: 10px 12px 4px;
 }
 
 .pickerSearch {
@@ -735,6 +701,24 @@
     display: flex;
     gap: 5px;
     margin-top: 2px;
+}
+
+/* ── Show more / less accordion button ── */
+.showMoreBtn {
+    background: none;
+    border: none;
+    color: var(--accent-secondary);
+    font-size: 12px;
+    font-family: inherit;
+    cursor: pointer;
+    padding: 2px 0;
+    text-align: left;
+    opacity: 0.8;
+    transition: opacity 0.15s;
+}
+
+.showMoreBtn:hover {
+    opacity: 1;
 }
 
 /* ── Tool activity row ── */
