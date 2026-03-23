@@ -1032,21 +1032,18 @@ export function ConfigPane({
                     />
 
                     <label className={styles.routineFormLabel}>Schedule</label>
-                    <div className={styles.routineFormCronRow}>
-                      <input
-                        className={styles.routineFormInput}
-                        style={{ flex: 1, fontFamily: "monospace" }}
-                        placeholder="0 9 * * *"
-                        value={routineFormCron}
-                        onChange={(e) => setRoutineFormCron(e.target.value)}
-                        disabled={routineFormSaving}
-                      />
-                      <CronPicker
-                        value={routineFormCron}
-                        onChange={setRoutineFormCron}
-                        disabled={routineFormSaving}
-                      />
-                    </div>
+                    <input
+                      className={styles.routineFormInput}
+                      style={{ fontFamily: "monospace" }}
+                      placeholder="0 9 * * *"
+                      value={routineFormCron}
+                      onChange={(e) => setRoutineFormCron(e.target.value)}
+                      disabled={routineFormSaving}
+                    />
+                    <CronPicker
+                      value={routineFormCron}
+                      onChange={setRoutineFormCron}
+                    />
 
                     {routineFormError && (
                       <div className={styles.routineFormError}>

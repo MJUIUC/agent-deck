@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect } from "react";
 import cronstrue from "cronstrue";
 import styles from "./CronPicker.module.css";
 
@@ -158,7 +158,6 @@ export function CronPicker({ value, onChange }: CronPickerProps) {
   const [open, setOpen] = useState(false);
   const [state, setState] = useState<PickerState>(() => parseCron(value));
 
-  const wrapRef = useRef<HTMLDivElement>(null);
   // Track what we last pushed to the parent so we can skip re-parsing our own
   // onChange emissions and avoid an infinite loop.
   const prevValueRef = useRef<string>(value);
@@ -170,20 +169,6 @@ export function CronPicker({ value, onChange }: CronPickerProps) {
       setState(parseCron(value));
     }
   }, [value]);
-
-  // ── Close on outside click ─────────────────────────────────────────────────
-  useEffect(() => {
-    if (!open) return;
-
-    function handler(e: MouseEvent) {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    }
-
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
 
   // ── State mutator — updates local state AND notifies parent ───────────────
   function updateState(next: PickerState) {
@@ -206,7 +191,7 @@ export function CronPicker({ value, onChange }: CronPickerProps) {
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div ref={wrapRef} className={styles.wrap}>
+    <div className={styles.wrap}>
       {/* ── Trigger button ── */}
       <button
         type="button"
@@ -214,18 +199,14 @@ export function CronPicker({ value, onChange }: CronPickerProps) {
         onClick={() => setOpen((o) => !o)}
         aria-label="Open schedule picker"
         aria-expanded={open}
-        title="Schedule"
+        title={open ? "Hide schedule builder" : "Show schedule builder"}
       >
-        📅
+        📅 {open ? "Hide schedule builder" : "Schedule builder"}
       </button>
 
-      {/* ── Popover ── */}
+      {/* ── Inline panel ── */}
       {open && (
-        <div
-          className={styles.popover}
-          role="dialog"
-          aria-label="Schedule picker"
-        >
+        <div className={styles.panel} role="group" aria-label="Schedule picker">
           {/* 1. Frequency pills */}
           <div className={styles.frequencyRow}>
             {FREQ_OPTIONS.map(({ key, label }) => (

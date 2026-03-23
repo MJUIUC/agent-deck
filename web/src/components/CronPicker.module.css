@@ -1,27 +1,27 @@
 /* ── CronPicker ──────────────────────────────────────────────────────────── */
 
-/* Wrapper — anchors the popover */
+/* Wrapper — block level, full width */
 .wrap {
-    position: relative;
-    display: inline-block;
+    display: block;
+    width: 100%;
 }
 
 /* ── Trigger button ─────────────────────────────────────────────────────── */
 
 .triggerBtn {
-    width: 28px;
+    width: 100%;
     height: 28px;
-    padding: 0;
+    padding: 0 10px;
     border-radius: 6px;
-    border: 1px solid transparent;
+    border: 1px solid var(--border-subtle);
     background: transparent;
-    color: var(--text-secondary);
-    font-size: 14px;
+    color: var(--text-tertiary);
+    font-size: 12px;
     line-height: 1;
     cursor: pointer;
     display: flex;
     align-items: center;
-    justify-content: center;
+    gap: 6px;
     transition:
         background 0.15s,
         border-color 0.15s,
@@ -36,40 +36,32 @@
 
 .triggerBtnOpen {
     background: var(--bg-elevated);
-    border-color: var(--border-default);
+    border-color: var(--accent-primary);
     color: var(--text-primary);
 }
 
-/* ── Popover card ───────────────────────────────────────────────────────── */
+/* ── Inline panel ───────────────────────────────────────────────────────── */
 
-.popover {
-    position: absolute;
-    top: calc(100% + 6px);
-    left: 0;
-    z-index: 200;
+.panel {
+    margin-top: 6px;
     background: var(--bg-elevated);
     border: 1px solid var(--border-default);
-    border-radius: 10px;
-    min-width: 280px;
+    border-radius: 8px;
     padding: 12px 12px 10px;
-    box-shadow:
-        0 4px 12px rgba(0, 0, 0, 0.3),
-        0 12px 32px rgba(0, 0, 0, 0.25);
     display: flex;
     flex-direction: column;
     gap: 10px;
-    /* Pop-in animation */
-    animation: cronPopoverIn 0.12s cubic-bezier(0.2, 0, 0.2, 1);
+    animation: cronPanelIn 0.14s ease;
 }
 
-@keyframes cronPopoverIn {
+@keyframes cronPanelIn {
     from {
         opacity: 0;
-        transform: translateY(-4px) scale(0.98);
+        transform: translateY(-4px);
     }
     to {
         opacity: 1;
-        transform: translateY(0) scale(1);
+        transform: translateY(0);
     }
 }
 
