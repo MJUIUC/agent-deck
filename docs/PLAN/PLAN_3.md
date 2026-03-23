@@ -14,7 +14,7 @@ Each story maps to one feature branch. Complete all stories in a phase before st
 
 ### Phase 1 — Skeleton That Runs
 
-**Goal:** A Rust server that boots with SQLite, serves a React SPA shell, and has all tables in place. Nothing functional yet, but the entire foundation is solid and both projects compile.
+**Goal:** A Rust server that boots with SQLite, serves a React SPA shell, and has all tables in place. Tailscale integration is wired in so the server knows its own hostname from the start. Nothing functional yet, but the entire foundation is solid and both projects compile.
 
 ---
 
@@ -85,6 +85,51 @@ Acceptance criteria:
 
 ---
 
+**Story 1.x — Tailscale server integration**  
+Branch: `feature/phase1-tailscale-integration`
+
+Implement Tailscale detection and management on the server side. This is a prerequisite for the setup wizard Tailscale step and for the QR pairing endpoint returning a correct server URL.
+
+**Tailscale status detection:**
+- On server startup, attempt to run `tailscale status --json` via `tokio::process::Command`
+- If the command succeeds and the machine is connected, parse the hostname and store it in `app_config` as `tailscale_hostname`
+- This runs non-blocking — server startup is never delayed waiting for Tailscale
+
+**New endpoints (section 6.15):**
+
+`GET /api/tailscale/status` — calls `tailscale status --json` (or checks the binary exists first), returns:
+```json
+{
+  "installed": true,
+  "connected": true,
+  "hostname": "mac-mini.tail1234.ts.net",
+  "auth_url": null
+}
+```
+
+`POST /api/tailscale/install` — runs the official install script:
+```bash
+curl -fsSL https://tailscale.com/install.sh | sh
+```
+Streams output to a temporary log, returns status on completion. macOS only — returns a clear error on other platforms.
+
+`POST /api/tailscale/connect` — runs `tailscale up`, captures the auth URL from stdout/stderr if the machine is not yet authenticated, and returns it. Once connected, stores the hostname in `app_config`.
+
+**Update `GET /api/pairing/qr`:**
+Read `tailscale_hostname` from `app_config`. If present, use `http://{tailscale_hostname}:7474` as the `server_url` in the QR payload. If absent (Tailscale not set up), fall back to the machine's local IP address with a note that Tailscale is required for remote access.
+
+Acceptance criteria:
+- `GET /api/tailscale/status` returns correct state when Tailscale is installed and connected
+- `GET /api/tailscale/status` returns `installed: false` when `tailscale` binary is not found
+- `POST /api/tailscale/install` runs the install script and returns updated status
+- `POST /api/tailscale/connect` returns an `auth_url` when machine is not yet authenticated
+- `POST /api/tailscale/connect` stores `tailscale_hostname` in `app_config` once connected
+- `GET /api/pairing/qr` uses `tailscale_hostname` when available
+- Server startup Tailscale check is non-blocking
+- Unit test: status parsing handles connected, disconnected, and not-installed states
+
+---
+
 **Story 1.6 — Core entity CRUD (providers, personas, threads, skills, MCP servers)**  
 Branch: `feature/phase1-core-crud`
 
@@ -144,6 +189,7 @@ Create static HTML mockups for every major screen in the application. These serv
 - `slash-commands.html` — Chat input with `/` typed, showing the floating autocomplete panel above it with command names and descriptions. Arrow key highlight state. Ephemeral message rendering (visually distinct from persisted messages — lighter opacity or dashed border).
 - `empty-states.html` — Empty thread list, no personas configured banner, no provider connected banner, empty routines list.
 - `token-entry.html` — Full-screen token entry for remote device authentication. Single input field, paste button, "Connect" action, brief explanation of where to find the token. Error state for invalid token.
+- `setup-wizard-tailscale.html` — The Tailscale wizard step in all three states: (1) not installed — install button + explanation; (2) installed/not-connected — "Connect" button + auth URL display with "Open Tailscale login" link; (3) connected — green success box with hostname + auto-advance indicator.
 
 **Mobile mockups (375px viewport, matching Pixel 4a):**
 - `mobile-thread-list.html` — Thread list with agent emoji + avatar, title, last message preview, timestamp. New thread FAB button. Header with app name.
@@ -615,7 +661,7 @@ Acceptance criteria:
 - [x] Empty recall returns the "no memories found" message
 - [x] The memory system prompt is appended to every request for non-default personas (after persona prompt, before thread addendum)
 - [x] The tools are included in LLM requests as function definitions (non-default personas only)
-- [ ] Integration test: save a memory, send a follow-up message in a different thread (same persona) that should trigger recall, verify the tool is called — deferred; covered by unit tests for each layer individually
+- [x] Integration test: save a memory, send a follow-up message in a different thread (same persona) that should trigger recall, verify the tool is called — deferred; covered by unit tests for each layer individually
 
 ### As-built notes (Story 5.2)
 
@@ -635,7 +681,7 @@ Acceptance criteria:
 
 ---
 
-**Story 5.3 — Routines CRUD and cron scheduler**
+**Story 5.3 — Routines CRUD and cron scheduler**✅
 Branch: `feature/phase5-routines`
 
 Implement all routine endpoints from section 6.10. Implement the routine scheduler service using `tokio-cron-scheduler`. On server startup, load all enabled routines from the DB and register them. When a routine is created, updated, or toggled via the API, update the scheduler accordingly. When a thread is archived, pause its routines. When unarchived, resume them.
@@ -650,7 +696,7 @@ Acceptance criteria:
 
 ---
 
-**Story 5.4 — Routine execution**
+**Story 5.4 — Routine execution** ✅
 
 > **Depends on Story 5.1** — the routine scheduler uses the notify endpoint with `event_type: routine_fired` (`persist: false, trigger: true`) to invoke the agent.
 
@@ -671,7 +717,7 @@ Implement the two-phase routine execution model per section 7.4. When a routine 
 8. Emit `routine_fired` event on the global SSE stream
 9. Update `last_run_at` and `run_count` on the routine record
 
-> **Note:** FCM push notification dispatch (when no SSE clients are connected) is implemented in Phase 7 Story 7.3.
+> **Note:** Web Push notification dispatch (when no SSE clients are connected) is implemented in Phase 7 Story 7.2.
 
 Acceptance criteria:
 - Integration test: create a routine with a 1-minute schedule, verify it fires, hidden intermediate messages are stored, and one visible result message appears
@@ -689,10 +735,10 @@ Branch: `feature/phase5-routine-ui`
 Wire routines into the thread config pane (the shell from Story 3.5 — now with full add/edit/delete/toggle functionality). Routine-generated messages in the chat view should be visually distinct (subtle different background using `bubble_routine` color, small "routine" label).
 
 Acceptance criteria:
-- [ ] Routines can be added, edited, deleted, and toggled from the thread config pane
-- [ ] Cron expression field shows human-readable description below it
-- [ ] Routine messages in chat are visually distinct from regular messages
-- [ ] Thread list updates when a routine fires (via global SSE)
+- [x] Routines can be added, edited, deleted, and toggled from the thread config pane
+- [x] Cron expression field shows human-readable description below it
+- [x] Routine messages in chat are visually distinct from regular messages
+- [x] Thread list updates when a routine fires (via global SSE)
 
 ---
 
@@ -818,145 +864,241 @@ Acceptance criteria:
 
 ---
 
-### Phase 6 — React Native Mobile App
+### Phase 6 — PWA
 
-**Goal:** A new React Native app is scaffolded from scratch and built to work with the agent-deck server API. Full chat experience on Android.
-
-> ⚠️ **Note:** The original `mobile/BotRelayApp/` scaffold was permanently deleted (`rm -rf`) before it was committed remotely. There is no recoverable version. Story 6.1 must initialize a fresh React Native project rather than cleaning up the old one. The dependency list and rename instructions below still apply — treat them as the target state for the new scaffold.
+**Goal:** The React SPA is installable as a Progressive Web App on Android and iOS. Users can add it to their home screen and open it full-screen. Mobile layout is polished. The foundation for push notifications (service worker) is in place.
 
 ---
 
-**Story 6.1 — App scaffold and setup**  
-Branch: `feature/phase6-mobile-cleanup`
+**Story 6.1 — PWA manifest and installability**  
+Branch: `feature/phase6-pwa-manifest`
 
-Initialize a new React Native project named `AgentDeck` at `mobile/AgentDeck/`. Install required dependencies: `react-native-gifted-chat`, `@react-navigation/native`, `@react-navigation/native-stack`, `react-native-mmkv`, `react-native-safe-area-context`, `axios`, `@notifee/react-native`, `@react-native-firebase/app`, `@react-native-firebase/messaging`. Do **not** install `socket.io-client`, `tweetnacl`, `tweetnacl-util`, or `react-native-video`. Apply the shared color theme from section 4.1 to `src/theme/colors.ts`.
+Add `web/public/manifest.json` with the correct fields for installability. Link it from `index.html`. Add app icons (192×192 and 512×512, generated from the agent-deck emoji/theme). Install `vite-plugin-pwa` as a dev dependency and configure it to inject the manifest link and register the service worker. The service worker at this stage only needs to handle the `push` event (implemented in Phase 7) — a minimal stub is sufficient now.
+
+Required `manifest.json` fields:
+- `name`: "agent-deck"
+- `short_name`: "agent-deck"
+- `display`: "standalone" — **required for iOS push notifications**
+- `start_url`: "/"
+- `background_color`: "#1C1C1A"
+- `theme_color`: "#1C1C1A"
+- `icons`: 192×192 and 512×512 PNG entries
 
 Acceptance criteria:
-- Fresh React Native project builds and runs on Android
-- App is named `AgentDeck` in `app.json` and `package.json`
-- All required dependencies installed, disallowed dependencies absent
-- Color tokens are in place at `src/theme/colors.ts`
+- Chrome on Android shows "Add to Home Screen" prompt or banner
+- iOS Safari shows the app name and icon when going through Share → Add to Home Screen
+- PWA opens full-screen (no browser UI) when launched from home screen on both platforms
+- `vite-plugin-pwa` is in devDependencies and configured in `vite.config.ts`
+- Service worker is registered without errors (stub is fine at this stage)
+- Lighthouse PWA audit passes installability checks
 
 ---
 
-**Story 6.2 — API service and auth**  
-Branch: `feature/phase6-mobile-api-service`
+**Story 6.2 — Mobile layout polish**  
+Branch: `feature/phase6-mobile-layout`
 
-Rewrite `ApiService.ts` to match the new server API. Store server URL and auth token in `react-native-mmkv`. Implement SSE client using `EventSource` polyfill or `fetch` with streaming. Handle reconnection.
+Audit and fix any layout issues on small viewports (375px–430px). The sidebar, chat view, config pane, message input, and settings modal all need to feel correct on a phone screen. The existing mobile sidebar slide-in works — focus on the remaining gaps.
+
+Specific items to address:
+- `ChatView`: messages should not be obscured by the keyboard on mobile — handle `visualViewport` resize or `env(keyboard-inset-height)` for the input bar
+- `ConfigPane`: on mobile (< 640px) should slide in full-width rather than as a side panel over the chat
+- `SettingsModal`: on mobile should be full-screen rather than a centered modal
+- Tap targets: all buttons must be at least 44×44px on mobile
+- No horizontal scroll anywhere on 375px viewport
 
 Acceptance criteria:
-- API service covers all endpoints needed by the mobile screens
-- Auth token is stored and sent on every request
-- SSE connection works and delivers events
+- Chat input stays above the keyboard when it opens on iOS and Android
+- Config pane and settings modal are full-screen on mobile
+- No layout bugs at 375px, 390px, or 430px viewport widths
+- All interactive elements meet minimum tap target size
 
 ---
 
-**Story 6.3 — QR pairing screen**  
-Branch: `feature/phase6-mobile-pairing`
+**Story 6.x — Tailscale wizard step and mobile settings**  
+Branch: `feature/phase6-tailscale-wizard`
 
-Implement the first-launch pairing screen. Show a QR code scanner. On scan, parse the server URL and token, store in MMKV, navigate to thread list. On subsequent launches, skip directly to thread list if already paired.
+Wire the Tailscale setup step into the setup wizard and update the mobile settings page with Tailscale install guidance.
+
+**Setup wizard — Tailscale step (new Step 2, between Welcome and Provider):**
+
+Add a new `Step2Tailscale.tsx` wizard step. On mount, call `GET /api/tailscale/status`.
+
+- **Connected state:** Green status box showing "✓ Connected · {hostname}". "Next →" button. Auto-advances after 1.5 seconds.
+- **Installed, not connected state:** "Connect to Tailscale" primary button. On click, call `POST /api/tailscale/connect`. If response contains `auth_url`, show:
+  ```
+  Open this link in your browser to authorise this machine:
+  [Open Tailscale login →]  (opens in new tab)
+  ```
+  Poll `GET /api/tailscale/status` every 2 seconds. When `connected: true`, auto-advance.
+- **Not installed state:** Brief explanation ("Tailscale is required for your phone and other devices to reach agent-deck privately."). "Install Tailscale" primary button — calls `POST /api/tailscale/install`, shows spinner with status text. On success transitions to "not connected" state.
+- **Skip link** always visible at bottom in tertiary text: "Skip — set up Tailscale later". Skipping advances the wizard without storing a hostname.
+
+**Mobile settings page — Tailscale section:**
+
+Add a new "Tailscale" section to `MobileSettings.tsx` above the existing QR code section.
+
+Content:
+- Current connection status (fetched from `GET /api/tailscale/status`)
+  - Connected: "✓ mac-mini.tail1234.ts.net" in accent color
+  - Not connected: "Not connected" with a "Connect in wizard" link that re-opens the setup wizard at the Tailscale step
+- **Install on your phone:** Two buttons/links:
+  - "Tailscale for iOS" → `https://apps.apple.com/app/tailscale/id1470499037`
+  - "Tailscale for Android" → `https://play.google.com/store/apps/details?id=com.tailscale.ipn.android`
+- Brief instruction: "Sign in to Tailscale on your phone using the same account as this Mac Mini. Then open the server URL below in Safari (iOS) or Chrome (Android)."
+- Server URL displayed as copyable text: the `tailscale_hostname`-based URL, or a placeholder if not connected
+
+**Update QR code label:**
+The existing QR code section should update its "How to pair" instructions to mention Tailscale step 1: "Make sure Tailscale is running on your phone and you're signed in to the same account."
 
 Acceptance criteria:
-- QR scanner opens and reads the pairing QR from the browser UI
-- Server URL and token are stored correctly
-- App connects to server and loads thread list after pairing
-- Already-paired users skip the pairing screen on launch
+- Tailscale wizard step renders all three states correctly (connected, installed/not-connected, not-installed)
+- Polling works and auto-advances when connection is established
+- Skip link works and advances wizard without error
+- Mobile settings Tailscale section shows correct connection status
+- App Store and Play Store links open correctly
+- Server URL in mobile settings uses `tailscale_hostname` when available
+- QR code "How to pair" instructions include Tailscale prerequisite
 
 ---
 
-**Story 6.4 — Thread list screen**  
-Branch: `feature/phase6-mobile-thread-list`
+**Story 6.3 — Updated mobile settings page**  
+Branch: `feature/phase6-mobile-settings`
 
-Implement the thread list screen matching `mockups/mobile-thread-list.html`. Show agent emoji + avatar, thread title, last message preview, timestamp. Connect to global SSE for real-time updates. New thread button (persona picker).
+Update `MobileSettings.tsx` to replace the Android-only QR pairing instructions with the PWA install flow. The page should help users install the PWA and enable notifications.
+
+Content:
+- Platform detection (iOS vs Android via user agent) to show the correct install steps
+- **iOS:** "Open in Safari → tap Share → Add to Home Screen → open from home screen"
+- **Android:** "Open in Chrome → tap menu → Add to Home Screen"
+- Notification subscription status: "Notifications enabled" / "Notifications not enabled" / "Permission denied"
+- "Enable Notifications" button — only shown if status is not yet subscribed and permission not denied. Triggers the push permission prompt (must be a user gesture). Disabled and hidden until Phase 7 VAPID endpoint is available — render a placeholder for now.
+- QR code section remains for sharing the server URL to new devices (unchanged from existing implementation)
 
 Acceptance criteria:
-- Thread list loads from server
-- Real-time updates work when a routine fires
-- Empty state displayed correctly
-- New thread creation works
+- iOS and Android show different install instructions based on user agent
+- Notification status section renders correctly in all three states
+- "Enable Notifications" button is present but clearly marked as coming in a future update (or hidden, TBD in Phase 7)
+- QR code generation still works
 
 ---
 
-**Story 6.5 — Chat screen**  
-Branch: `feature/phase6-mobile-chat`
+### Phase 7 — Web Push Notifications
 
-Implement the chat screen matching `mockups/mobile-chat.html`, using `react-native-gifted-chat`. Show agent avatar on every agent message. Stream tokens in real time via SSE. Send messages. Routine messages visually distinct.
+**Goal:** The PWA receives push notifications when routines fire and no SSE client is connected. No Firebase, no Google/Apple accounts, no external registration. Works on Android (Chrome) and iOS (Safari 16.4+, home screen install required).
+
+**No prerequisites.** VAPID keys are auto-generated on first server startup. No external setup is needed before starting.
+
+---
+
+**Story 7.1 — VAPID key generation and server endpoints**  
+Branch: `feature/phase7-vapid-server`
+
+On server startup, check `app_config` for `vapid_public_key` and `vapid_private_key`. If absent, generate a new VAPID P-256 key pair using the `web-push` crate and store both in `app_config`. The private key must never be logged or returned by any API endpoint.
+
+Add three new endpoints:
+
+**`GET /api/push/vapid-public-key`** — public, returns:
+```json
+{ "public_key": "<base64url encoded public key>" }
+```
+
+**`POST /api/push/subscribe`** — authenticated, body:
+```json
+{
+  "endpoint": "https://...",
+  "p256dh": "<base64url>",
+  "auth": "<base64url>",
+  "user_agent": "Chrome/Android"
+}
+```
+Upserts into `push_subscriptions` (insert or update by endpoint).
+
+**`DELETE /api/push/subscribe`** — authenticated, body:
+```json
+{ "endpoint": "https://..." }
+```
+Removes the subscription row.
 
 Acceptance criteria:
-- Chat history loads on screen open
-- Streaming works and feels smooth
-- Agent avatar displays correctly on every agent message
-- Routine messages are visually distinct from chat messages
+- VAPID keys are generated once and persist across server restarts
+- Private key is never logged or returned by any endpoint
+- All three endpoints work correctly
+- `push_subscriptions` table is created by migration (add migration `009_push_subscriptions.sql`)
+- Unit tests for key generation idempotency (calling generate twice returns the same key)
 
 ---
 
-**Story 6.6 — Thread config screen**  
-Branch: `feature/phase6-mobile-thread-config`
+**Story 7.2 — Web Push dispatch from server**  
+Branch: `feature/phase7-web-push-dispatch`
 
-Implement a simplified thread config screen (accessible from a header button in the chat screen). Show current model, option to switch model, list of active routines (view only on mobile).
+In the routine execution service, after persisting the routine response, check whether any SSE client is currently connected for the thread. If not, send a Web Push notification to all `push_subscriptions` rows for the user using the `web-push` crate.
+
+Notification payload (JSON, encrypted by the crate):
+```json
+{
+  "title": "🦉 Aldous",
+  "body": "<first 100 chars of routine response>",
+  "data": { "thread_id": "<uuid>" }
+}
+```
+
+If a subscription endpoint returns HTTP 410 (Gone), delete that subscription row — it means the browser has revoked it.
 
 Acceptance criteria:
-- Config screen accessible from chat header
-- Model switch works and persists
-- Routines list shows correctly
-
----
-
-### Phase 7 — Push Notifications (Android/FCM)
-
-**Goal:** The Android app receives push notifications when routines fire and no SSE client is connected.
-
-**Prerequisite:** Before starting any stories in this phase, create a Firebase project and complete the manual setup: add the Android app, download `google-services.json`, generate a service account key. This is external configuration that blocks all four stories — do it first, not as part of Story 7.1.
-
----
-
-**Story 7.1 — Firebase project setup**  
-Branch: `feature/phase7-firebase-setup`
-
-Create a Firebase project. Add the Android app to it. Download `google-services.json` and place it in `mobile/BotRelayApp/android/app/`. Download the Firebase service account JSON and place it in `server/config/`. Document the setup steps in the README.
-
-Acceptance criteria:
-- Firebase project exists
-- Android app builds with Firebase dependencies
-- Service account file is in place on the server (not committed to git — add to `.gitignore`)
-
----
-
-**Story 7.2 — Device token registration**  
-Branch: `feature/phase7-device-token-registration`
-
-In the mobile app, request notification permission on first launch. Get the FCM token via `@react-native-firebase/messaging`. Register it with the server via `POST /api/device-tokens` on every app launch (token can change). Handle token refresh events.
-
-Acceptance criteria:
-- Token is registered with server after first launch
-- Token refresh events trigger re-registration
-- `device_tokens` table has the correct entry after registration
-
----
-
-**Story 7.3 — FCM dispatch from server**  
-Branch: `feature/phase7-fcm-dispatch`
-
-In the routine execution service, after persisting the routine response, check whether any SSE client is currently connected for the thread. If not, send an FCM push notification to all registered device tokens for the user. Notification title: agent emoji + name. Body: first 100 chars of response. Data: `thread_id`.
-
-Acceptance criteria:
-- Notification is sent when no SSE client is connected
+- Notification is sent when no SSE client is connected for the thread
 - Notification is NOT sent when an SSE client is connected
-- Notification title and body are correct
-- Routine execution dispatches FCM notification when no SSE client is connected (wires up Story 5.4 step 10)
+- 410 responses from push endpoints cause the subscription to be deleted
+- Routine execution wires up the dispatch (fulfils the TODO from Story 5.4 step 10)
 - Unit test for the "should notify" decision logic
 
 ---
 
-**Story 7.4 — Notification handling in mobile app**  
-Branch: `feature/phase7-mobile-notification-handling`
+**Story 7.3 — PWA service worker and client subscription**  
+Branch: `feature/phase7-pwa-push-client`
 
-Handle incoming FCM notifications in the mobile app. Foreground: show an in-app banner using `@notifee/react-native`. Background/quit: tapping the notification deep-links to the correct thread using `thread_id` from the notification data.
+Implement the service worker push handler and the client-side subscription flow.
+
+**Service worker (`web/public/sw.js` or generated by vite-plugin-pwa):**
+```javascript
+self.addEventListener('push', (event) => {
+  const { title, body, data } = event.data.json();
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      icon: '/icon-192.png',
+      data,
+    })
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const threadId = event.notification.data?.thread_id;
+  if (threadId) {
+    event.waitUntil(
+      clients.openWindow(`/?thread=${threadId}`)
+    );
+  }
+});
+```
+
+**Client subscription flow (wired into the "Enable Notifications" button in `MobileSettings.tsx`):**
+1. Fetch VAPID public key from `GET /api/push/vapid-public-key`
+2. Call `navigator.serviceWorker.ready` to get the active service worker registration
+3. Call `registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: vapidPublicKey })`
+4. POST the resulting subscription object to `POST /api/push/subscribe`
+5. Update UI to show "Notifications enabled"
+
+Handle unsubscribe: call `subscription.unsubscribe()`, then `DELETE /api/push/subscribe`.
 
 Acceptance criteria:
-- Foreground notification banner appears and is tappable
-- Background notification tap navigates to correct thread
-- Quit-state notification tap opens app and navigates to correct thread
+- "Enable Notifications" button triggers the browser permission prompt
+- After granting permission, subscription is stored on the server
+- Push notification is received and shown on Android Chrome when a routine fires with no SSE client connected
+- Push notification is received and shown on iOS Safari (PWA installed, home screen launch) when a routine fires
+- Tapping the notification opens the PWA and navigates to the correct thread
+- "Notifications enabled" / "Notifications not enabled" status in settings reflects actual subscription state
+- Unsubscribe flow works and removes the subscription from the server
 
 ---
 
@@ -1024,7 +1166,7 @@ Implement cursor-based pagination on `GET /api/threads/:id/messages`. In the web
 **Story 9.4 — Setup and README**  
 Branch: `feature/phase9-docs`
 
-Write a comprehensive README covering: what agent-deck is, prerequisites, installation steps (including `git submodule init` for copilot-api), first-run setup, mobile pairing, and how to add providers. Document the Firebase setup steps. Document the Tailscale setup.
+Write a comprehensive README covering: what agent-deck is, prerequisites, installation steps (including `git submodule init` for copilot-api), first-run setup, PWA installation on Android and iOS, push notification setup, and how to add providers. Document the Tailscale setup.
 
 ---
 
@@ -1044,8 +1186,8 @@ A native macOS Swift/SwiftUI app that lives in the menu bar. It manages the Rust
 ### OAuth and Third-Party App Credentials
 Browser-based OAuth flows (Google, GitHub, etc.) with token refresh, consent screens, and callback handling. Required to unlock Gmail, Google Calendar, Google Drive, and any MCP server that authenticates via OAuth rather than static tokens. Includes: OAuth provider trait and registry, token refresh on credential resolution, `/settings/accounts` page for connected accounts, and the Google app verification process for consumer distribution. This is a significant UX and infrastructure investment — deferred until the core platform is stable and the credential store, MCP integration, and agent runtime are proven out. When ready, the credential store already supports the encrypted storage layer; the work is in adding the browser flow, refresh logic, and new credential types (`oauth2` with `scopes`, `expires_at`, `refresh_token`).
 
-### iOS App
-No iOS app in v1. Building for iOS requires an Apple Developer account ($99/year). The Android app serves as the mobile client. iOS can be added in a future version once the Android app is stable.
+### Native iOS App
+No native iOS app is planned. The PWA covers iOS via Safari Web Push (iOS 16.4+). Users install the PWA via "Add to Home Screen" in Safari — no App Store, no Developer account required. If a richer native experience is ever desired (e.g. background audio, Siri integration), a native wrapper could be added as a paid tier in a future version.
 
 ### Multi-User Support
 The data model includes `user_id` on all relevant tables in anticipation of this. In v1 there is one user. Future: add a login screen, user management, per-user API keys, per-user thread isolation.

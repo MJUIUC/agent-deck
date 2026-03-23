@@ -10,6 +10,7 @@ import type {
   McpTool,
   Routine,
   SlashCommandResponse,
+  MemoryListResponse,
 } from "@/types";
 
 // ── Credential types ──────────────────────────────────────────────────────────
@@ -590,5 +591,27 @@ export const setupApi = {
       method: "POST",
       body: JSON.stringify({ display_name: displayName }),
     });
+  },
+};
+
+export const memoriesApi = {
+  list(
+    personaId: string,
+    params: { limit?: number; offset?: number; thread_id?: string } = {},
+  ) {
+    const qs = new URLSearchParams();
+    if (params.limit != null) qs.set("limit", String(params.limit));
+    if (params.offset != null) qs.set("offset", String(params.offset));
+    if (params.thread_id) qs.set("thread_id", params.thread_id);
+    const query = qs.toString() ? `?${qs.toString()}` : "";
+    return apiFetch<{ data: MemoryListResponse }>(
+      `/api/personas/${personaId}/memory${query}`,
+    );
+  },
+  delete(personaId: string, memoryId: string) {
+    return apiFetch<{ data: { deleted: boolean } }>(
+      `/api/personas/${personaId}/memory/${memoryId}`,
+      { method: "DELETE" },
+    );
   },
 };

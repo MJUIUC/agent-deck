@@ -511,7 +511,7 @@ async fn handle_routine_command(
 
 async fn handle_memory_command(
     state: &AppState,
-    _thread_id: &str,
+    thread_id: &str,
     user_id: &str,
     args: &[String],
 ) -> AppResult<SlashCommandData> {
@@ -521,42 +521,82 @@ async fn handle_memory_command(
 
     match subcommand.as_deref() {
         Some("list") | None => {
-            // Fetch persona for this user
-            let persona: Option<(String,)> =
-                sqlx::query_as("SELECT id FROM agent_personas WHERE user_id = ? LIMIT 1")
+            // Step 1: resolve the thread's persona_id from the threads table
+            let thread_persona: Option<(String,)> =
+                sqlx::query_as("SELECT persona_id FROM threads WHERE id = ? AND user_id = ?")
+                    .bind(thread_id)
                     .bind(user_id)
                     .fetch_optional(&state.pool)
                     .await?;
 
-            let persona_id = match persona {
+            let persona_id = match thread_persona {
                 Some((id,)) => id,
                 None => {
                     return Ok(SlashCommandData {
                         kind: "memory_list".to_string(),
-                        message: "No persona found.".to_string(),
+                        message: "Thread not found.".to_string(),
                         payload: None,
                     })
                 }
             };
 
-            let entries = memory_service::recall_memory(&state.pool, user_id, &persona_id, "", 10)
-                .await
-                .unwrap_or_default();
+            // Step 2: check whether this persona is the Default persona
+            let is_default_row: Option<(bool,)> =
+                sqlx::query_as("SELECT is_default FROM agent_personas WHERE id = ?")
+                    .bind(&persona_id)
+                    .fetch_optional(&state.pool)
+                    .await?;
 
-            if entries.is_empty() {
+            let is_default = is_default_row.map(|(v,)| v).unwrap_or(false);
+
+            if is_default {
                 return Ok(SlashCommandData {
                     kind: "memory_list".to_string(),
-                    message: "No memories stored yet.".to_string(),
+                    message: "Memory is not available for this thread. Assign a persona to use long-term memory.".to_string(),
                     payload: None,
                 });
             }
 
-            let list: Vec<String> = entries.iter().map(|e| format!("- {}", e.content)).collect();
+            // Step 3: fetch up to 20 most recent memories for this persona
+            let result =
+                memory_service::list_memories(&state.pool, user_id, &persona_id, 0, 20, None)
+                    .await?;
+
+            if result.memories.is_empty() {
+                return Ok(SlashCommandData {
+                    kind: "memory_list".to_string(),
+                    message: "No memories stored for this persona yet.".to_string(),
+                    payload: None,
+                });
+            }
+
+            // Step 4: format each entry as "- [YYYY-MM-DD] content", optionally
+            // appending "(from: thread_title)" when the source thread differs.
+            let list: Vec<String> = result
+                .memories
+                .iter()
+                .map(|e| {
+                    // created_at is stored as ISO 8601; grab the first 10 chars for YYYY-MM-DD
+                    let date = &e.created_at[..e.created_at.len().min(10)];
+                    let mut line = format!("- [{}] {}", date, e.content);
+                    if let (Some(src_tid), Some(title)) =
+                        (e.thread_id.as_deref(), e.thread_title.as_deref())
+                    {
+                        if src_tid != thread_id {
+                            line.push_str(&format!(" (from: {})", title));
+                        }
+                    }
+                    line
+                })
+                .collect();
 
             Ok(SlashCommandData {
                 kind: "memory_list".to_string(),
                 message: list.join("\n"),
-                payload: None,
+                payload: Some(serde_json::json!({
+                    "total": result.total_count,
+                    "persona_id": persona_id,
+                })),
             })
         }
 

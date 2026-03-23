@@ -457,18 +457,29 @@ data: {"thread_id": "<id>", "routine_id": "<id>", "routine_name": "Morning Brief
 }
 ```
 
-### 6.12 Device Tokens (Push Notifications)
+### 6.12 Push Subscriptions (Web Push)
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/api/device-tokens` | Register a device token |
-| `DELETE` | `/api/device-tokens/:token` | Unregister a device token |
+| `GET` | `/api/push/vapid-public-key` | Returns the server's VAPID public key (used by client to subscribe) |
+| `POST` | `/api/push/subscribe` | Register a Web Push subscription |
+| `DELETE` | `/api/push/subscribe` | Unregister a Web Push subscription (by endpoint) |
+
+**POST /api/push/subscribe body:**
+```json
+{
+  "endpoint": "https://fcm.googleapis.com/fcm/send/...",
+  "p256dh": "<base64url browser public key>",
+  "auth": "<base64url auth secret>",
+  "user_agent": "Chrome/Android"
+}
+```
 
 ### 6.13 Mobile Pairing
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/pairing/qr` | Returns server URL + auth token as QR-encodable JSON |
+| `GET` | `/api/pairing/qr` | Returns server URL (using `tailscale_hostname` from `app_config`) + auth token as QR-encodable JSON |
 
 ### 6.14 App Config
 
@@ -476,6 +487,42 @@ data: {"thread_id": "<id>", "routine_id": "<id>", "routine_name": "Morning Brief
 |---|---|---|
 | `GET` | `/api/config` | Get all config key/value pairs |
 | `PUT` | `/api/config/:key` | Update a config value |
+
+### 6.15 Tailscale
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/tailscale/status` | Returns current Tailscale state |
+| `POST` | `/api/tailscale/install` | Installs Tailscale on the host machine (macOS only) |
+| `POST` | `/api/tailscale/connect` | Runs `tailscale up` and returns auth URL if needed |
+
+All Tailscale endpoints require auth except when accessed from localhost (same localhost bypass as the rest of the API).
+
+**GET /api/tailscale/status response:**
+```json
+{
+  "installed": true,
+  "connected": true,
+  "hostname": "mac-mini.tail1234.ts.net",
+  "auth_url": null
+}
+```
+
+- `installed`: whether the `tailscale` binary is present and `tailscaled` is running
+- `connected`: whether the machine is authenticated and connected to a Tailnet
+- `hostname`: the machine's fully qualified Tailscale hostname, or `null` if not connected
+- `auth_url`: populated (and `connected` is `false`) when `tailscale up` has been run but the user has not yet authenticated — this is the `https://login.tailscale.com/a/...` URL to open in a browser
+
+**POST /api/tailscale/install behaviour:**
+- macOS: runs the official Tailscale install script via `curl -fsSL https://tailscale.com/install.sh | sh`
+- After install, starts `tailscaled` if not already running
+- Returns updated status object
+
+**POST /api/tailscale/connect behaviour:**
+- Runs `tailscale up` and captures output
+- If an auth URL is present in output, returns it in the response so the setup wizard can display it
+- Polls `tailscale status` until connected, then stores `tailscale_hostname` in `app_config`
+- Returns updated status object
 
 ---
 
@@ -556,7 +603,7 @@ A routine is a scheduled prompt that fires automatically on a cron schedule. It 
 2. This is written to `messages` as a standard assistant message with `source: routine`, `visibility: visible`, and `execution_id` set
 3. The `routine_executions` row is updated with `status: completed` and `output_message_id`
 4. The server pushes a `routine_message` event on the thread's SSE stream
-5. The server checks for connected SSE clients — if none, dispatches an FCM push notification
+5. The server checks for connected SSE clients — if none, dispatches a Web Push notification (implemented in Phase 7)
 
 **Routine invocation message schema** (injected as the triggering user message in the background context, not persisted to visible thread):
 ```json
@@ -869,45 +916,77 @@ Each provider is stored in the `providers` table with a kind, base URL, and opti
 - Routines attached to threads using an unavailable provider skip execution and log a warning rather than failing hard — the routine's `last_run_at` is not updated, so it effectively retries on the next cron cycle
 - The server does not block startup waiting for `copilot-api` — it starts the process asynchronously and marks Copilot as "connecting" until the health check passes
 
-### 7.8 Push Notifications (Android/FCM)
+### 7.8 Push Notifications (Web Push / VAPID)
 
-Push notifications are sent when a routine fires and no SSE client is connected for that thread.
+Push notifications are sent when a routine fires and no SSE client is connected for that thread. No Firebase project, Google account, or Apple Developer account is required.
 
-The Android app registers its FCM token with the server on startup via `POST /api/device-tokens`. The server stores it in the `device_tokens` table.
+**VAPID key lifecycle:**
+- On first server startup, generate a VAPID key pair (P-256 elliptic curve) and store both keys in `app_config` as `vapid_public_key` and `vapid_private_key`
+- The public key is served via `GET /api/push/vapid-public-key` — the client uses it to subscribe
+- The private key never leaves the server
 
-When a notification needs to be sent, the Rust server makes a direct HTTPS call to the FCM v1 API using a Firebase service account credential.
+**Subscription lifecycle:**
+- When the user enables notifications in the PWA settings, the client calls `navigator.serviceWorker` and `PushManager.subscribe()` with the server's VAPID public key
+- The browser returns a subscription object containing an `endpoint` URL and encryption keys (`p256dh`, `auth`)
+- The client POSTs this to `POST /api/push/subscribe` — stored in `push_subscriptions`
+- On unsubscribe or browser permission revoke, the subscription is deleted via `DELETE /api/push/subscribe`
 
-Notification payload:
-- **Title:** The agent's name and emoji (e.g. "🦉 Aldous")
-- **Body:** First 100 characters of the routine response
-- **Data:** `thread_id` — the mobile app uses this to deep-link directly into the thread
+**Dispatch:**
+- When a routine completes and no SSE client is connected for the thread, the server sends a Web Push notification to all stored subscriptions for the user
+- Uses the `web-push` Rust crate (`web_push = "0.10"` or current) for VAPID signing and HTTP delivery
+- Notification payload:
+  - **Title:** The agent's name and emoji (e.g. "🦉 Aldous")
+  - **Body:** First 100 characters of the routine response
+  - **Data:** `thread_id` — the PWA service worker uses this to open the correct thread on notification tap
+
+**Platform behaviour:**
+- **Android (Chrome):** Works when PWA is installed or browser is running in background. Instant delivery.
+- **iOS (Safari 16.4+):** Works only when PWA is installed to home screen. User must open from home screen icon at least once and grant notification permission via an explicit in-app button tap (Apple requires a user gesture).
 
 ### 7.9 First-Run Setup Wizard
 
 When `GET /api/setup/status` returns `{ complete: false }`, the SPA shows a full-screen setup wizard instead of the main app. The wizard walks through:
 
 1. **Welcome screen** — what agent-deck is, what you're about to set up
-2. **Add a provider** — pick Copilot, OpenAI, Anthropic, or custom. Complete auth/key entry.
-3. **Create your first persona** — name, emoji, system prompt (with a starter template), model selection
-4. **Done** — calls `POST /api/setup/complete`, redirects to main chat UI
+2. **Tailscale setup** — connects the Mac Mini to your Tailnet so all devices can reach it
+3. **Add a provider** — pick Copilot, OpenAI, Anthropic, or custom. Complete auth/key entry.
+4. **Create your first persona** — name, emoji, system prompt (with a starter template), model selection
+5. **Done** — calls `POST /api/setup/complete`, redirects to main chat UI
 
-The wizard is skippable from step 2 onward — the user can always finish setup later from settings.
+The wizard is skippable from step 3 onward — the user can always finish setup later from settings. The Tailscale step (step 2) is skippable but skipping means remote devices won't be able to reach the server.
 
-### 7.10 Mobile App Pairing
+**Tailscale wizard step behaviour:**
 
-The mobile app needs to know the server's Tailscale address and the auth token.
+The step polls `GET /api/tailscale/status` on mount.
 
-On the server, `GET /api/pairing/qr` returns:
-```json
-{
-  "server_url": "http://mac-mini.tailnet-name.ts.net:7474",
-  "token": "<auth_token>"
-}
-```
+- **Already connected:** Shows the Tailscale hostname in a green success box ("✓ Connected as mac-mini.tail1234.ts.net"), auto-advances to next step after 1.5s or immediately on "Next" click.
+- **Installed but not connected:** Shows a "Connect to Tailscale" button. On click, calls `POST /api/tailscale/connect`. If an `auth_url` is returned, shows it as a prominent link/button: "Open Tailscale login →". Polls `GET /api/tailscale/status` every 2 seconds until `connected: true`, then auto-advances.
+- **Not installed:** Shows an "Install Tailscale" button. On click, calls `POST /api/tailscale/install` (shows a spinner while running). On success, transitions to the "not connected" state above.
+- **Skip link** is always visible at the bottom: "Skip for now — I'll set up Tailscale later"
 
-This is displayed as a QR code in the browser UI under Settings → Mobile App.
+The step never blocks progress — if the user skips or Tailscale setup fails, the wizard continues normally.
 
-The React Native app has a first-launch screen where the user taps "Scan QR Code", scans it, and the server URL + token are stored in `react-native-mmkv`. On every subsequent launch, the app connects automatically using the stored values.
+### 7.10 PWA Install and Mobile Access
+
+The mobile experience is delivered via PWA — no native app installation is needed.
+
+**Accessing agent-deck from a phone:**
+1. Install Tailscale on the phone — links shown in Settings → Mobile:
+   - iOS: App Store link
+   - Android: Play Store link
+2. Sign in to Tailscale on the phone using the same account as the Mac Mini
+3. Open Safari (iOS) or Chrome (Android) and navigate to the server URL shown in Settings → Mobile (e.g. `http://mac-mini.tail1234.ts.net:7474`)
+4. On first visit from a remote device, the token entry screen appears — paste the auth token or scan the QR code from Settings → Mobile
+5. Add to home screen: iOS: Share → "Add to Home Screen"; Android: Chrome menu → "Add to Home Screen"
+6. The PWA icon appears on the home screen and opens full-screen like a native app
+
+**Enabling push notifications:**
+1. Open the PWA from the home screen (not from the browser — required on iOS)
+2. Go to Settings → Mobile
+3. Tap "Enable Notifications" — the browser shows its native permission prompt
+4. Once granted, notifications are registered with the server automatically
+
+The QR pairing endpoint (`GET /api/pairing/qr`) remains available for convenience — it can be used to quickly share the server URL to a new device by scanning instead of typing the Tailscale address.
 
 ---
 
@@ -1276,15 +1355,24 @@ Accessible from the sidebar "Settings" link. Sections as sub-routes:
 **Accounts UI pattern (used in both `/settings/accounts` and persona settings):**
 Each connected account shows: provider logo, display name, connected email or handle, granted scopes (as pills), and a Disconnect button. A "+ Connect account" button opens a provider picker. Selecting a provider with OAuth begins the redirect flow. For personas, the heading reads "{Persona name}'s accounts" to make the identity distinction clear.
 
-### 8.5 React Native App — Screens
+### 8.5 PWA — Mobile Experience
 
-- **Scan Screen** — first launch only, QR code scanner for server pairing
-- **Thread List Screen** — shows active threads with agent avatar, name, last message preview, timestamp
-- **Chat Screen** — full chat UI matching SPA aesthetics, with streaming, agent avatar on every message
-- **Thread Config Screen** — model switcher, view routines, view skills (modal or push navigation)
-- **Archived Threads Screen** — accessible from thread list header menu
+The React SPA is the mobile client. No separate codebase. The existing responsive layout (sliding sidebar, hamburger menu, mobile backdrop) already handles small viewports.
 
-The mobile app does **not** include management screens (persona creation, provider setup, skill authoring). Those are browser-only in v1.
+On mobile the full app is available including settings. The layout adapts: the sidebar slides in as a panel, the chat and config pane take the full viewport.
+
+**Mobile-specific behaviour:**
+- Thread list sidebar hidden by default on viewports < 640px, revealed via hamburger
+- Config pane slides in full-width on mobile rather than as a side panel
+- Input bar accounts for mobile keyboard appearance (avoid content being obscured)
+- Notifications arrive via Web Push when the PWA is installed to home screen and permission is granted
+
+**Settings → Mobile page:**
+The existing `MobileSettings.tsx` component is updated (Phase 6) to:
+- Show platform-specific install instructions (iOS and Android variants, detected via user agent)
+- Show current notification subscription status (subscribed / not subscribed / permission denied)
+- Show an "Enable Notifications" button that triggers the push permission prompt (must be a user gesture per browser requirements)
+- Show a "Disable Notifications" button when subscribed
 
 ### 8.6 First-Run / Empty States
 
@@ -1335,8 +1423,7 @@ agent-deck/
 │   ├── vite.config.ts
 │   ├── tailwind.config.ts
 │   └── package.json
-├── mobile/                  # React Native app
-│   └── BotRelayApp/         # Existing scaffold (rename to AgentDeck)
+# mobile/ directory does not exist — mobile experience is delivered via PWA
 │       ├── src/
 │       │   ├── screens/
 │       │   ├── services/
@@ -1424,7 +1511,7 @@ The goal is not 100% coverage — it is confidence that critical logic works and
 **Test file conventions:**
 - Rust: `#[cfg(test)]` modules within the same file for unit tests, `server/tests/` for integration tests
 - React/TypeScript: `*.test.ts` or `*.test.tsx` co-located with the file being tested
-- React Native: same convention, in `mobile/BotRelayApp/src/__tests__/` or co-located
+
 
 ### 9.4 Environment Setup
 
@@ -1459,9 +1546,7 @@ npm run dev   # dev server proxies /api to localhost:7474
 
 **Mobile setup:**
 ```bash
-cd mobile/BotRelayApp
-npm install
-npx react-native run-android
+# Mobile: open http://mac-mini.tailnet:7474 in Chrome (Android) or Safari (iOS) and add to home screen
 ```
 
 **Environment variables (server/.env):**
@@ -1469,7 +1554,7 @@ npx react-native run-android
 PORT=7474
 DATABASE_URL=sqlite:./data/agent-deck.db
 RUST_LOG=info
-FCM_SERVICE_ACCOUNT_JSON=./config/firebase-service-account.json
+# VAPID keys are auto-generated on first startup and stored in app_config — no manual setup needed
 ```
 
 ### 9.5 Frontend Component Design Principles

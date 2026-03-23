@@ -125,6 +125,7 @@ pub async fn recall_memory(
 }
 
 /// List all memories for a persona, most recent first.
+/// When `thread_id` is `Some`, results are filtered to that thread only.
 #[allow(dead_code)]
 pub async fn list_memories(
     pool: &SqlitePool,
@@ -132,46 +133,92 @@ pub async fn list_memories(
     persona_id: &str,
     offset: i64,
     limit: i64,
+    thread_id: Option<&str>,
 ) -> Result<MemoryListResponse> {
-    let total: (i64,) =
-        sqlx::query_as("SELECT COUNT(*) FROM memory WHERE user_id = ? AND persona_id = ?")
-            .bind(user_id)
-            .bind(persona_id)
-            .fetch_one(pool)
-            .await?;
-
-    let rows = sqlx::query_as::<_, (String, String, Option<String>, Option<String>, String)>(
-        "SELECT m.id, m.content, m.thread_id, t.title, m.created_at
-         FROM memory m
-         LEFT JOIN threads t ON t.id = m.thread_id
-         WHERE m.user_id = ? AND m.persona_id = ?
-         ORDER BY m.created_at DESC
-         LIMIT ? OFFSET ?",
-    )
-    .bind(user_id)
-    .bind(persona_id)
-    .bind(limit)
-    .bind(offset)
-    .fetch_all(pool)
-    .await?;
-
-    let memories = rows
-        .into_iter()
-        .map(
-            |(id, content, thread_id, thread_title, created_at)| MemoryEntry {
-                id,
-                content,
-                thread_id,
-                thread_title,
-                created_at,
-            },
+    if let Some(tid) = thread_id {
+        let total: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM memory WHERE user_id = ? AND persona_id = ? AND thread_id = ?",
         )
-        .collect();
+        .bind(user_id)
+        .bind(persona_id)
+        .bind(tid)
+        .fetch_one(pool)
+        .await?;
 
-    Ok(MemoryListResponse {
-        memories,
-        total_count: total.0,
-    })
+        let rows = sqlx::query_as::<_, (String, String, Option<String>, Option<String>, String)>(
+            "SELECT m.id, m.content, m.thread_id, t.title, m.created_at
+             FROM memory m
+             LEFT JOIN threads t ON t.id = m.thread_id
+             WHERE m.user_id = ? AND m.persona_id = ? AND m.thread_id = ?
+             ORDER BY m.created_at DESC
+             LIMIT ? OFFSET ?",
+        )
+        .bind(user_id)
+        .bind(persona_id)
+        .bind(tid)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(pool)
+        .await?;
+
+        let memories = rows
+            .into_iter()
+            .map(
+                |(id, content, thread_id, thread_title, created_at)| MemoryEntry {
+                    id,
+                    content,
+                    thread_id,
+                    thread_title,
+                    created_at,
+                },
+            )
+            .collect();
+
+        Ok(MemoryListResponse {
+            memories,
+            total_count: total.0,
+        })
+    } else {
+        let total: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM memory WHERE user_id = ? AND persona_id = ?")
+                .bind(user_id)
+                .bind(persona_id)
+                .fetch_one(pool)
+                .await?;
+
+        let rows = sqlx::query_as::<_, (String, String, Option<String>, Option<String>, String)>(
+            "SELECT m.id, m.content, m.thread_id, t.title, m.created_at
+             FROM memory m
+             LEFT JOIN threads t ON t.id = m.thread_id
+             WHERE m.user_id = ? AND m.persona_id = ?
+             ORDER BY m.created_at DESC
+             LIMIT ? OFFSET ?",
+        )
+        .bind(user_id)
+        .bind(persona_id)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(pool)
+        .await?;
+
+        let memories = rows
+            .into_iter()
+            .map(
+                |(id, content, thread_id, thread_title, created_at)| MemoryEntry {
+                    id,
+                    content,
+                    thread_id,
+                    thread_title,
+                    created_at,
+                },
+            )
+            .collect();
+
+        Ok(MemoryListResponse {
+            memories,
+            total_count: total.0,
+        })
+    }
 }
 
 /// Delete a single memory entry by ID.

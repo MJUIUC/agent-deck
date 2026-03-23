@@ -7,6 +7,7 @@ import type {
   Provider,
   Model,
   Routine,
+  MemoryEntry,
 } from "@/types";
 import {
   threadsApi,
@@ -14,6 +15,7 @@ import {
   providersApi,
   modelsApi,
   routinesApi,
+  memoriesApi,
 } from "@/api/client";
 import { X, ChevronRight, Settings } from "lucide-react";
 import styles from "./ConfigPane.module.css";
@@ -531,6 +533,11 @@ export function ConfigPane({
   const [routinesExpanded, setRoutinesExpanded] = useState(false);
   const [mcpExpanded, setMcpExpanded] = useState(false);
 
+  // ── Thread memories ──
+  const [threadMemories, setThreadMemories] = useState<MemoryEntry[]>([]);
+  const [threadMemoriesLoading, setThreadMemoriesLoading] = useState(false);
+  const [threadMemoriesTotal, setThreadMemoriesTotal] = useState(0);
+
   // Sync local state when thread prop changes (different thread selected)
   useEffect(() => {
     setAddendum(thread.system_prompt_addendum ?? "");
@@ -543,6 +550,9 @@ export function ConfigPane({
     setShowRoutineForm(false);
     setEditingRoutine(null);
     setRoutineFormError(null);
+    // Reset thread memories on thread switch
+    setThreadMemories([]);
+    setThreadMemoriesTotal(0);
   }, [
     thread.id,
     thread.system_prompt_addendum,
@@ -583,6 +593,38 @@ export function ConfigPane({
       cancelled = true;
     };
   }, [isOpen, thread.id]);
+
+  // Load thread memories whenever the pane opens or thread/persona changes
+  useEffect(() => {
+    if (!isOpen) return;
+    const p = thread.persona;
+    if (!p || p.is_default) {
+      setThreadMemories([]);
+      return;
+    }
+    let cancelled = false;
+    async function load() {
+      setThreadMemoriesLoading(true);
+      try {
+        const res = await memoriesApi.list(p!.id, {
+          limit: 5,
+          thread_id: thread.id,
+        });
+        if (!cancelled) {
+          setThreadMemories(res.data.memories);
+          setThreadMemoriesTotal(res.data.total_count);
+        }
+      } catch {
+        // ignore
+      } finally {
+        if (!cancelled) setThreadMemoriesLoading(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, thread.id, thread.persona?.id, thread.persona?.is_default]);
 
   // Load routines whenever the pane opens or thread changes
   useEffect(() => {
@@ -922,6 +964,41 @@ export function ConfigPane({
           </div>
 
           <div className={styles.divider} />
+
+          {/* ── Memory ── */}
+          {persona && !persona.is_default && (
+            <>
+              <div className={styles.section}>
+                <div className={styles.sectionHeader}>
+                  <span className={styles.sectionTitle}>Memory</span>
+                  {threadMemoriesTotal > 0 && (
+                    <span className={styles.sectionSubtitle}>
+                      {threadMemoriesTotal} from this thread
+                    </span>
+                  )}
+                </div>
+                {threadMemoriesLoading ? (
+                  <div className={styles.emptyHint}>Loading…</div>
+                ) : threadMemories.length === 0 ? (
+                  <div className={styles.emptyHint}>
+                    No memories from this thread yet.
+                  </div>
+                ) : (
+                  <div className={styles.memoryList}>
+                    {threadMemories.map((m) => (
+                      <div key={m.id} className={styles.memoryEntry}>
+                        <div className={styles.memoryContent}>{m.content}</div>
+                        <div className={styles.memoryMeta}>
+                          {new Date(m.created_at).toLocaleDateString()}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className={styles.divider} />
+            </>
+          )}
 
           {/* ── Model ── */}
           <div className={styles.section}>
