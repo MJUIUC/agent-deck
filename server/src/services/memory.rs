@@ -104,22 +104,26 @@ fn build_fts_query(query: &str) -> String {
         || query.contains(" AND ")
         || query.contains(" NOT ")
         || query.contains('"')
-        || query.contains('*')
-        || query.contains('-');
+        || query.contains('*');
 
     if has_operators {
         return query.to_string();
     }
 
+    // Normalise: replace hyphens with spaces so compound words like
+    // "agent-deck" split into two independent tokens rather than being
+    // passed raw to FTS5 where `-token` is the NOT operator.
+    let normalised = query.replace('-', " ");
+
     // Split on whitespace, drop empty tokens, append `*` to each.
-    let terms: Vec<String> = query
+    let terms: Vec<String> = normalised
         .split_whitespace()
         .filter(|t| !t.is_empty())
         .map(|t| format!("{}*", t))
         .collect();
 
     if terms.is_empty() {
-        return query.to_string();
+        return normalised;
     }
 
     terms.join(" OR ")
@@ -452,6 +456,19 @@ mod tests {
     #[test]
     fn existing_wildcard_passes_through_unchanged() {
         assert_eq!(build_fts_query("type*"), "type*");
+    }
+
+    #[test]
+    fn hyphenated_compound_word_splits_into_or_terms() {
+        assert_eq!(build_fts_query("agent-deck"), "agent* OR deck*");
+    }
+
+    #[test]
+    fn hyphenated_multi_word_query_splits_correctly() {
+        assert_eq!(
+            build_fts_query("agent-deck project"),
+            "agent* OR deck* OR project*"
+        );
     }
 
     #[test]
