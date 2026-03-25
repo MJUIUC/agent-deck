@@ -25,6 +25,7 @@ interface SseStore {
   threadConnected: boolean;
   threadError: string | null;
   globalError: string | null;
+  lastMcpStatusChange: { mcp_server_id: string; status: string } | null;
 
   // Internal (not exposed as reactive state, just held in closure)
   _threadConn: SseConnection | null;
@@ -56,6 +57,7 @@ export const useSseStore = create<SseStore>((set, get) => ({
   threadConnected: false,
   threadError: null,
   globalError: null,
+  lastMcpStatusChange: null,
 
   _threadConn: null,
   _globalConn: null,
@@ -369,6 +371,25 @@ export const useSseStore = create<SseStore>((set, get) => ({
         }
       };
 
+      const handleMcpStatusChanged = (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data) as {
+            mcp_server_id: string;
+            status: string;
+          };
+          if (data.mcp_server_id && data.status) {
+            set({
+              lastMcpStatusChange: {
+                mcp_server_id: data.mcp_server_id,
+                status: data.status,
+              },
+            });
+          }
+        } catch {
+          // ignore
+        }
+      };
+
       const handleConnError = () => {
         set({
           globalConnected: false,
@@ -394,6 +415,7 @@ export const useSseStore = create<SseStore>((set, get) => ({
       es.addEventListener("thread_updated", handleThreadUpdated);
       es.addEventListener("title_updated", handleTitleUpdated);
       es.addEventListener("routine_fired", handleRoutineFired);
+      es.addEventListener("mcp_status_changed", handleMcpStatusChanged);
 
       es.addEventListener("open", () => {
         set({
@@ -409,6 +431,7 @@ export const useSseStore = create<SseStore>((set, get) => ({
         es.removeEventListener("thread_updated", handleThreadUpdated);
         es.removeEventListener("title_updated", handleTitleUpdated);
         es.removeEventListener("routine_fired", handleRoutineFired);
+        es.removeEventListener("mcp_status_changed", handleMcpStatusChanged);
         es.close();
       };
 

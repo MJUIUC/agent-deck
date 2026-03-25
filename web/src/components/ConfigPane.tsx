@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useSseStore } from "@/stores/useSseStore";
 import cronstrue from "cronstrue";
 import type {
   Thread,
@@ -506,6 +507,8 @@ export function ConfigPane({
   const [isSavingSystemEvents, setIsSavingSystemEvents] = useState(false);
 
   // ── MCP servers ──
+  const lastMcpStatusChange = useSseStore((s) => s.lastMcpStatusChange);
+
   const [attachedEntries, setAttachedEntries] = useState<ThreadMcpEntry[]>([]);
   const [mcpServersMap, setMcpServersMap] = useState<Record<string, McpServer>>(
     {},
@@ -630,6 +633,47 @@ export function ConfigPane({
       cancelled = true;
     };
   }, [isOpen, thread.persona?.id, thread.persona?.is_default]);
+
+  // React to MCP server status changes broadcast over the global SSE stream.
+  // Updates the status badge in place and auto-loads tools when a server
+  // transitions to "connected" so the card reflects live state without a
+  // manual refresh.
+  useEffect(() => {
+    if (!lastMcpStatusChange) return;
+    const { mcp_server_id, status } = lastMcpStatusChange;
+
+    // Update the server's status in our local map if we know about it
+    setMcpServersMap((prev) => {
+      if (!prev[mcp_server_id]) return prev;
+      return {
+        ...prev,
+        [mcp_server_id]: {
+          ...prev[mcp_server_id],
+          status: status as McpServer["status"],
+        },
+      };
+    });
+
+    // If the server just connected and is attached to this thread, load its tools
+    if (status === "connected") {
+      setAttachedEntries((entries) => {
+        const isAttached = entries.some(
+          (e) => e.mcp_server_id === mcp_server_id,
+        );
+        if (isAttached) {
+          mcpServersApi
+            .listTools(mcp_server_id)
+            .then(({ data: tools }) => {
+              setToolsMap((prev) => ({ ...prev, [mcp_server_id]: tools }));
+            })
+            .catch(() => {
+              setToolsMap((prev) => ({ ...prev, [mcp_server_id]: [] }));
+            });
+        }
+        return entries;
+      });
+    }
+  }, [lastMcpStatusChange]);
 
   // Load routines whenever the pane opens or thread changes
   useEffect(() => {

@@ -821,13 +821,40 @@ Acceptance criteria:
 
 ---
 
-**Story 5.8 — Context window summarization**
+**Story 5.8 — Context window summarization and conversation recall**
 Branch: `feature/phase5-summarization`
 
-Implement rolling context-window summarization per section 7.12. Replaces the current silent sliding-window discard with a two-trigger system: proactive (message count threshold) and reactive (context-length 400 error detection and retry).
+Implement rolling context-window summarization and a `recall_conversation` agent tool. Replaces the current silent sliding-window discard with a two-trigger system: proactive (message count threshold) and reactive (context-length 400 error detection and retry). Summaries are persisted to a log table so the agent can look back at past conversations by date range.
 
 **Part A — Migration and model:**
-Add migration 009 with `summary TEXT`, `summary_updated_at TEXT`, `summary_message_count INTEGER NOT NULL DEFAULT 0`, and `auto_summarize INTEGER NOT NULL DEFAULT 1` columns on `threads`. Update `Thread` struct and `UpdateThread` to include `auto_summarize`. `summary` and `summary_message_count` are server-managed and not accepted on PUT.
+Add migration 010 (009 is taken by Story 5.7) with:
+
+On `threads`:
+- `summary TEXT` — latest rolling summary, overwritten on each summarization run; injected into every context window
+- `summary_updated_at TEXT`
+- `summary_message_count INTEGER NOT NULL DEFAULT 0` — message count at the time the current summary was written
+- `auto_summarize INTEGER NOT NULL DEFAULT 1`
+
+New `thread_summaries` table — append-only log of every summarization run:
+```sql
+CREATE TABLE thread_summaries (
+    id                TEXT PRIMARY KEY,
+    thread_id         TEXT NOT NULL REFERENCES threads(id),
+    summary           TEXT NOT NULL,
+    from_message_seq  INTEGER NOT NULL,
+    to_message_seq    INTEGER NOT NULL,
+    from_date         TEXT NOT NULL,
+    to_date           TEXT NOT NULL,
+    created_at        TEXT NOT NULL
+);
+CREATE INDEX idx_thread_summaries_thread_id ON thread_summaries(thread_id);
+CREATE INDEX idx_thread_summaries_to_date   ON thread_summaries(to_date);
+```
+
+On `agent_personas`:
+- `recall_conversation_cross_thread INTEGER NOT NULL DEFAULT 1` — when 1, `recall_conversation` searches across all threads using this persona; when 0, restricts to the current thread only.
+
+Update `Thread` struct and `UpdateThread` to include `auto_summarize`. Update `AgentPersona` to include `recall_conversation_cross_thread`. Add a `ThreadSummary` model struct. `summary` and `summary_message_count` are server-managed and not accepted on `PUT /api/threads/:id`.
 
 **Part B — Summarization service:**
 Add `services/summarization.rs`. Implement `pub async fn summarize_thread(state: &AppState, thread_id: &str) -> Result<()>` which:
@@ -837,7 +864,9 @@ Add `services/summarization.rs`. Implement `pub async fn summarize_thread(state:
 4. If fewer than `DEFAULT_HISTORY_LIMIT` messages would be summarised, returns early (not enough new content)
 5. Builds the summarisation prompt per §7.12.5, prepending any existing summary so the new summary covers the full history from the beginning
 6. Calls the thread's active provider with no tools and no streaming (regular completion)
-7. On success: writes result to `threads.summary`, updates `summary_updated_at` and `summary_message_count` to the current total visible message count
+7. On success:
+   - Writes result to `threads.summary`, updates `summary_updated_at` and `summary_message_count`
+   - Appends a row to `thread_summaries` capturing `from_message_seq` (previous `summary_message_count`), `to_message_seq` (new `summary_message_count`), `from_date` and `to_date` (wall-clock timestamps of the first and last messages in the summarised range)
 8. On any failure: logs at WARN, returns — must never propagate or surface to the user
 
 **Part C — Proactive trigger:**
@@ -849,7 +878,55 @@ In `retry_strategy_for`, add a new match arm that detects context-length errors 
 **Part E — Context injection:**
 Add `conversation_summary: Option<String>` to `AssemblyInput` in `context.rs`. In `assemble()`, inject it at position 2.5 per §7.12.4 when `Some` and non-empty. The history query in `run_inner` changes from "last 20 visible messages" to "visible messages after the `summary_message_count` boundary, capped at `DEFAULT_HISTORY_LIMIT`". Update all existing `AssemblyInput` constructions in tests to include `conversation_summary: None`.
 
-**Part F — UI: Advanced section in ConfigPane:**
+**Part F — `recall_conversation` tool:**
+Add `recall_conversation` as a fourth built-in tool, available to non-default personas only (same gate as `save_memory` / `recall_memory` / `delete_memory`).
+
+Tool definition:
+```json
+{
+  "name": "recall_conversation",
+  "description": "Look up summaries of past conversations by date range. Use this when the user asks about something discussed in a previous conversation or references a specific time period ('last week', 'back in March'). Returns narrative summaries of what was discussed. Use recall_memory for facts and preferences — use this tool for conversational context and history.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "from_date": {
+        "type": "string",
+        "description": "Start of the date range (ISO 8601, e.g. '2024-03-01'). Omit to search from the beginning."
+      },
+      "to_date": {
+        "type": "string",
+        "description": "End of the date range (ISO 8601, e.g. '2024-03-31'). Omit to search up to the present."
+      },
+      "keywords": {
+        "type": "string",
+        "description": "Optional keywords for substring filtering of summary text (case-insensitive)."
+      }
+    },
+    "required": []
+  }
+}
+```
+
+Tool implementation in `services/tools.rs`:
+- Loads the current persona's `recall_conversation_cross_thread` flag
+- When cross-thread: queries `thread_summaries` JOIN `threads` WHERE `threads.persona_id = ?` (current persona), filtered by date range and optional keyword substring, ordered by `to_date DESC`, capped at 5 results
+- When single-thread: same query but also filtered to `thread_id = ?` (current thread)
+- Formats each result as:
+  ```
+  [thread: {thread_title}] {from_date} – {to_date}
+  {summary}
+  ```
+- Returns "No conversation summaries found for that period." when empty
+
+**Part G — System prompt instructions:**
+Extend `MEMORY_INSTRUCTIONS` in `context.rs` with a `## Conversation Recall` section that teaches the model the distinction between the two recall tools:
+
+> **`recall_memory` vs `recall_conversation`:** Use `recall_memory` for facts, preferences, names, and things the user has told you directly (e.g. "what's my dog's name?", "what stack do I use?"). Use `recall_conversation` when the user references a past discussion or a specific time period (e.g. "remember when we talked about X last week?", "what did we decide about the migration in March?"). When the intent is ambiguous, you may call both. They are complementary — facts live in memory, narrative context lives in conversation summaries.
+
+**Part H — Persona settings toggle:**
+Add a `recall_conversation_cross_thread` toggle to the persona settings form (below the system prompt field, above the profile hint). Label: "Cross-thread conversation recall". Hint: "When enabled, recall_conversation searches across all threads using this persona. When disabled, it only looks back within the current thread."
+
+**Part I — UI: Advanced section in ConfigPane:**
 Refactor the thread config pane per §7.12.8:
 - Add a collapsible Advanced section at the bottom (collapsed by default)
 - Move show-tool-activity and show-system-events toggles into it
@@ -859,8 +936,8 @@ Refactor the thread config pane per §7.12.8:
 - Update `Thread` TypeScript type to include `summary`, `summary_updated_at`, `summary_message_count`, `auto_summarize`
 
 Acceptance criteria:
-- [ ] Migration adds all four columns with correct defaults
-- [ ] `GET /api/threads/:id` includes new fields
+- [ ] Migration 010 adds all thread columns, creates `thread_summaries` table and indexes, adds `recall_conversation_cross_thread` to `agent_personas`
+- [ ] `GET /api/threads/:id` includes new thread fields
 - [ ] `PUT /api/threads/:id` accepts `auto_summarize`; ignores `summary` if sent
 - [ ] No summarization when `auto_summarize = 0`
 - [ ] No summarization when fewer than `DEFAULT_HISTORY_LIMIT` new messages since last summary
@@ -869,16 +946,25 @@ Acceptance criteria:
 - [ ] Proactive trigger does not block the user response
 - [ ] Reactive trigger detects context-length 400 and runs summarization synchronously before retry
 - [ ] After reactive summarization, the retry uses the new summary and succeeds (assuming summary reduces context sufficiently)
+- [ ] On every successful summarization run, a row is appended to `thread_summaries` with correct seq boundaries and wall-clock dates
 - [ ] Summary is injected between thread addendum and history
 - [ ] History loaded is messages AFTER the summary boundary, not unconditional last-20
 - [ ] Summary injection is absent when `summary` is null
 - [ ] Summarization failure is logged at WARN and not surfaced to the user
 - [ ] `summary_message_count` reflects the message count at the time of summarization
+- [ ] `recall_conversation` tool is available to non-default personas and absent for the Default persona
+- [ ] Cross-thread mode returns summaries from all threads sharing the current persona, ordered newest first, capped at 5
+- [ ] Single-thread mode returns summaries from the current thread only
+- [ ] Date range filtering works: `from_date` and `to_date` both optional, either alone, or together
+- [ ] Keyword filtering performs case-insensitive substring match on summary text
+- [ ] Empty result returns the "No conversation summaries found" message
+- [ ] `recall_conversation_cross_thread` toggle persists on the persona; defaults to enabled
+- [ ] MEMORY_INSTRUCTIONS includes the `recall_memory` vs `recall_conversation` guidance
 - [ ] Advanced section in ConfigPane collapsed by default; expands on click
 - [ ] Auto-summarize toggle persists; show-tool-activity and show-system-events toggles work from new location
 - [ ] Archive button works from new location
 - [ ] "Last summarized" hint visible when summary exists
-- [ ] Unit tests: summarization prompt construction, context injection (with/without summary), re-summarization guard, boundary query (messages after summary_message_count)
+- [ ] Unit tests: summarization prompt construction, context injection (with/without summary), re-summarization guard, boundary query (messages after summary_message_count), `thread_summaries` row written on success, `recall_conversation` cross-thread vs single-thread scoping, date range filtering, keyword filtering, empty result message
 
 ---
 

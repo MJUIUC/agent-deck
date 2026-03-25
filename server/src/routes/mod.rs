@@ -36,6 +36,7 @@ pub mod messages;
 pub mod models;
 pub mod notify;
 pub mod personas;
+pub mod profile;
 pub mod providers;
 pub mod routines;
 pub mod setup;
@@ -377,6 +378,11 @@ pub async fn build_router(
         .route(
             "/api/auth/token/rotate",
             axum::routing::post(auth::rotate_token),
+        )
+        // User profile
+        .route(
+            "/api/profile",
+            get(profile::get_profile).put(profile::update_profile),
         )
         .layer(middleware::from_fn_with_state(
             state.clone(),

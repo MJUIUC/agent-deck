@@ -1,6 +1,13 @@
-import React, { useCallback, useEffect, useState } from "react";
-import { authApi } from "@/api/client";
-import { Btn, FieldHint, FieldLabel } from "./shared";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { authApi, profileApi } from "@/api/client";
+import type { UserProfile } from "@/types";
+import {
+  Btn,
+  FieldHint,
+  FieldInput,
+  FieldLabel,
+  FieldTextarea,
+} from "./shared";
 
 // ─── Section card wrapper ─────────────────────────────────────────────────────
 
@@ -41,6 +48,105 @@ function SectionCard({
         )}
       </div>
       {children}
+    </div>
+  );
+}
+
+// ─── ProfileField ─────────────────────────────────────────────────────────────
+
+function ProfileField({
+  label,
+  field,
+  value: initialValue,
+  placeholder,
+  saving,
+  onBlurSave,
+}: {
+  label: string;
+  field: keyof UserProfile;
+  value: string;
+  placeholder?: string;
+  saving: boolean;
+  onBlurSave: (field: keyof UserProfile, value: string) => void;
+}) {
+  const [localValue, setLocalValue] = useState(initialValue);
+
+  // Sync when profile loads (initialValue changes)
+  useEffect(() => {
+    setLocalValue(initialValue);
+  }, [initialValue]);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <FieldLabel>{label}</FieldLabel>
+      <FieldInput
+        type="text"
+        value={localValue}
+        placeholder={placeholder}
+        onChange={(e) => setLocalValue(e.target.value)}
+        onBlur={() => onBlurSave(field, localValue)}
+        style={saving ? { opacity: 0.6 } : undefined}
+      />
+    </div>
+  );
+}
+
+// ─── AboutField ───────────────────────────────────────────────────────────────
+
+function AboutField({
+  value: initialValue,
+  saving,
+  onBlurSave,
+}: {
+  value: string;
+  saving: boolean;
+  onBlurSave: (field: keyof UserProfile, value: string) => void;
+}) {
+  const [localValue, setLocalValue] = useState(initialValue);
+
+  useEffect(() => {
+    setLocalValue(initialValue);
+  }, [initialValue]);
+
+  const ABOUT_MAX = 500;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <FieldLabel>About</FieldLabel>
+      <FieldTextarea
+        value={localValue}
+        placeholder="Background context shown to all your personas on every turn..."
+        onChange={(e) => {
+          if (e.target.value.length <= ABOUT_MAX) setLocalValue(e.target.value);
+        }}
+        onBlur={() => onBlurSave("about", localValue)}
+        style={{ minHeight: 80, ...(saving ? { opacity: 0.6 } : {}) }}
+      />
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+        }}
+      >
+        <FieldHint>
+          Shown to all your personas as background context. Be direct — this is
+          read by the model on every turn.
+        </FieldHint>
+        <span
+          style={{
+            fontSize: 11,
+            color:
+              localValue.length >= ABOUT_MAX
+                ? "var(--error)"
+                : "var(--text-tertiary)",
+            flexShrink: 0,
+            marginLeft: 8,
+          }}
+        >
+          {localValue.length} / {ABOUT_MAX}
+        </span>
+      </div>
     </div>
   );
 }
@@ -228,11 +334,24 @@ export function GeneralSettings() {
     database_path: string;
   } | null>(null);
 
+  // Profile state
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [profileSaving, setProfileSaving] = useState<string | null>(null); // field key being saved
+
   // Preferences — local state only for now (no persistence endpoint yet)
   const [showStreamingIndicator, setShowStreamingIndicator] = useState(true);
   const [autoScroll, setAutoScroll] = useState(true);
   const [showRoutineLabels, setShowRoutineLabels] = useState(true);
   const [pushNotifications, setPushNotifications] = useState(false);
+
+  // Auto-detect timezone for pre-fill
+  const detectedTimezone = useMemo(() => {
+    try {
+      return Intl.DateTimeFormat().resolvedOptions().timeZone;
+    } catch {
+      return "";
+    }
+  }, []);
 
   // Load server info on mount
   const loadServerInfo = useCallback(async () => {
@@ -247,9 +366,34 @@ export function GeneralSettings() {
     }
   }, []);
 
+  // Load profile on mount
+  const loadProfile = useCallback(async () => {
+    try {
+      const res = await profileApi.get();
+      setProfile(res.data);
+    } catch {
+      // non-critical
+    }
+  }, []);
+
   useEffect(() => {
     loadServerInfo();
-  }, [loadServerInfo]);
+    loadProfile();
+  }, [loadServerInfo, loadProfile]);
+
+  // Save a profile field on blur
+  const handleProfileBlur = async (field: keyof UserProfile, value: string) => {
+    const finalValue = value.trim() || null;
+    try {
+      setProfileSaving(field);
+      const res = await profileApi.update({ [field]: finalValue });
+      setProfile(res.data);
+    } catch {
+      // ignore
+    } finally {
+      setProfileSaving(null);
+    }
+  };
 
   // Copy token to clipboard
   const handleCopy = async () => {
@@ -308,6 +452,74 @@ export function GeneralSettings() {
           Auth token management, preferences, and server information.
         </div>
       </div>
+
+      {/* ── Profile card ── */}
+      <SectionCard
+        title="Profile"
+        subtitle="Shared with all your personas as background context"
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {/* display_name */}
+          <ProfileField
+            label="Name"
+            field="display_name"
+            value={profile?.display_name ?? ""}
+            saving={profileSaving === "display_name"}
+            onBlurSave={handleProfileBlur}
+          />
+          {/* pronouns */}
+          <ProfileField
+            label="Pronouns"
+            field="pronouns"
+            value={profile?.pronouns ?? ""}
+            placeholder="e.g. she/her"
+            saving={profileSaving === "pronouns"}
+            onBlurSave={handleProfileBlur}
+          />
+          {/* role */}
+          <ProfileField
+            label="Role"
+            field="role"
+            value={profile?.role ?? ""}
+            placeholder="e.g. Senior Software Engineer"
+            saving={profileSaving === "role"}
+            onBlurSave={handleProfileBlur}
+          />
+          {/* organization */}
+          <ProfileField
+            label="Organization"
+            field="organization"
+            value={profile?.organization ?? ""}
+            placeholder="e.g. Acme Corp"
+            saving={profileSaving === "organization"}
+            onBlurSave={handleProfileBlur}
+          />
+          {/* location */}
+          <ProfileField
+            label="Location"
+            field="location"
+            value={profile?.location ?? ""}
+            placeholder="e.g. San Francisco, CA"
+            saving={profileSaving === "location"}
+            onBlurSave={handleProfileBlur}
+          />
+          {/* timezone */}
+          <ProfileField
+            label="Timezone"
+            field="timezone"
+            value={profile?.timezone ?? detectedTimezone}
+            placeholder="e.g. America/Los_Angeles"
+            saving={profileSaving === "timezone"}
+            onBlurSave={handleProfileBlur}
+          />
+          {/* about — textarea with counter */}
+          <AboutField
+            value={profile?.about ?? ""}
+            saving={profileSaving === "about"}
+            onBlurSave={handleProfileBlur}
+          />
+        </div>
+      </SectionCard>
 
       {/* ── Auth Token card ── */}
       <SectionCard
