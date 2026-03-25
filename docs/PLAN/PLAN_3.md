@@ -746,18 +746,36 @@ Acceptance criteria:
 Branch: `feature/phase5-memory-ui`
 
 Add memory viewer per section 7.6.7:
-- In the thread config pane: a "Memory" section showing recent memories saved from the current thread (filtered by provenance `thread_id`). This section is hidden when the thread uses the Default persona (no persona).
+- In the thread config pane: a "Memory" section showing all persona memories (not thread-scoped). This section is hidden when the thread uses the Default persona (no persona).
 - In settings under each persona: a full memory list for that persona with content, date, source thread name, and delete button. The Default persona's settings page does not show a memory section.
 - `/memory list` slash command returning last 20 memories as an ephemeral message. When issued in a thread using the Default persona, returns a message explaining that memory is not available without a persona.
 
 Acceptance criteria:
-- [ ] Thread config pane shows memories from the current thread (non-default persona only)
-- [ ] Memory section is hidden in thread config when thread uses Default persona
-- [ ] Persona settings page shows all memories for that persona with delete capability
-- [ ] Default persona settings page does not show memory section
-- [ ] `/memory list` command works and displays results as ephemeral message
-- [ ] `/memory list` in a Default persona thread returns explanatory message
-- [ ] Memory count badge visible in persona settings (non-default personas only)
+- [x] Thread config pane shows memories for the active persona (non-default persona only)
+- [x] Memory section is hidden in thread config when thread uses Default persona
+- [x] Persona settings page shows all memories for that persona with delete capability
+- [x] Default persona settings page does not show memory section
+- [x] `/memory list` command works and displays results as ephemeral message
+- [x] `/memory list` in a Default persona thread returns explanatory message
+- [x] Memory count badge visible in persona settings (non-default personas only)
+
+### As-built notes (Story 5.6)
+
+- **Memory section scope changed:** The spec called for filtering by `thread_id` provenance ("what did the agent learn in this conversation"). After review this was changed to show all persona memories — the more useful question is "what does this agent know?" not "what did it happen to save here." The `GET /api/personas/:id/memory` endpoint gained an optional `?thread_id=` filter for future use but the UI does not apply it.
+
+- **ConfigPane restructured:** The thread config pane was reorganised into two tiers. Top-level (always visible): Persona, Model, Routines, MCP Servers. Collapsible Advanced section (collapsed by default): Memory (with per-entry delete and N/500 count), Show tool activity, Show system events, System Prompt Addendum, Archive. The two developer toggles were moved out of the MCP section where they had been embedded.
+
+- **Memory list is expandable:** Shows 2 entries by default with "Show N more / Show less" toggle, matching the Routines and MCP Servers pattern. Resets to collapsed on thread switch.
+
+- **Recall quality fixes:** The FTS5 query was being passed raw to SQLite, causing two bugs: (1) multi-word queries used implicit AND so `"dog name"` required both words in the same entry; (2) hyphenated terms like `agent-deck` were parsed as `agent NOT deck` giving "no such column: deck". Fixed with `build_fts_query()` which normalises hyphens to spaces and joins tokens with `OR` + prefix wildcards (`dog* OR name*`). Queries containing explicit FTS5 operators pass through unchanged.
+
+- **`MEMORY_INSTRUCTIONS` strengthened:** The recall rule now explicitly states the model must call `recall_memory` before claiming ignorance. Tool description updated to explain OR semantics and instruct retry with different keywords before concluding a memory doesn't exist.
+
+- **`show_tool_activity` fully implemented:** Previously the toggle was stored in the DB but the messages list always filtered to `visibility = 'visible'`. Fixed: server adds `include_hidden` query param; when true, returns hidden `source = 'tool'` messages alongside visible ones. Client always fetches with `include_hidden=true` and filters display based on `show_tool_activity`. Built-in tool calls (memory ops) now persist hidden call+result records matching the MCP tool format.
+
+- **Pre-tool text preserved:** `generation_loop` previously only added the final turn's text to `final_content`. Text streamed before a tool call was visible during streaming but absent from the persisted message. Fixed: pre-tool turn text is now folded into `final_content` with `\n\n` separator. A matching `\n\n` separator token is emitted via SSE between turns so the streaming bubble stays in sync.
+
+- **Message input focus:** Auto-focuses the textarea on thread open/switch. Restores focus after streaming ends (the DOM swap from streaming bubble to final message was dropping focus to `document.body`).
 
 ---
 
