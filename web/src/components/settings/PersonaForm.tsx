@@ -215,6 +215,11 @@ export function PersonaForm({
               Defines the agent's core personality and behavior. Always
               prepended to the conversation context.
             </FieldHint>
+            <FieldHint>
+              ℹ️ User profile context (role, location, timezone, about) is
+              automatically included in every conversation with this persona.
+              You don't need to repeat it here.
+            </FieldHint>
           </div>
         </div>
 

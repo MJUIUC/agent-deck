@@ -9,6 +9,8 @@
 //!
 //! 1. **System message** — persona system prompt + memory instructions
 //!    (combined into one system message so the persona voice is seamless)
+//! 1.5. **System message** — user profile context, only when `user_profile_context` is `Some`
+//!    and non-empty (injected between the persona prompt and the thread addendum)
 //! 2. **System message** — thread addendum, only when `Some`
 //! 3. **History** — last N visible messages from the thread (oldest-first)
 //! 4. **System message** — routine context notice, only when `is_routine_triggered`
@@ -39,11 +41,11 @@ const MEMORY_INSTRUCTIONS: &str = r#"
 
 You have persistent long-term memory that spans across all our conversations. Use it actively:
 
-**When to save:** When I share a preference, a fact about myself, a project detail, a deadline, a name, a relationship, a goal, or anything that seems worth remembering in future conversations — save it immediately using save_memory. Save one fact per call. Write memories as concise factual statements, not narrative.
+**When to save:** When I share a preference, a fact about myself, a deadline, a name, a relationship, a goal, or anything about me that seems worth remembering in future conversations — save it immediately using save_memory. Save one fact per call. Write memories as concise factual statements, not narrative.
 
 **When to recall:** Before answering questions that might benefit from prior context, when I reference something from a past conversation, or when I seem to assume you know something — call recall_memory first. **Never reply that you don't know, don't remember, or aren't sure about something without first calling recall_memory to check.** Use 1–3 short keywords, not full sentences or questions — e.g. `typescript`, `dog name`, `deadline march`. Multiple keywords are OR-matched with prefix search, so any entry containing any of the words will be returned. If the first search returns nothing, try again with different or broader keywords before concluding the memory doesn't exist.
 
-**When to delete:** Before saving something you may already know, call recall_memory first to check. If you find a duplicate or outdated entry, delete the old one with delete_memory (using the id: value from the recall result) before saving the updated version. If save_memory reports the store is full, call recall_memory to review your memories and delete entries that are no longer relevant before retrying.
+**When to delete:** Before saving something you may already know, call recall_memory first to check. If you find a duplicate or outdated entry, delete the old one with delete_memory (using the id: value from the recall result) before saving the updated version. If save_memory reports the store is full, call recall_memory to review your memories for consolidating and deleting entries that are no longer relevant before retrying.
 
 **Do not** tell me every time you save, recall, or delete a memory. Use memory silently unless I specifically ask what you remember about something."#;
 
@@ -64,6 +66,10 @@ pub struct AssemblyInput {
     pub persona_system_prompt: String,
     /// Optional per-thread addendum (thread.system_prompt_addendum).
     pub thread_addendum: Option<String>,
+    /// Optional user profile context block injected between the persona prompt
+    /// and the thread addendum. Only present for non-default personas when the
+    /// user has filled in at least one profile field beyond display_name.
+    pub user_profile_context: Option<String>,
     /// Recent visible messages from the thread, in chronological order.
     /// The caller should pre-filter to `visibility = 'visible'` and sort
     /// ascending by `created_at` before passing in.
@@ -138,6 +144,20 @@ pub fn assemble(input: AssemblyInput) -> AssembledContext {
             .expect("system message build")
             .into(),
     );
+
+    // ── 1.5. System message: user profile context (optional) ─────────────────
+    if let Some(ref ctx) = input.user_profile_context {
+        let trimmed = ctx.trim();
+        if !trimmed.is_empty() {
+            messages.push(
+                ChatCompletionRequestSystemMessageArgs::default()
+                    .content(trimmed.to_string())
+                    .build()
+                    .expect("profile context message build")
+                    .into(),
+            );
+        }
+    }
 
     // ── 2. System message: thread addendum (optional) ─────────────────────────
     if let Some(addendum) = &input.thread_addendum {
@@ -349,6 +369,7 @@ mod tests {
         AssemblyInput {
             persona_system_prompt: "You are a helpful assistant.".to_string(),
             thread_addendum: None,
+            user_profile_context: None,
             history: vec![],
             history_limit: None,
             user_message: user_message.to_string(),
@@ -763,6 +784,7 @@ mod tests {
         let input = AssemblyInput {
             persona_system_prompt: "You are a coding assistant.".to_string(),
             thread_addendum: Some("Only answer Rust questions.".to_string()),
+            user_profile_context: None,
             history: vec![
                 visible("user", "What is a trait?"),
                 visible("assistant", "A trait is an interface in Rust."),
@@ -810,6 +832,7 @@ mod tests {
         let input = AssemblyInput {
             persona_system_prompt: "You are helpful.".to_string(),
             thread_addendum: None,
+            user_profile_context: None,
             history: vec![],
             history_limit: None,
             user_message: "Hello".to_string(),
@@ -858,6 +881,7 @@ mod tests {
         let input = AssemblyInput {
             persona_system_prompt: "".to_string(),
             thread_addendum: None,
+            user_profile_context: None,
             history: vec![],
             history_limit: None,
             user_message: "Hello".to_string(),
@@ -874,5 +898,50 @@ mod tests {
             "MCP tools must still be present for Default persona"
         );
         assert_eq!(ctx.tools[0].function.name, "fs__read_file");
+    }
+
+    #[test]
+    fn user_profile_context_injected_at_position_1_5() {
+        let mut input = basic_input("hello");
+        input.user_profile_context =
+            Some("## About the User\n\nName: Alice\nRole: Engineer".to_string());
+        let ctx = assemble(input);
+        // Should have: [0] persona system, [1] profile context, then user
+        assert!(ctx.messages.len() >= 2);
+        let profile_msg = system_content(&ctx.messages[1]);
+        assert!(
+            profile_msg.unwrap().contains("About the User"),
+            "profile block should be at index 1"
+        );
+    }
+
+    #[test]
+    fn user_profile_context_injected_before_thread_addendum() {
+        let mut input = basic_input("hello");
+        input.user_profile_context = Some("## About the User\n\nName: Alice".to_string());
+        input.thread_addendum = Some("Always reply in French.".to_string());
+        let ctx = assemble(input);
+        // [0] = persona, [1] = profile, [2] = addendum, last = user
+        let profile = system_content(&ctx.messages[1]);
+        let addendum = system_content(&ctx.messages[2]);
+        assert!(profile.unwrap().contains("About the User"));
+        assert!(addendum.unwrap().contains("French"));
+    }
+
+    #[test]
+    fn empty_user_profile_context_not_injected() {
+        let mut input = basic_input("hello");
+        input.user_profile_context = Some("   ".to_string());
+        let ctx = assemble(input);
+        // second message should be user (no addendum, no history by default)
+        assert_eq!(ctx.messages.len(), 2); // [system, user]
+    }
+
+    #[test]
+    fn none_user_profile_context_not_injected() {
+        let mut input = basic_input("hello");
+        input.user_profile_context = None;
+        let ctx = assemble(input);
+        assert_eq!(ctx.messages.len(), 2); // [system, user]
     }
 }

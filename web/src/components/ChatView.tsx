@@ -4,7 +4,9 @@ import {
   useState,
   useCallback,
   useRef,
+  Component,
 } from "react";
+import type { ReactNode, ErrorInfo } from "react";
 import type { Thread, ThreadState } from "@/types";
 import { useMessageStore } from "@/stores/useMessageStore";
 import { useSseStore } from "@/stores/useSseStore";
@@ -17,6 +19,87 @@ import { ChatHeader } from "./ChatHeader";
 import { ConfigPane } from "./ConfigPane";
 
 import styles from "./ChatView.module.css";
+
+// ── MessageListErrorBoundary ──────────────────────────────────────────────────
+// Catches render errors (e.g. a corrupt/oversized tool message) so a single
+// bad message can't freeze or crash the entire app.
+
+interface ErrorBoundaryState {
+  error: Error | null;
+}
+
+class MessageListErrorBoundary extends Component<
+  { children: ReactNode },
+  ErrorBoundaryState
+> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error("[MessageList] render error:", error, info.componentStack);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div
+          style={{
+            padding: "24px 20px",
+            color: "var(--text-secondary)",
+            fontSize: 13,
+            lineHeight: 1.6,
+          }}
+        >
+          <div
+            style={{ fontWeight: 600, color: "var(--error)", marginBottom: 6 }}
+          >
+            ⚠ Unable to render messages
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            One or more messages in this thread could not be displayed. This is
+            usually caused by oversized tool output.
+          </div>
+          <div
+            style={{
+              fontFamily: "monospace",
+              fontSize: 11,
+              color: "var(--text-tertiary)",
+              background: "var(--bg-tertiary)",
+              borderRadius: 6,
+              padding: "8px 10px",
+              wordBreak: "break-all",
+            }}
+          >
+            {this.state.error.message}
+          </div>
+          <button
+            onClick={() => this.setState({ error: null })}
+            style={{
+              marginTop: 14,
+              padding: "6px 14px",
+              borderRadius: 7,
+              border: "1px solid var(--border-default)",
+              background: "var(--bg-elevated)",
+              color: "var(--text-primary)",
+              fontSize: 12,
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            Retry
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 interface ChatViewProps {
   thread: Thread;
@@ -152,51 +235,53 @@ export function ChatView({
 
       {/* ── Messages area ── */}
       <div ref={containerRef} className={`${styles.messages} scrollbar-thin`}>
-        {isLoadingMessages ? (
-          <div className={styles.loading}>Loading messages…</div>
-        ) : visibleMessages.length === 0 && !isStreaming ? (
-          /* Empty thread */
-          <div className={styles.emptyThread}>
-            <div className={styles.emptyEmoji}>{personaEmoji}</div>
-            <div className={styles.emptyTitle}>
-              Start a conversation with {personaName}
-            </div>
-            <div className={styles.emptyHint}>
-              Send a message below to begin.
-            </div>
-          </div>
-        ) : (
-          <>
-            {grouped.map(({ dateLabel, dateKey, items }) => (
-              <div key={dateKey}>
-                {/* Date divider */}
-                <div className="date-divider">{dateLabel}</div>
-
-                {items.map((message) => (
-                  <MessageBubble
-                    key={message.id}
-                    message={message}
-                    personaEmoji={personaEmoji}
-                    personaName={personaName}
-                  />
-                ))}
+        <MessageListErrorBoundary>
+          {isLoadingMessages ? (
+            <div className={styles.loading}>Loading messages…</div>
+          ) : visibleMessages.length === 0 && !isStreaming ? (
+            /* Empty thread */
+            <div className={styles.emptyThread}>
+              <div className={styles.emptyEmoji}>{personaEmoji}</div>
+              <div className={styles.emptyTitle}>
+                Start a conversation with {personaName}
               </div>
-            ))}
+              <div className={styles.emptyHint}>
+                Send a message below to begin.
+              </div>
+            </div>
+          ) : (
+            <>
+              {grouped.map(({ dateLabel, dateKey, items }) => (
+                <div key={dateKey}>
+                  {/* Date divider */}
+                  <div className="date-divider">{dateLabel}</div>
 
-            {/* Streaming bubble — shown as soon as the message is sent so the
+                  {items.map((message) => (
+                    <MessageBubble
+                      key={message.id}
+                      message={message}
+                      personaEmoji={personaEmoji}
+                      personaName={personaName}
+                    />
+                  ))}
+                </div>
+              ))}
+
+              {/* Streaming bubble — shown as soon as the message is sent so the
                 animation appears immediately, not only after the first token */}
-            {(isSending || isStreaming) && (
-              <StreamingBubble
-                personaEmoji={personaEmoji}
-                personaName={personaName}
-                content={streamingContent}
-              />
-            )}
+              {(isSending || isStreaming) && (
+                <StreamingBubble
+                  personaEmoji={personaEmoji}
+                  personaName={personaName}
+                  content={streamingContent}
+                />
+              )}
 
-            {/* Scroll sentinel — always rendered at the bottom of the list */}
-            <div ref={bottomRef} style={{ height: 0, overflow: "hidden" }} />
-          </>
-        )}
+              {/* Scroll sentinel — always rendered at the bottom of the list */}
+              <div ref={bottomRef} style={{ height: 0, overflow: "hidden" }} />
+            </>
+          )}
+        </MessageListErrorBoundary>
 
         {/* Error banner */}
         {messageError && !isStreaming && (

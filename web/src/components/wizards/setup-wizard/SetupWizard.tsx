@@ -3,12 +3,20 @@ import { WizardShell } from "../shared/WizardShell";
 import type { WizardStepMeta } from "../shared/types";
 import { Step1Welcome } from "./Step1Welcome";
 import { Step2Name } from "./Step2Name";
+import { Step2bAboutYou } from "./Step2bAboutYou";
+import type { AboutYouDraft } from "./Step2bAboutYou";
 import { Step3Provider } from "./Step3Provider";
 import type { ProviderDraft } from "./Step3Provider";
 import { Step4Persona } from "./Step4Persona";
 import type { PersonaConfig } from "./Step4Persona";
 import { Step5Done } from "./Step5Done";
-import { personasApi, setupApi, providersApi, modelsApi } from "@/api/client";
+import {
+  personasApi,
+  setupApi,
+  providersApi,
+  modelsApi,
+  profileApi,
+} from "@/api/client";
 import type { Model } from "@/types";
 
 // ── SetupWizard ───────────────────────────────────────────────────────────────
@@ -19,13 +27,15 @@ import type { Model } from "@/types";
 // Steps (1-based):
 //   1 — Welcome        (no indicator)
 //   2 — Your Name
-//   3 — Add a Provider
-//   4 — Create First Persona
-//   5 — Done
+//   3 — About You      (optional / skippable)
+//   4 — Add a Provider
+//   5 — Create First Persona
+//   6 — Done
 
 const STEPS: WizardStepMeta[] = [
   { label: "Welcome" },
   { label: "Your name" },
+  { label: "About you", skippable: true },
   { label: "Provider", skippable: true },
   { label: "Persona", skippable: true },
   { label: "Done" },
@@ -40,9 +50,11 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   // ── Step state ──────────────────────────────────────────────────────────────
   const [step, setStep] = useState(1);
 
-  // ── Wizard data — collected across steps, persisted all at once in Step 5 ──
+  // ── Wizard data — collected across steps, persisted all at once in Step 6 ──
   const [displayName, setDisplayName] = useState("");
-  // providerDraft holds the raw form data; nothing is written to DB until Step 5
+  // profileDraft holds the "About You" fields collected in Step 3
+  const [profileDraft, setProfileDraft] = useState<AboutYouDraft | null>(null);
+  // providerDraft holds the raw form data; nothing is written to DB until Step 6
   const [providerDraft, setProviderDraft] = useState<ProviderDraft | null>(
     null,
   );
@@ -51,8 +63,8 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const [personaSkipped, setPersonaSkipped] = useState(false);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [persona, setPersona] = useState<PersonaConfig | null>(null);
-  // models are populated after provider creation in Step 5, but we pre-fetch
-  // a preview from the draft in Step 4 only when a copilot token already exists
+  // models are populated after provider creation in Step 6, but we pre-fetch
+  // a preview from the draft in Step 5 only when a copilot token already exists
   const [models, setModels] = useState<Model[]>([]);
 
   // ── Completion state ────────────────────────────────────────────────────────
@@ -66,13 +78,23 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
 
-  // ── Step 3 completion — store draft, then try to pre-fetch models ───────────
-  // If draft is null the user skipped — jump straight to Step 5 (Step 4 is
+  // ── Step 3 completion — store About You draft, proceed to Provider ──────────
+
+  const handleAboutYouNext = useCallback(
+    (draft: AboutYouDraft | null) => {
+      setProfileDraft(draft);
+      goTo(4);
+    },
+    [goTo],
+  );
+
+  // ── Step 4 completion — store draft, then try to pre-fetch models ───────────
+  // If draft is null the user skipped — jump straight to Step 6 (Step 5 is
   // meaningless without a provider).
   //
   // For Copilot (and any provider kind that may already exist in the DB from a
   // previous setup attempt), we look up the matching provider and load its
-  // models now so the Step 4 dropdown is populated immediately.
+  // models now so the Step 5 dropdown is populated immediately.
 
   const handleProviderNext = useCallback(
     async (draft: ProviderDraft | null) => {
@@ -84,7 +106,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         setPersonaSkipped(true);
         setPersona(null);
         setModels([]);
-        goTo(5);
+        goTo(6);
         return;
       }
 
@@ -125,29 +147,30 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         setModels([]);
       }
 
-      goTo(4);
-    },
-    [goTo],
-  );
-
-  // ── Step 4 completion — store persona config, no API call yet ──────────────
-
-  const handlePersonaNext = useCallback(
-    (config: PersonaConfig | null) => {
-      setPersona(config);
-      setPersonaSkipped(config === null);
       goTo(5);
     },
     [goTo],
   );
 
-  // ── Step 5 completion — persist everything in order ────────────────────────
+  // ── Step 5 completion — store persona config, no API call yet ──────────────
+
+  const handlePersonaNext = useCallback(
+    (config: PersonaConfig | null) => {
+      setPersona(config);
+      setPersonaSkipped(config === null);
+      goTo(6);
+    },
+    [goTo],
+  );
+
+  // ── Step 6 completion — persist everything in order ────────────────────────
   //
   // Order matters:
   //   1. POST /api/setup/complete  → creates the user row (required by all below)
-  //   2. POST /api/providers       → creates the provider (if one was configured)
-  //   3. POST /api/providers/:id/models  → syncs models for the new provider
-  //   4. POST /api/personas        → creates the persona (if one was configured)
+  //   2. PUT  /api/profile         → saves About You fields (best-effort)
+  //   3. POST /api/providers       → creates the provider (if one was configured)
+  //   4. POST /api/providers/:id/models  → syncs models for the new provider
+  //   5. POST /api/personas        → creates the persona (if one was configured)
 
   const handleComplete = useCallback(async () => {
     setSaving(true);
@@ -157,11 +180,33 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       // 1 — Create the user row
       await setupApi.complete(displayName.trim() || "User");
 
+      // 2 — Save profile (best-effort, non-fatal)
+      if (
+        profileDraft &&
+        (profileDraft.role ||
+          profileDraft.organization ||
+          profileDraft.location ||
+          profileDraft.about ||
+          profileDraft.timezone)
+      ) {
+        try {
+          await profileApi.update({
+            role: profileDraft.role || null,
+            organization: profileDraft.organization || null,
+            location: profileDraft.location || null,
+            about: profileDraft.about || null,
+            timezone: profileDraft.timezone || null,
+          });
+        } catch {
+          // Non-fatal — profile can be set in Settings
+        }
+      }
+
       let createdProviderId: string | null = null;
       // DB row ID of the synced model matching the user's selection, or null
       let resolvedModelId: string | null = null;
 
-      // 2 — Create provider
+      // 3 — Create provider
       if (providerDraft) {
         try {
           const provRes = await providersApi.create({
@@ -172,7 +217,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           });
           createdProviderId = provRes.data.id;
 
-          // 3 — Sync models then resolve the selected model to its DB row ID.
+          // 4 — Sync models then resolve the selected model to its DB row ID.
           // persona.default_model holds the raw sidecar model_id (e.g. "gpt-4o"),
           // which is NOT the DB primary key. We must look it up after sync or
           // the FK constraint on agent_personas.default_model will fail.
@@ -194,7 +239,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         }
       }
 
-      // 4 — Create persona
+      // 5 — Create persona
       if (persona) {
         try {
           await personasApi.create({
@@ -222,7 +267,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     } finally {
       setSaving(false);
     }
-  }, [displayName, providerDraft, persona, onComplete]);
+  }, [displayName, profileDraft, providerDraft, persona, onComplete]);
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
@@ -243,23 +288,31 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       )}
 
       {step === 3 && (
-        <Step3Provider
-          initialDraft={providerDraft}
+        <Step2bAboutYou
+          initialDraft={profileDraft}
           onBack={() => goTo(2)}
-          onNext={handleProviderNext}
+          onNext={handleAboutYouNext}
         />
       )}
 
       {step === 4 && (
-        <Step4Persona
-          models={models}
-          modelsLoading={modelsLoading}
+        <Step3Provider
+          initialDraft={providerDraft}
           onBack={() => goTo(3)}
-          onNext={handlePersonaNext}
+          onNext={handleProviderNext}
         />
       )}
 
       {step === 5 && (
+        <Step4Persona
+          models={models}
+          modelsLoading={modelsLoading}
+          onBack={() => goTo(4)}
+          onNext={handlePersonaNext}
+        />
+      )}
+
+      {step === 6 && (
         <Step5Done
           displayName={displayName}
           providerName={providerDraft?.name ?? null}

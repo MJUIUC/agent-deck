@@ -169,7 +169,13 @@ export interface SseThreadUpdatedEvent {
   updated_at: string;
 }
 
-export type SseGlobalEvent = SseThreadUpdatedEvent;
+export interface SseMcpStatusChangedEvent {
+  event: "mcp_status_changed";
+  mcp_server_id: string;
+  status: "inactive" | "connecting" | "connected" | "error";
+}
+
+export type SseGlobalEvent = SseThreadUpdatedEvent | SseMcpStatusChangedEvent;
 
 // ── API response wrappers ─────────────────────────────────────────────────────
 
@@ -237,4 +243,17 @@ export interface MemoryEntry {
 export interface MemoryListResponse {
   memories: MemoryEntry[];
   total_count: number;
+}
+
+// ── User Profile ──────────────────────────────────────────────────────────────
+
+export interface UserProfile {
+  display_name: string;
+  pronouns: string | null;
+  role: string | null;
+  organization: string | null;
+  location: string | null;
+  timezone: string | null;
+  about: string | null;
+  profile_updated_at: string | null;
 }

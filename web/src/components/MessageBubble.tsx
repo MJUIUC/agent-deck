@@ -31,9 +31,18 @@ function AgentAvatar({
   );
 }
 
+const TOOL_CONTENT_LIMIT = 4000;
+
 export function ToolActivityBubble({ message }: { message: Message }) {
   const isCall = message.role === "assistant";
   const timeStr = formatMessageTime(message.created_at);
+
+  const raw = message.content ?? "";
+  const truncated = raw.length > TOOL_CONTENT_LIMIT;
+  const displayContent = truncated
+    ? raw.slice(0, TOOL_CONTENT_LIMIT) +
+      "\n\n…(truncated — content too large to display)"
+    : raw;
 
   return (
     <div className={styles.toolRow}>
@@ -43,7 +52,7 @@ export function ToolActivityBubble({ message }: { message: Message }) {
         </div>
         <div className={styles.toolContent}>
           <ReactMarkdown remarkPlugins={[remarkGfm]}>
-            {message.content}
+            {displayContent}
           </ReactMarkdown>
         </div>
         <div className={styles.toolMeta}>{timeStr}</div>

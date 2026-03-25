@@ -261,6 +261,25 @@ async fn run_inner(
 
     let is_default_persona = persona.is_default;
 
+    // ── Load user profile for context injection ─────────────────────────────────
+    let user_profile_context: Option<String> = if !is_default_persona {
+        let user_row: Option<crate::models::user::User> = sqlx::query_as(
+            "SELECT id, display_name, pronouns, role, organization, location,
+                    timezone, about, profile_updated_at, created_at
+             FROM users WHERE id = ?",
+        )
+        .bind(user_id)
+        .fetch_optional(&state.pool)
+        .await
+        .unwrap_or(None);
+
+        user_row
+            .as_ref()
+            .and_then(|u| format_user_profile_context(u))
+    } else {
+        None
+    };
+
     // ── Routine execution tracking ────────────────────────────────────────────────
     // When is_routine=true, parse the routine_id from the JSON trigger content,
     // generate an execution_id (shared by all messages in this run), and create
@@ -466,6 +485,7 @@ async fn run_inner(
     let assembled = context::assemble(AssemblyInput {
         persona_system_prompt: persona.system_prompt.clone(),
         thread_addendum: thread.system_prompt_addendum.clone(),
+        user_profile_context,
         history,
         history_limit: None,
         user_message: user_message.to_string(),
@@ -1639,6 +1659,53 @@ fn build_assistant_tool_call_message(
 // ─── Provider factory ──────────────────────────────────────────────────────────
 
 /// Instantiate a concrete `LlmProvider` from a database provider row.
+/// Build the "## About the User" system message block from the user's profile.
+/// Returns `None` when only display_name is set (all other fields null/empty).
+pub(crate) fn format_user_profile_context(user: &crate::models::user::User) -> Option<String> {
+    let mut lines: Vec<String> = Vec::new();
+
+    // Always include Name (display_name is always set)
+    lines.push(format!("Name: {}", user.display_name));
+
+    if let Some(ref v) = user.pronouns {
+        if !v.is_empty() {
+            lines.push(format!("Pronouns: {}", v));
+        }
+    }
+    if let Some(ref v) = user.role {
+        if !v.is_empty() {
+            lines.push(format!("Role: {}", v));
+        }
+    }
+    if let Some(ref v) = user.organization {
+        if !v.is_empty() {
+            lines.push(format!("Organization: {}", v));
+        }
+    }
+    if let Some(ref v) = user.location {
+        if !v.is_empty() {
+            lines.push(format!("Location: {}", v));
+        }
+    }
+    if let Some(ref v) = user.timezone {
+        if !v.is_empty() {
+            lines.push(format!("Timezone: {}", v));
+        }
+    }
+    if let Some(ref v) = user.about {
+        if !v.is_empty() {
+            lines.push(format!("About: {}", v));
+        }
+    }
+
+    // Only inject when more than just the Name line is present
+    if lines.len() <= 1 {
+        return None;
+    }
+
+    Some(format!("## About the User\n\n{}", lines.join("\n")))
+}
+
 pub(crate) fn build_provider(
     state: &AppState,
     row: &crate::models::provider::Provider,
@@ -1715,6 +1782,7 @@ pub fn generate_title_from_message(content: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::format_user_profile_context;
     use super::*;
 
     // ── generate_title_from_message ───────────────────────────────────────────
@@ -2098,5 +2166,72 @@ mod tests {
                     .map(|s| s.to_string())
             });
         assert_eq!(parsed, None);
+    }
+
+    // ── format_user_profile_context ───────────────────────────────────────────
+
+    #[test]
+    fn profile_context_all_fields() {
+        let user = crate::models::user::User {
+            id: "u1".to_string(),
+            display_name: "Alice".to_string(),
+            pronouns: Some("she/her".to_string()),
+            role: Some("Engineer".to_string()),
+            organization: Some("Acme".to_string()),
+            location: Some("NYC".to_string()),
+            timezone: Some("America/New_York".to_string()),
+            about: Some("I prefer short answers.".to_string()),
+            profile_updated_at: None,
+            created_at: "".to_string(),
+        };
+        let ctx = format_user_profile_context(&user).unwrap();
+        assert!(ctx.contains("## About the User"));
+        assert!(ctx.contains("Name: Alice"));
+        assert!(ctx.contains("Role: Engineer"));
+        assert!(ctx.contains("Pronouns: she/her"));
+        assert!(ctx.contains("Organization: Acme"));
+        assert!(ctx.contains("Location: NYC"));
+        assert!(ctx.contains("Timezone: America/New_York"));
+        assert!(ctx.contains("About: I prefer short answers."));
+    }
+
+    #[test]
+    fn profile_context_only_display_name_returns_none() {
+        let user = crate::models::user::User {
+            id: "u1".to_string(),
+            display_name: "Alice".to_string(),
+            pronouns: None,
+            role: None,
+            organization: None,
+            location: None,
+            timezone: None,
+            about: None,
+            profile_updated_at: None,
+            created_at: "".to_string(),
+        };
+        assert!(format_user_profile_context(&user).is_none());
+    }
+
+    #[test]
+    fn profile_context_partial_fields() {
+        let user = crate::models::user::User {
+            id: "u1".to_string(),
+            display_name: "Bob".to_string(),
+            pronouns: None,
+            role: Some("Designer".to_string()),
+            organization: None,
+            location: Some("London".to_string()),
+            timezone: None,
+            about: None,
+            profile_updated_at: None,
+            created_at: "".to_string(),
+        };
+        let ctx = format_user_profile_context(&user).unwrap();
+        assert!(ctx.contains("Name: Bob"));
+        assert!(ctx.contains("Role: Designer"));
+        assert!(ctx.contains("Location: London"));
+        assert!(!ctx.contains("Organization"));
+        assert!(!ctx.contains("Timezone"));
+        assert!(!ctx.contains("About:"));
     }
 }

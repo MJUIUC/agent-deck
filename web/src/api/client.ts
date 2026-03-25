@@ -11,6 +11,7 @@ import type {
   Routine,
   SlashCommandResponse,
   MemoryListResponse,
+  UserProfile,
 } from "@/types";
 
 // ── Credential types ──────────────────────────────────────────────────────────
@@ -658,5 +659,28 @@ export const memoriesApi = {
       `/api/personas/${personaId}/memory/${memoryId}`,
       { method: "DELETE" },
     );
+  },
+};
+
+export const profileApi = {
+  get() {
+    return apiFetch<{ data: UserProfile }>("/api/profile");
+  },
+
+  update(
+    fields: Partial<{
+      display_name: string;
+      pronouns: string | null;
+      role: string | null;
+      organization: string | null;
+      location: string | null;
+      timezone: string | null;
+      about: string | null;
+    }>,
+  ) {
+    return apiFetch<{ data: UserProfile }>("/api/profile", {
+      method: "PUT",
+      body: JSON.stringify(fields),
+    });
   },
 };
