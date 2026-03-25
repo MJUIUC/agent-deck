@@ -92,6 +92,7 @@ function makeThread(id = "t1"): Thread {
       system_prompt: "",
       default_model: null,
       default_provider: null,
+      is_default: false,
       created_at: "2024-01-01T00:00:00.000Z",
       updated_at: "2024-01-01T00:00:00.000Z",
     },

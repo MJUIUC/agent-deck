@@ -10,6 +10,7 @@ import type {
   McpTool,
   Routine,
   SlashCommandResponse,
+  MemoryListResponse,
 } from "@/types";
 
 // ── Credential types ──────────────────────────────────────────────────────────
@@ -56,17 +57,37 @@ export interface UpdateCredentialPayload {
   password?: string;
 }
 
+// Get auth token from localStorage or session
+function getAuthToken(): string | null {
+  try {
+    // Check localStorage first (set after successful login)
+    const token = localStorage.getItem("agent_deck_auth_token");
+    if (token) return token;
+  } catch {
+    // localStorage might not be available
+  }
+  return null;
+}
+
 // Base fetch helper — throws on non-OK responses with the error body
 async function apiFetch<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(options.headers ?? {}),
+  } as Record<string, string>;
+
+  // Include auth token if available
+  const token = getAuthToken();
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
   const res = await fetch(path, {
     ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers ?? {}),
-    },
+    headers,
   });
 
   if (!res.ok) {
@@ -259,11 +280,12 @@ export const threadsApi = {
 export const messagesApi = {
   list(
     threadId: string,
-    opts: { limit?: number; before?: string } = {},
+    opts: { limit?: number; before?: string; include_hidden?: boolean } = {},
   ): Promise<{ data: Message[] }> {
     const params = new URLSearchParams();
     if (opts.limit != null) params.set("limit", String(opts.limit));
     if (opts.before) params.set("before", opts.before);
+    if (opts.include_hidden) params.set("include_hidden", "true");
     const qs = params.toString();
     return apiFetch(`/api/threads/${threadId}/messages${qs ? `?${qs}` : ""}`);
   },
@@ -480,6 +502,30 @@ export const authApi = {
   }> {
     return apiFetch("/api/config");
   },
+
+  // Login with token (for mobile/remote access)
+  login(token: string): void {
+    try {
+      localStorage.setItem("agent_deck_auth_token", token);
+    } catch {
+      // localStorage might not be available, that's ok
+      console.warn("Could not store auth token in localStorage");
+    }
+  },
+
+  // Get stored auth token
+  getToken(): string | null {
+    return getAuthToken();
+  },
+
+  // Clear auth token (logout)
+  logout(): void {
+    try {
+      localStorage.removeItem("agent_deck_auth_token");
+    } catch {
+      // localStorage might not be available
+    }
+  },
 };
 
 // ── Pairing ───────────────────────────────────────────────────────────────────
@@ -590,5 +636,27 @@ export const setupApi = {
       method: "POST",
       body: JSON.stringify({ display_name: displayName }),
     });
+  },
+};
+
+export const memoriesApi = {
+  list(
+    personaId: string,
+    params: { limit?: number; offset?: number; thread_id?: string } = {},
+  ) {
+    const qs = new URLSearchParams();
+    if (params.limit != null) qs.set("limit", String(params.limit));
+    if (params.offset != null) qs.set("offset", String(params.offset));
+    if (params.thread_id) qs.set("thread_id", params.thread_id);
+    const query = qs.toString() ? `?${qs.toString()}` : "";
+    return apiFetch<{ data: MemoryListResponse }>(
+      `/api/personas/${personaId}/memory${query}`,
+    );
+  },
+  delete(personaId: string, memoryId: string) {
+    return apiFetch<{ data: { deleted: boolean } }>(
+      `/api/personas/${personaId}/memory/${memoryId}`,
+      { method: "DELETE" },
+    );
   },
 };

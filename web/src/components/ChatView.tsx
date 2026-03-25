@@ -63,7 +63,13 @@ export function ChatView({
   const streamingContent = phase.status === "streaming" ? phase.content : "";
   const messageError = phase.status === "error" ? phase.message : null;
 
-  const visibleMessages = messages.filter((m) => m.visibility !== "hidden");
+  const visibleMessages = messages.filter((m) => {
+    if (m.visibility === "hidden") {
+      if (m.source === "tool") return thread.show_tool_activity ?? false;
+      return false;
+    }
+    return true;
+  });
 
   // Show the loading/empty state when there are no visible messages and we are
   // idle. Using visibleMessages (not messages) means threads whose only

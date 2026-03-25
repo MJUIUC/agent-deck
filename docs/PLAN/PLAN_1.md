@@ -1,8 +1,31 @@
 # Agent-Deck — Project Plan
 
-**Version:** 1.8  
+**Version:** 1.9  
 **Project:** agent-deck  
-**Purpose:** A self-hosted, highly configurable personal AI agent platform designed to make working with LLMs accessible to non-engineers. Runs on a Mac mini, accessible privately over Tailscale, with a browser UI and Android mobile app.
+**Purpose:** A self-hosted, highly configurable personal AI agent platform designed to make working with LLMs accessible to non-engineers. Runs on a Mac mini, accessible privately over Tailscale, with a browser UI and mobile PWA.
+
+**v1.9 Changes:**
+- Replaced React Native mobile app (Phases 6–7) with PWA + Web Push notification approach
+- Removed React Native, Firebase, and FCM dependencies entirely — no external accounts or services required
+- Mobile experience delivered via PWA: `manifest.json`, service worker, home screen install on Android and iOS
+- Push notifications use Web Push with VAPID keys — keys generated once on server startup, stored in `app_config`, no registration with Google or Apple required
+- Replaced `device_tokens` table (FCM) with `push_subscriptions` table (Web Push endpoint + encryption keys)
+- Replaced `POST /api/device-tokens` with `POST /api/push/subscribe` and `DELETE /api/push/subscribe`
+- Added `GET /api/push/vapid-public-key` endpoint to expose VAPID public key to client
+- Section 3.3 rewritten: React Native → PWA description
+- Section 7.8 rewritten: FCM → Web Push
+- Section 7.10 rewritten: QR pairing → PWA install instructions
+- Section 8.5 rewritten: React Native screens → PWA mobile experience
+- Phase 6 rewritten: React Native scaffold → PWA manifest + install story
+- Phase 7 rewritten: FCM push → Web Push server + client story
+- Removed `mobile/` directory from repository structure
+- Removed `FCM_SERVICE_ACCOUNT_JSON` environment variable
+- Deferred/future work: updated iOS note (no Developer account needed for Web Push PWA)
+- Added Tailscale integration: server-side status detection, install, and connect flow; `tailscale_hostname` stored in `app_config`; `GET /api/tailscale/status`, `POST /api/tailscale/install`, `POST /api/tailscale/connect` endpoints
+- Setup wizard gains a Tailscale step (between Welcome and Provider) that auto-advances if already connected
+- `GET /api/pairing/qr` now uses `tailscale_hostname` from `app_config` for the server URL
+- Added Story 1.x (Tailscale server integration) to Phase 1; Story 6.x (Tailscale wizard step) to Phase 6
+- Added `tailscale` CLI to Rust server tech stack (invoked via `tokio::process::Command`)
 
 **v1.8 Changes:**
 - Restructured Story 5.1 into "Per-thread agent run management" with seven parts (A–G): run lock, cancellation, notify endpoint, schema migration, client integration, system events toggle, orphan cleanup
@@ -141,9 +164,9 @@ Agent-Deck is a self-hosted personal AI agent platform. The goal is to make work
 │                     Tailscale Network                    │
 │                                                         │
 │  ┌──────────────────┐         ┌──────────────────────┐  │
-│  │   Browser        │         │  Android App         │  │
-│  │   React SPA      │         │  React Native        │  │
-│  │   (any device)   │         │  (Pixel 4a)          │  │
+│  │   Browser        │         │  Mobile PWA          │  │
+│  │   React SPA      │         │  (any device,        │  │
+│  │   (any device)   │         │   home screen)       │  │
 │  └────────┬─────────┘         └──────────┬───────────┘  │
 │           │ HTTP + SSE                   │ HTTP + SSE   │
 │           │                              │              │
@@ -172,11 +195,6 @@ Agent-Deck is a self-hosted personal AI agent platform. The goal is to make work
 │  │  provider is active    │                              │
 │  └────────────────────────┘                              │
 └─────────────────────────────────────────────────────────┘
-                        │
-                        │ HTTPS (FCM)
-                        ▼
-              Google Firebase (FCM)
-              Push notifications only
 ```
 
 ### 2.2 Process Relationships
@@ -186,15 +204,16 @@ The Rust server is the central process. It:
 - Exposes a REST + SSE API consumed by both the browser and mobile app
 - Owns the agent run-loop — LLM calls happen here, not on the client
 - Manages the `copilot-api` child process (starts it, monitors it, restarts if it crashes)
+- Detects and manages Tailscale connection state; stores the machine's Tailscale hostname in `app_config`
 - Owns the cron scheduler for routines — routines deliver invocations via the system notification channel (not direct function calls)
-- Dispatches FCM push notifications when no SSE client is connected for a thread
+- Dispatches Web Push notifications (VAPID) when no SSE client is connected for a thread
 - Enforces a per-thread agent run lock — only one agent run may execute per thread at a time; additional runs queue behind it (see section 7.x)
 
 ### 2.3 Communication Patterns
 
 - **Client → Server:** Standard HTTP REST (POST, GET, PUT, DELETE, PATCH)
 - **Server → Client (streaming):** Server-Sent Events (SSE) — used for LLM token streaming and live event delivery (new messages, routine completions, system events)
-- **Server → Mobile (background):** Firebase Cloud Messaging (FCM) push notifications
+- **Server → Mobile (background):** Web Push notifications via VAPID — no external accounts or registration required
 - **Server → LLM Provider:** HTTP via provider abstraction layer (OpenAI-compatible API)
 - **Routine → Agent:** Via `POST /api/threads/:id/notify` with `event_type: routine_fired` — same path as all other system notifications
 - **Config change → Agent:** Client calls `POST /api/threads/:id/notify` after any mutation the agent should be aware of (model switch, MCP attach/detach, addendum update)
@@ -233,7 +252,8 @@ Two SSE endpoints exist:
 | UUID generation | `uuid` | v4 UUIDs |
 | Error handling | `anyhow` + `thiserror` | Ergonomic error types |
 | Logging | `tracing` + `tracing-subscriber` | Structured async logging |
-| FCM | `fcm` or direct HTTP via `reqwest` | Push notification dispatch |
+| web-push | `web_push` crate | Web Push (VAPID) notification dispatch |
+| Tailscale CLI | `tokio::process::Command` | Install detection, `tailscale up`, hostname discovery |
 | Child process mgmt | `tokio::process` | Managing the copilot-api process |
 
 ### 3.2 React SPA (Browser Frontend)
@@ -252,28 +272,23 @@ Two SSE endpoints exist:
 | Icons | `lucide-react` | Clean icon set used by shadcn |
 | Forms | `react-hook-form` + `zod` | Validation and form state |
 
-### 3.3 React Native App (Android)
+### 3.3 PWA (Mobile and Desktop)
 
-The mobile app directory already exists at `mobile/BotRelayApp/`. It was scaffolded for the previous bot-relay project. Key existing dependencies to keep:
+The React SPA is also the mobile client. No separate native app is needed. The `mobile/` directory does not exist in this project.
 
-| Dependency | Purpose |
+The web app is made installable as a Progressive Web App by adding:
+
+| Addition | Purpose |
 |---|---|
-| `react-native-gifted-chat` | Chat UI component |
-| `@react-navigation/native` + `native-stack` | Navigation |
-| `react-native-mmkv` | Fast local storage (replaces AsyncStorage) |
-| `react-native-safe-area-context` | Safe area handling |
-| `axios` | HTTP client |
-| `@notifee/react-native` | Local notification display |
+| `manifest.json` | Defines app name, icons, `display: standalone` (required for iOS push) |
+| Service worker (`sw.js`) | Handles background push events, shows notifications |
+| `vite-plugin-pwa` (dev dependency) | Generates service worker boilerplate, injects manifest link |
 
-Dependencies to **remove** (no longer needed):
-- `socket.io-client` — replaced by SSE
-- `tweetnacl` + `tweetnacl-util` — encryption no longer needed at app layer
-- `react-native-video` — not applicable
+**Installing on Android:** Chrome shows an "Add to Home Screen" banner automatically, or via the browser menu. Once installed, the PWA opens full-screen like a native app.
 
-New dependencies to **add**:
-- `@react-native-firebase/app` + `@react-native-firebase/messaging` — FCM push notifications
+**Installing on iOS:** In Safari, tap Share → "Add to Home Screen". The PWA must be opened from the home screen icon (not from Safari) for push notifications to work — this is an Apple requirement.
 
-The app name should be renamed from `BotRelayApp` to `AgentDeck` in `app.json` and `package.json`.
+Push notifications use the Web Push API with VAPID keys. No Firebase project, no Google account, no Apple Developer account required. The browser vendor's push infrastructure (Google for Chrome, Apple for Safari) relays the notification, but this requires no registration — VAPID keys are self-generated and self-signed. See section 7.8 for the full push notification spec.
 
 ### 3.4 copilot-api
 
@@ -290,7 +305,7 @@ The app name should be renamed from `BotRelayApp` to `AgentDeck` in `app.json` a
 
 ## 4. Shared Theme
 
-Both the React SPA and React Native app must use the same named color tokens. Colors are defined once and imported in both projects. When a color needs to change, it changes in one place.
+The React SPA uses named color tokens defined as CSS custom properties. The color tokens are defined once in `web/src/styles.css` and referenced throughout. When a color needs to change, it changes in one place.
 
 ### 4.1 Color Tokens
 
@@ -337,7 +352,7 @@ const colors = {
 
 - Never hardcode hex values in component files — always use token names
 - All Tailwind classes in the SPA must map to these tokens via `tailwind.config.ts`
-- All React Native `StyleSheet` entries must import from the shared colors file
+
 - If a color doesn't look right, change the token value, not the component
 
 ---
@@ -533,17 +548,19 @@ CREATE TABLE routines (
 );
 ```
 
-#### `device_tokens`
-FCM device tokens for push notifications.
+#### `push_subscriptions`
+Web Push subscription objects from browsers/PWA clients. Stored per-user, one row per subscribed browser instance.
 
 ```sql
-CREATE TABLE device_tokens (
-  id           TEXT PRIMARY KEY,          -- UUID v4
-  user_id      TEXT NOT NULL,
-  token        TEXT NOT NULL UNIQUE,      -- FCM device token
-  platform     TEXT NOT NULL DEFAULT 'android',
-  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
+CREATE TABLE push_subscriptions (
+  id            TEXT PRIMARY KEY,         -- UUID v4
+  user_id       TEXT NOT NULL,
+  endpoint      TEXT NOT NULL UNIQUE,     -- browser-provided push endpoint URL
+  p256dh        TEXT NOT NULL,            -- browser public key (base64url)
+  auth          TEXT NOT NULL,            -- browser auth secret (base64url)
+  user_agent    TEXT,                     -- optional, for display in settings
+  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
 ```
@@ -632,5 +649,17 @@ CREATE TABLE app_config (
   updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 ```
+
+Key values used by the server:
+
+| Key | Set by | Purpose |
+|---|---|---|
+| `auth_token` | First startup | 64-char hex auth token |
+| `machine_secret` | First startup | Encryption key for credentials |
+| `credential_master_key` | First startup | Separate key for credential blobs |
+| `vapid_public_key` | First startup | VAPID public key for Web Push |
+| `vapid_private_key` | First startup | VAPID private key (never exposed via API) |
+| `tailscale_hostname` | Tailscale connect | Machine's Tailscale hostname (e.g. `mac-mini.tail1234.ts.net`) |
+| `setup_complete` | Setup wizard | Whether first-run setup has been completed |
 
 ---

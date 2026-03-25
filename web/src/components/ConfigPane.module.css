@@ -1144,6 +1144,124 @@
 }
 
 .routineFormSave:disabled {
-    opacity: 0.5;
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+/* ── Memory section ── */
+.memoryList {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.memoryEntry {
+    background: var(--bg-elevated);
+    border-radius: 8px;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: row;
+    gap: 8px;
+    align-items: flex-start;
+}
+
+.memoryContent {
+    font-size: 12px;
+    color: var(--text-primary);
+    line-height: 1.5;
+}
+
+.memoryMeta {
+    font-size: 10px;
+    color: var(--text-tertiary);
+}
+
+/* ── Advanced collapsible ── */
+.advancedToggle {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    font-family: inherit;
+    color: var(--text-tertiary);
+    transition: color 0.15s;
+}
+
+.advancedToggle:hover {
+    color: var(--text-secondary);
+}
+
+.advancedToggleLabel {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.advancedBody {
+    margin-top: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.advancedSectionTitle {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+}
+
+.advancedSectionHint {
+    font-weight: 400;
+    color: var(--text-tertiary);
+    font-size: 11px;
+}
+
+.advancedMemoryCount {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    margin-bottom: 8px;
+}
+
+.advancedMemoryWarning {
+    color: var(--warning, #f59e0b);
+}
+
+.advancedDivider {
+    height: 1px;
+    background: var(--border-subtle);
+    margin: 14px 0;
+}
+
+/* ── Memory entry (updated for delete button) ── */
+.memoryEntryBody {
+    flex: 1;
+    min-width: 0;
+}
+
+.memoryDeleteBtn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-tertiary);
+    font-size: 12px;
+    padding: 2px 4px;
+    border-radius: 4px;
+    flex-shrink: 0;
+    line-height: 1;
+    transition: color 0.15s;
+}
+
+.memoryDeleteBtn:hover:not(:disabled) {
+    color: var(--error, #ef4444);
+}
+
+.memoryDeleteBtn:disabled {
+    opacity: 0.4;
     cursor: not-allowed;
 }

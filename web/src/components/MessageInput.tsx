@@ -24,13 +24,23 @@ export function MessageInput({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [value, setValue] = useState("");
 
-  // Reset input when thread changes
+  // Reset input and focus when thread changes
   useEffect(() => {
     setValue("");
     if (textareaRef.current) {
       textareaRef.current.style.height = "22px";
+      textareaRef.current.focus();
     }
   }, [threadId]);
+
+  // Restore focus when streaming ends (true → false transition)
+  const wasStreamingRef = useRef(false);
+  useEffect(() => {
+    if (wasStreamingRef.current && !isStreaming) {
+      textareaRef.current?.focus();
+    }
+    wasStreamingRef.current = isStreaming ?? false;
+  }, [isStreaming]);
 
   const resize = useCallback(() => {
     const el = textareaRef.current;

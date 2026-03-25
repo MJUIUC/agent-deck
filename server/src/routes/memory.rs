@@ -51,6 +51,7 @@ async fn verify_persona_ownership(
 pub struct ListMemoryQuery {
     pub limit: Option<i64>,
     pub offset: Option<i64>,
+    pub thread_id: Option<String>,
 }
 
 /// GET /api/personas/:id/memory
@@ -68,8 +69,15 @@ pub async fn list(
     let limit = query.limit.unwrap_or(20).clamp(1, 100);
     let offset = query.offset.unwrap_or(0).max(0);
 
-    let result =
-        memory_service::list_memories(&state.pool, &user_id, &persona_id, offset, limit).await?;
+    let result = memory_service::list_memories(
+        &state.pool,
+        &user_id,
+        &persona_id,
+        offset,
+        limit,
+        query.thread_id.as_deref(),
+    )
+    .await?;
 
     Ok((StatusCode::OK, Json(json!({ "data": result }))))
 }

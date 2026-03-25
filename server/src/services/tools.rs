@@ -127,7 +127,7 @@ impl AgentTool for RecallMemoryTool {
     }
 
     fn description(&self) -> &str {
-        "Search long-term memory for entries matching a query. Returns up to 10 results."
+        "Search long-term memory for entries matching a query. Use 1–3 short keywords, not full sentences. Multiple keywords are OR-matched with prefix search, so 'dog name' returns any entry containing 'dog' or 'name'. Call this multiple times with different keywords if the first result is empty."
     }
 
     fn input_schema(&self) -> Value {
@@ -136,7 +136,7 @@ impl AgentTool for RecallMemoryTool {
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "Keywords or a short phrase to search for in memory."
+                    "description": "1–3 keywords to search for. Short and specific — e.g. 'typescript', 'dog name', 'deadline march'. Do NOT use full sentences or questions."
                 }
             },
             "required": ["query"]

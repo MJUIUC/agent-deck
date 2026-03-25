@@ -223,3 +223,18 @@ export interface ThreadState {
 }
 
 export type ThreadMap = Record<string, ThreadState>;
+
+// ── Memory ────────────────────────────────────────────────────────────────────
+
+export interface MemoryEntry {
+  id: string;
+  content: string;
+  thread_id: string | null;
+  thread_title: string | null;
+  created_at: string;
+}
+
+export interface MemoryListResponse {
+  memories: MemoryEntry[];
+  total_count: number;
+}
