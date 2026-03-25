@@ -194,6 +194,7 @@ export const threadsApi = {
       system_prompt_addendum?: string;
       show_tool_activity?: boolean;
       show_system_events?: boolean;
+      auto_summarize?: boolean;
     },
   ): Promise<{ data: Thread }> {
     return apiFetch(`/api/threads/${id}`, {

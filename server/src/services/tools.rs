@@ -263,6 +263,152 @@ impl AgentTool for DeleteMemoryTool {
     }
 }
 
+// ─── RecallConversationTool ───────────────────────────────────────────────────
+
+const RECALL_CONVERSATION_LIMIT: i64 = 5;
+
+pub struct RecallConversationTool;
+
+#[async_trait]
+impl AgentTool for RecallConversationTool {
+    fn name(&self) -> &str {
+        "recall_conversation"
+    }
+
+    fn description(&self) -> &str {
+        "Look up summaries of past conversations by date range. Use this when the user asks \
+         about something discussed in a previous conversation or references a specific time \
+         period ('last week', 'back in March'). Returns narrative summaries of what was discussed. \
+         Use recall_memory for facts and preferences — use this tool for conversational context \
+         and history."
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "from_date": {
+                    "type": "string",
+                    "description": "Start of the date range (ISO 8601, e.g. '2024-03-01'). Omit to search from the beginning."
+                },
+                "to_date": {
+                    "type": "string",
+                    "description": "End of the date range (ISO 8601, e.g. '2024-03-31'). Omit to search up to the present."
+                },
+                "keywords": {
+                    "type": "string",
+                    "description": "Optional keywords for substring filtering of summary text (case-insensitive)."
+                }
+            },
+            "required": []
+        })
+    }
+
+    async fn run(&self, args: Value, context: &ToolContext<'_>) -> Result<String> {
+        let from_date = args
+            .get("from_date")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let to_date = args
+            .get("to_date")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let keywords = args
+            .get("keywords")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        // Load the persona's cross-thread setting
+        let cross_thread: bool = sqlx::query_as::<_, (bool,)>(
+            "SELECT recall_conversation_cross_thread FROM agent_personas WHERE id = ?",
+        )
+        .bind(context.persona_id)
+        .fetch_optional(context.pool)
+        .await
+        .ok()
+        .flatten()
+        .map(|(v,)| v)
+        .unwrap_or(true); // default: cross-thread enabled
+
+        // Build query dynamically based on filters
+        // Base: join thread_summaries with threads, filter by persona
+        let mut conditions: Vec<String> = Vec::new();
+        let mut bind_values: Vec<String> = Vec::new();
+
+        conditions.push("t.persona_id = ?".to_string());
+        bind_values.push(context.persona_id.to_string());
+
+        if !cross_thread {
+            conditions.push("ts.thread_id = ?".to_string());
+            bind_values.push(context.thread_id.to_string());
+        }
+
+        if !from_date.is_empty() {
+            conditions.push("ts.to_date >= ?".to_string());
+            bind_values.push(from_date.clone());
+        }
+
+        if !to_date.is_empty() {
+            conditions.push("ts.from_date <= ?".to_string());
+            bind_values.push(to_date.clone());
+        }
+
+        if !keywords.is_empty() {
+            conditions.push("LOWER(ts.summary) LIKE ?".to_string());
+            bind_values.push(format!("%{}%", keywords.to_lowercase()));
+        }
+
+        let where_clause = if conditions.is_empty() {
+            String::new()
+        } else {
+            format!("WHERE {}", conditions.join(" AND "))
+        };
+
+        let sql = format!(
+            "SELECT ts.summary, ts.from_date, ts.to_date, t.title
+             FROM thread_summaries ts
+             JOIN threads t ON t.id = ts.thread_id
+             {}
+             ORDER BY ts.to_date DESC
+             LIMIT {}",
+            where_clause, RECALL_CONVERSATION_LIMIT
+        );
+
+        // Execute with dynamic bindings using a raw query
+        let mut query = sqlx::query_as::<_, (String, String, String, String)>(&sql);
+        for val in &bind_values {
+            query = query.bind(val.as_str());
+        }
+
+        let rows = match query.fetch_all(context.pool).await {
+            Ok(r) => r,
+            Err(e) => {
+                warn!(error = %e, "recall_conversation query failed");
+                return Ok("No conversation summaries found for that period.".to_string());
+            }
+        };
+
+        if rows.is_empty() {
+            return Ok("No conversation summaries found for that period.".to_string());
+        }
+
+        let mut lines = Vec::new();
+        for (summary, from_d, to_d, thread_title) in &rows {
+            let from_short = from_d.split('T').next().unwrap_or(from_d);
+            let to_short = to_d.split('T').next().unwrap_or(to_d);
+            lines.push(format!(
+                "[thread: {}] {} – {}\n{}",
+                thread_title, from_short, to_short, summary
+            ));
+        }
+
+        Ok(lines.join("\n\n---\n\n"))
+    }
+}
+
 // ─── Registry factory ─────────────────────────────────────────────────────────
 
 /// Construct the list of all statically-registered built-in tools.
@@ -274,6 +420,7 @@ pub fn built_in_tools() -> Vec<Arc<dyn AgentTool>> {
         Arc::new(SaveMemoryTool),
         Arc::new(RecallMemoryTool),
         Arc::new(DeleteMemoryTool),
+        Arc::new(RecallConversationTool),
     ]
 }
 
@@ -306,6 +453,9 @@ mod tests {
 
         let found = tools.iter().find(|t| t.name() == "delete_memory");
         assert!(found.is_some(), "delete_memory must be in the registry");
+
+        let found = tools.iter().find(|t| t.name() == "recall_conversation");
+        assert!(found.is_some(), "recall_conversation must be in the registry");
 
         let not_found = tools.iter().find(|t| t.name() == "nonexistent_tool");
         assert!(not_found.is_none());

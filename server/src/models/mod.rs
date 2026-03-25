@@ -10,4 +10,5 @@ pub mod provider;
 pub mod routine;
 pub mod routine_execution;
 pub mod thread;
+pub mod thread_summary;
 pub mod user;

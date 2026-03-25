@@ -30,7 +30,9 @@ pub async fn list(State(state): State<Arc<AppState>>) -> AppResult<impl IntoResp
 
     let personas: Vec<AgentPersona> = sqlx::query_as(
         "SELECT id, user_id, name, emoji, avatar_path, system_prompt,
-                default_model, default_provider, is_default, created_at, updated_at
+                default_model, default_provider, is_default,
+                recall_conversation_cross_thread,
+                created_at, updated_at
          FROM agent_personas
          WHERE user_id = ?
          ORDER BY created_at ASC",
@@ -51,7 +53,9 @@ pub async fn get(
 
     let persona: Option<AgentPersona> = sqlx::query_as(
         "SELECT id, user_id, name, emoji, avatar_path, system_prompt,
-                default_model, default_provider, is_default, created_at, updated_at
+                default_model, default_provider, is_default,
+                recall_conversation_cross_thread,
+                created_at, updated_at
          FROM agent_personas
          WHERE id = ? AND user_id = ?",
     )
@@ -89,8 +93,10 @@ pub async fn create(
     sqlx::query(
         "INSERT INTO agent_personas
              (id, user_id, name, emoji, avatar_path, system_prompt,
-              is_default, default_model, default_provider, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+              is_default, default_model, default_provider,
+              recall_conversation_cross_thread,
+              created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&persona.id)
     .bind(&persona.user_id)
@@ -101,6 +107,7 @@ pub async fn create(
     .bind(persona.is_default)
     .bind(&persona.default_model)
     .bind(&persona.default_provider)
+    .bind(persona.recall_conversation_cross_thread)
     .bind(&persona.created_at)
     .bind(&persona.updated_at)
     .execute(&state.pool)
@@ -135,7 +142,9 @@ pub async fn update(
 
     let existing: Option<AgentPersona> = sqlx::query_as(
         "SELECT id, user_id, name, emoji, avatar_path, system_prompt,
-                default_model, default_provider, is_default, created_at, updated_at
+                default_model, default_provider, is_default,
+                recall_conversation_cross_thread,
+                created_at, updated_at
          FROM agent_personas
          WHERE id = ? AND user_id = ?",
     )
@@ -179,6 +188,10 @@ pub async fn update(
         None => existing.default_provider.as_deref(),
     };
 
+    let recall_cross = payload
+        .recall_conversation_cross_thread
+        .unwrap_or(existing.recall_conversation_cross_thread);
+
     let now = chrono::Utc::now()
         .format("%Y-%m-%dT%H:%M:%S%.3fZ")
         .to_string();
@@ -186,7 +199,9 @@ pub async fn update(
     sqlx::query(
         "UPDATE agent_personas
          SET name = ?, emoji = ?, system_prompt = ?,
-             default_model = ?, default_provider = ?, updated_at = ?
+             default_model = ?, default_provider = ?,
+             recall_conversation_cross_thread = ?,
+             updated_at = ?
          WHERE id = ? AND user_id = ?",
     )
     .bind(name)
@@ -194,6 +209,7 @@ pub async fn update(
     .bind(system_prompt)
     .bind(default_model)
     .bind(default_provider)
+    .bind(recall_cross)
     .bind(&now)
     .bind(&id)
     .bind(&user_id)
@@ -210,6 +226,7 @@ pub async fn update(
         default_model: default_model.map(str::to_string),
         default_provider: default_provider.map(str::to_string),
         is_default: existing.is_default,
+        recall_conversation_cross_thread: recall_cross,
         created_at: existing.created_at,
         updated_at: now,
     };
@@ -243,7 +260,9 @@ pub async fn delete(
     // Fetch the persona first so we can enforce the is_default guard.
     let persona: Option<AgentPersona> = sqlx::query_as(
         "SELECT id, user_id, name, emoji, avatar_path, system_prompt,
-                default_model, default_provider, is_default, created_at, updated_at
+                default_model, default_provider, is_default,
+                recall_conversation_cross_thread,
+                created_at, updated_at
          FROM agent_personas
          WHERE id = ? AND user_id = ?",
     )
@@ -298,7 +317,9 @@ pub async fn upload_avatar(
     // Verify the persona exists and belongs to this user
     let persona: Option<AgentPersona> = sqlx::query_as(
         "SELECT id, user_id, name, emoji, avatar_path, system_prompt,
-                default_model, default_provider, is_default, created_at, updated_at
+                default_model, default_provider, is_default,
+                recall_conversation_cross_thread,
+                created_at, updated_at
          FROM agent_personas
          WHERE id = ? AND user_id = ?",
     )
