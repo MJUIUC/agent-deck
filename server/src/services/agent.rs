@@ -760,6 +760,19 @@ async fn generation_loop(
             break 'turn_loop;
         }
 
+        // Emit a paragraph separator into the SSE stream so the streaming
+        // bubble shows a visible gap between the pre-tool text and the next
+        // turn's response — matching the \n\n already written into
+        // final_content above.
+        if !turn.text.is_empty() {
+            state.send_thread_event(
+                thread_id,
+                ThreadEvent::Token {
+                    token: "\n\n".to_string(),
+                },
+            );
+        }
+
         for (tc, result) in turn.tool_calls.iter().zip(tool_results) {
             messages.push(
                 ChatCompletionRequestToolMessageArgs::default()
