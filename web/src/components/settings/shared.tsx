@@ -37,6 +37,7 @@ export type PersonaFormData = {
   system_prompt: string;
   default_provider: string;
   default_model: string;
+  recall_conversation_cross_thread?: boolean;
 };
 
 // ─── Constants ────────────────────────────────────────────────────────────────

@@ -50,6 +50,7 @@ struct AttachedMcpServer {
 // ─── Public entry point ────────────────────────────────────────────────────────
 
 /// Result of a complete generation loop run.
+#[derive(Debug)]
 struct GenerationResult {
     content: String,
     cancelled: bool,
@@ -75,6 +76,8 @@ enum RetryStrategy {
     },
     /// Do not retry; surface the error to the client immediately.
     None,
+    /// Summarize the thread's context window and retry with a reduced message history.
+    SummarizeAndRetry,
 }
 
 /// Choose a retry strategy based on the error returned by the provider.
@@ -111,6 +114,16 @@ fn retry_strategy_for(error: &anyhow::Error) -> RetryStrategy {
             delay: std::time::Duration::from_secs(1),
             max_attempts: 2,
         };
+    }
+
+    // Context-length errors — summarize history and retry
+    if msg.contains("context_length_exceeded")
+        || msg.contains("context window")
+        || msg.contains("maximum context length")
+        || msg.contains("prompt is too long")
+        || msg.contains("context_window_exceeded")
+    {
+        return RetryStrategy::SummarizeAndRetry;
     }
 
     // HTTP 4xx (except 429), parse errors, auth errors — surface immediately.
@@ -238,6 +251,7 @@ async fn run_inner(
     let thread: crate::models::thread::Thread = sqlx::query_as(
         "SELECT id, user_id, persona_id, title, active_model, active_provider,
                 system_prompt_addendum, status, show_tool_activity, show_system_events,
+                summary, summary_updated_at, summary_message_count, auto_summarize,
                 created_at, updated_at
          FROM threads WHERE id = ?",
     )
@@ -251,7 +265,8 @@ async fn run_inner(
 
     let persona: crate::models::agent_persona::AgentPersona = sqlx::query_as(
         "SELECT id, user_id, name, emoji, avatar_path, system_prompt, default_model,
-                default_provider, is_default, created_at, updated_at
+                default_provider, is_default, recall_conversation_cross_thread,
+                created_at, updated_at
          FROM agent_personas WHERE id = ?",
     )
     .bind(persona_id)
@@ -423,9 +438,12 @@ async fn run_inner(
         "SELECT role, content, visibility
          FROM messages
          WHERE thread_id = ? AND visibility = 'visible'
-         ORDER BY created_at ASC",
+         ORDER BY created_at ASC
+         LIMIT ? OFFSET ?",
     )
     .bind(thread_id)
+    .bind(context::DEFAULT_HISTORY_LIMIT as i64)
+    .bind(thread.summary_message_count)
     .fetch_all(&state.pool)
     .await?;
 
@@ -482,16 +500,17 @@ async fn run_inner(
         }
     }
 
-    let assembled = context::assemble(AssemblyInput {
+    let mut assembled = context::assemble(AssemblyInput {
         persona_system_prompt: persona.system_prompt.clone(),
         thread_addendum: thread.system_prompt_addendum.clone(),
-        user_profile_context,
+        user_profile_context: user_profile_context.clone(),
         history,
         history_limit: None,
         user_message: user_message.to_string(),
         is_routine_triggered: is_routine,
         supports_tools: true,
         include_memory: !is_default_persona,
+        conversation_summary: thread.summary.clone(),
         built_in_tool_defs: if is_default_persona {
             vec![]
         } else {
@@ -509,27 +528,119 @@ async fn run_inner(
                 })
                 .collect()
         },
-        mcp_tools: mcp_tool_defs,
+        mcp_tools: mcp_tool_defs.clone(),
     });
 
-    // ── 5. Run the generation loop (handles tool calls inline) ─────────────────
-    let gen_result = generation_loop(
-        state,
-        thread_id,
-        user_id,
-        persona_id,
-        &*provider,
-        &model_id,
-        assembled.messages,
-        assembled.tools,
-        &attached,
-        &cancellation_rx,
-        run_state,
-        turn_id,
-        execution_id.as_deref(),
-        routine_id_opt.as_deref(),
-    )
-    .await?;
+    // ── 5. Generation loop — with reactive summarization on context-length error ──
+    let mut tried_summarize = false;
+    let gen_result = loop {
+        let result = generation_loop(
+            state,
+            thread_id,
+            user_id,
+            persona_id,
+            &*provider,
+            &model_id,
+            assembled.messages.clone(),
+            assembled.tools.clone(),
+            &attached,
+            &cancellation_rx,
+            run_state.clone(),
+            turn_id,
+            execution_id.as_deref(),
+            routine_id_opt.as_deref(),
+        )
+        .await;
+
+        match result {
+            Ok(r) => break r,
+            Err(ref e)
+                if e.to_string().starts_with("CONTEXT_TOO_LONG_RETRY")
+                    && !tried_summarize
+                    && thread.auto_summarize =>
+            {
+                tried_summarize = true;
+                warn!(thread_id = %thread_id, "Reactive summarization triggered");
+                let _ = crate::services::summarization::summarize_thread(state, thread_id).await;
+
+                // Reload thread with updated summary fields
+                let updated: crate::models::thread::Thread = match sqlx::query_as(
+                    "SELECT id, user_id, persona_id, title, active_model, active_provider,
+                            system_prompt_addendum, status, show_tool_activity, show_system_events,
+                            summary, summary_updated_at, summary_message_count, auto_summarize,
+                            created_at, updated_at
+                     FROM threads WHERE id = ?",
+                )
+                .bind(thread_id)
+                .fetch_one(&state.pool)
+                .await
+                {
+                    Ok(t) => t,
+                    Err(e) => {
+                        error!(thread_id=%thread_id, error=%e, "Failed to reload thread after reactive summarization");
+                        return Err(result.unwrap_err());
+                    }
+                };
+
+                // Reload history with new boundary
+                let new_history_rows: Vec<(String, String, String)> = sqlx::query_as(
+                    "SELECT role, content, visibility
+                     FROM messages
+                     WHERE thread_id = ? AND visibility = 'visible'
+                     ORDER BY created_at ASC
+                     LIMIT ? OFFSET ?",
+                )
+                .bind(thread_id)
+                .bind(context::DEFAULT_HISTORY_LIMIT as i64)
+                .bind(updated.summary_message_count)
+                .fetch_all(&state.pool)
+                .await
+                .unwrap_or_default();
+
+                let new_history: Vec<context::HistoryMessage> = new_history_rows
+                    .into_iter()
+                    .map(|(role, content, visibility)| context::HistoryMessage {
+                        role,
+                        content,
+                        visibility,
+                    })
+                    .collect();
+
+                assembled = context::assemble(context::AssemblyInput {
+                    persona_system_prompt: persona.system_prompt.clone(),
+                    thread_addendum: updated.system_prompt_addendum.clone(),
+                    user_profile_context: user_profile_context.clone(),
+                    history: new_history,
+                    history_limit: None,
+                    user_message: user_message.to_string(),
+                    is_routine_triggered: is_routine,
+                    supports_tools: true,
+                    include_memory: !is_default_persona,
+                    conversation_summary: updated.summary.clone(),
+                    built_in_tool_defs: if is_default_persona {
+                        vec![]
+                    } else {
+                        state
+                            .built_in_tools
+                            .iter()
+                            .map(|t| async_openai::types::ChatCompletionTool {
+                                r#type: async_openai::types::ChatCompletionToolType::Function,
+                                function: async_openai::types::FunctionObject {
+                                    name: t.name().to_string(),
+                                    description: Some(t.description().to_string()),
+                                    parameters: Some(t.input_schema()),
+                                    strict: None,
+                                },
+                            })
+                            .collect()
+                    },
+                    mcp_tools: mcp_tool_defs.clone(),
+                });
+                continue;
+            }
+            Err(e) => return Err(e),
+        }
+    };
 
     if gen_result.cancelled {
         info!(thread_id = %thread_id, "Agent run-loop cancelled");
@@ -655,6 +766,25 @@ async fn run_inner(
     }) {
         // No global-stream subscribers — normal when no client is connected.
         tracing::debug!(thread_id = %thread_id, error = %e, "ThreadUpdated broadcast had no receivers");
+    }
+
+    // ── 8. Proactive summarization ────────────────────────────────────────────
+    // After the turn completes, check if enough new messages have accumulated
+    // to warrant a background summarization. Runs inline (fire-and-forget safe).
+    if thread.auto_summarize {
+        let new_total: i64 = sqlx::query_as::<_, (i64,)>(
+            "SELECT COUNT(*) FROM messages WHERE thread_id = ? AND visibility = 'visible'",
+        )
+        .bind(thread_id)
+        .fetch_one(&state.pool)
+        .await
+        .map(|(c,)| c)
+        .unwrap_or(0);
+
+        if (new_total - thread.summary_message_count) >= context::DEFAULT_HISTORY_LIMIT as i64 {
+            let _ = crate::services::summarization::summarize_thread(state, thread_id).await;
+            info!(thread_id = %thread_id, "Proactive summarization complete");
+        }
     }
 
     info!(
@@ -1042,6 +1172,18 @@ async fn stream_one_turn(
                             },
                         );
                         return Err(e);
+                    }
+                    RetryStrategy::SummarizeAndRetry => {
+                        state.send_thread_event(
+                            thread_id,
+                            ThreadEvent::Retry {
+                                attempt: 1,
+                                max_attempts: 1,
+                                reason: "Context too long — summarizing conversation history…"
+                                    .to_string(),
+                            },
+                        );
+                        return Err(anyhow::anyhow!("CONTEXT_TOO_LONG_RETRY: {}", e));
                     }
                 };
 

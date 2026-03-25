@@ -47,7 +47,13 @@ You have persistent long-term memory that spans across all our conversations. Us
 
 **When to delete:** Before saving something you may already know, call recall_memory first to check. If you find a duplicate or outdated entry, delete the old one with delete_memory (using the id: value from the recall result) before saving the updated version. If save_memory reports the store is full, call recall_memory to review your memories for consolidating and deleting entries that are no longer relevant before retrying.
 
-**Do not** tell me every time you save, recall, or delete a memory. Use memory silently unless I specifically ask what you remember about something."#;
+**Do not** tell me every time you save, recall, or delete a memory. Use memory silently unless I specifically ask what you remember about something.
+
+## Conversation Recall
+
+You also have access to a `recall_conversation` tool that lets you look up summaries of past conversations by date range.
+
+**`recall_memory` vs `recall_conversation`:** Use `recall_memory` for facts, preferences, names, and things the user has told you directly (e.g. "what's my dog's name?", "what stack do I use?"). Use `recall_conversation` when the user references a past discussion or a specific time period (e.g. "remember when we talked about X last week?", "what did we decide about the migration in March?"). When the intent is ambiguous, you may call both. They are complementary — facts live in memory, narrative context lives in conversation summaries."#;
 
 // ─── Input types ──────────────────────────────────────────────────────────────
 
@@ -96,6 +102,10 @@ pub struct AssemblyInput {
     /// MCP tools already namespaced (tag__tool_name).
     /// Pass an empty vec when none are attached.
     pub mcp_tools: Vec<async_openai::types::ChatCompletionTool>,
+    /// Optional rolling conversation summary injected between the thread addendum
+    /// and the message history. Present when the thread has been summarized at
+    /// least once and `auto_summarize` is enabled.
+    pub conversation_summary: Option<String>,
 }
 
 // ─── Output type ──────────────────────────────────────────────────────────────
@@ -168,6 +178,25 @@ pub fn assemble(input: AssemblyInput) -> AssembledContext {
                     .content(trimmed.to_string())
                     .build()
                     .expect("addendum message build")
+                    .into(),
+            );
+        }
+    }
+
+    // ── 2.5. System message: conversation summary (optional) ──────────────────
+    if let Some(ref summary) = input.conversation_summary {
+        let trimmed = summary.trim();
+        if !trimmed.is_empty() {
+            messages.push(
+                ChatCompletionRequestSystemMessageArgs::default()
+                    .content(format!(
+                        "## Conversation Summary\n\n\
+                         The following is a summary of the conversation history up to this point. \
+                         The most recent messages follow below.\n\n{}",
+                        trimmed
+                    ))
+                    .build()
+                    .expect("summary message build")
                     .into(),
             );
         }
@@ -378,6 +407,7 @@ mod tests {
             include_memory: true,
             built_in_tool_defs: built_in_tool_defs_for_test(),
             mcp_tools: vec![],
+            conversation_summary: None,
         }
     }
 
@@ -701,12 +731,12 @@ mod tests {
     }
 
     #[test]
-    fn exactly_two_built_in_tools_in_registry() {
+    fn exactly_four_built_in_tools_in_registry() {
         let defs = built_in_tool_defs_for_test();
         assert_eq!(
             defs.len(),
-            3,
-            "expected exactly save_memory, recall_memory, and delete_memory in the built-in registry"
+            4,
+            "expected exactly save_memory, recall_memory, delete_memory, and recall_conversation in the built-in registry"
         );
     }
 
@@ -796,6 +826,7 @@ mod tests {
             include_memory: true,
             built_in_tool_defs: built_in_tool_defs_for_test(),
             mcp_tools: vec![],
+            conversation_summary: None,
         };
 
         let ctx = assemble(input);
@@ -824,7 +855,7 @@ mod tests {
         );
 
         // Tools
-        assert_eq!(ctx.tools.len(), 3);
+        assert_eq!(ctx.tools.len(), 4);
     }
 
     #[test]
@@ -841,6 +872,7 @@ mod tests {
             include_memory: false,
             built_in_tool_defs: built_in_tool_defs_for_test(),
             mcp_tools: vec![],
+            conversation_summary: None,
         };
         let ctx = assemble(input);
         // System message must not contain memory instructions
@@ -890,6 +922,7 @@ mod tests {
             include_memory: false,
             built_in_tool_defs: built_in_tool_defs_for_test(),
             mcp_tools: vec![mcp_tool],
+            conversation_summary: None,
         };
         let ctx = assemble(input);
         assert_eq!(
@@ -943,5 +976,76 @@ mod tests {
         input.user_profile_context = None;
         let ctx = assemble(input);
         assert_eq!(ctx.messages.len(), 2); // [system, user]
+    }
+
+    // ── Conversation summary injection ────────────────────────────────────────
+
+    #[test]
+    fn conversation_summary_injected_between_addendum_and_history() {
+        let mut input = basic_input("recent message");
+        input.thread_addendum = Some("Extra instructions.".to_string());
+        input.conversation_summary = Some("We discussed Rust programming basics.".to_string());
+        input.history = vec![visible("user", "recent message")];
+
+        let ctx = assemble(input);
+        // Find the positions of system messages
+        let system_positions: Vec<usize> = ctx
+            .messages
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| is_system(m))
+            .map(|(i, _)| i)
+            .collect();
+        // There should be: persona(0), addendum(1), summary(2), history starts after
+        assert!(
+            system_positions.len() >= 3,
+            "should have at least 3 system messages"
+        );
+    }
+
+    #[test]
+    fn conversation_summary_injected_without_addendum() {
+        let mut input = basic_input("hello");
+        input.thread_addendum = None;
+        input.conversation_summary = Some("We discussed topic X.".to_string());
+
+        let ctx = assemble(input);
+        // Should have persona system msg + summary system msg + user msg
+        let system_count = ctx.messages.iter().filter(|m| is_system(m)).count();
+        assert!(
+            system_count >= 2,
+            "should have persona + summary system messages"
+        );
+    }
+
+    #[test]
+    fn empty_conversation_summary_not_injected() {
+        let mut input = basic_input("hello");
+        input.conversation_summary = Some("   ".to_string());
+
+        let ctx = assemble(input);
+        let system_count = ctx.messages.iter().filter(|m| is_system(m)).count();
+        // Only the persona system message (no addendum, no summary)
+        assert_eq!(system_count, 1);
+    }
+
+    #[test]
+    fn none_conversation_summary_not_injected() {
+        let mut input = basic_input("hello");
+        input.conversation_summary = None;
+
+        let ctx = assemble(input);
+        let system_count = ctx.messages.iter().filter(|m| is_system(m)).count();
+        assert_eq!(system_count, 1);
+    }
+
+    #[test]
+    fn recall_conversation_tool_is_present() {
+        let tools = crate::services::tools::built_in_tools();
+        let found = tools.iter().find(|t| t.name() == "recall_conversation");
+        assert!(
+            found.is_some(),
+            "recall_conversation must be in the registry"
+        );
     }
 }
