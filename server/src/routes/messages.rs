@@ -48,6 +48,7 @@ pub(crate) async fn verify_thread_ownership(
 pub struct ListMessagesQuery {
     pub limit: Option<i64>,
     pub before: Option<String>,
+    pub include_hidden: Option<bool>,
 }
 
 /// GET /api/threads/:id/messages
@@ -65,6 +66,13 @@ pub async fn list(
 
     let limit = query.limit.unwrap_or(50).clamp(1, 200);
 
+    let include_hidden = query.include_hidden.unwrap_or(false);
+    let visibility_filter = if include_hidden {
+        "(visibility = 'visible' OR (visibility = 'hidden' AND source = 'tool'))"
+    } else {
+        "visibility = 'visible'"
+    };
+
     let messages: Vec<Message> = if let Some(before_id) = &query.before {
         // Cursor pagination: get messages older than the cursor message
         let cursor_time: Option<(String,)> =
@@ -76,14 +84,15 @@ pub async fn list(
 
         match cursor_time {
             Some((cursor_created_at,)) => {
-                sqlx::query_as(
+                sqlx::query_as::<_, Message>(&format!(
                     "SELECT id, thread_id, role, content, source, routine_id, visibility,
                             execution_id, event_type, stopped, created_at
                      FROM messages
-                     WHERE thread_id = ? AND created_at < ? AND visibility = 'visible'
+                     WHERE thread_id = ? AND created_at < ? AND {}
                      ORDER BY created_at DESC
                      LIMIT ?",
-                )
+                    visibility_filter
+                ))
                 .bind(&thread_id)
                 .bind(&cursor_created_at)
                 .bind(limit)
@@ -103,19 +112,20 @@ pub async fn list(
         }
     } else {
         // No cursor: return the most recent `limit` messages, oldest-first
-        sqlx::query_as(
+        sqlx::query_as::<_, Message>(&format!(
             "SELECT id, thread_id, role, content, source, routine_id, visibility,
                     execution_id, event_type, stopped, created_at
              FROM (
                  SELECT id, thread_id, role, content, source, routine_id, visibility,
                         execution_id, event_type, stopped, created_at
                  FROM messages
-                 WHERE thread_id = ? AND visibility = 'visible'
+                 WHERE thread_id = ? AND {}
                  ORDER BY created_at DESC
                  LIMIT ?
              )
              ORDER BY created_at ASC",
-        )
+            visibility_filter
+        ))
         .bind(&thread_id)
         .bind(limit)
         .fetch_all(&state.pool)

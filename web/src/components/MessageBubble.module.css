@@ -321,3 +321,56 @@
         opacity: 1;
     }
 }
+
+/* ── Tool activity ── */
+.toolRow {
+    display: flex;
+    padding: 2px 16px;
+}
+
+.toolBubble {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    padding: 8px 12px;
+    max-width: 85%;
+    font-size: 11px;
+}
+
+.toolLabel {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 4px;
+}
+
+.toolContent {
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+.toolContent p {
+    margin: 0 0 4px 0;
+}
+
+.toolContent pre {
+    background: var(--bg-secondary);
+    border-radius: 4px;
+    padding: 6px 8px;
+    overflow-x: auto;
+    font-size: 10px;
+    margin: 4px 0 0 0;
+}
+
+.toolContent code {
+    font-family: monospace;
+    font-size: 10px;
+}
+
+.toolMeta {
+    font-size: 10px;
+    color: var(--text-tertiary);
+    margin-top: 4px;
+}

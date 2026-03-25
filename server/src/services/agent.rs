@@ -718,6 +718,16 @@ async fn generation_loop(
             break 'turn_loop;
         }
 
+        // Fold any text the model produced before requesting tools into the
+        // running transcript. This ensures the final persisted message
+        // contains the agent's full thought process, not just the last turn.
+        if !turn.text.is_empty() {
+            if !final_content.is_empty() {
+                final_content.push_str("\n\n");
+            }
+            final_content.push_str(&turn.text);
+        }
+
         tool_rounds += 1;
 
         let pending: Vec<PendingToolCall> = turn
@@ -1280,7 +1290,7 @@ async fn execute_tool_calls(
                 persona_id,
                 thread_id,
             };
-            match tool.run(args, &context).await {
+            let output = match tool.run(args, &context).await {
                 Ok(r) => {
                     info!(thread_id = %thread_id, tool = %tc.name,
                         result_len = r.len(), "execute_tool_calls: built-in tool returned result");
@@ -1290,7 +1300,33 @@ async fn execute_tool_calls(
                     warn!(tool = %tc.name, error = %e, "Built-in tool execution failed; returning error to model");
                     format!("Tool execution failed: {}", e)
                 }
+            };
+
+            // Persist hidden call + result so show_tool_activity can surface them.
+            if let Some(id) = persist_tool_message(
+                &state.pool,
+                thread_id,
+                "assistant",
+                &format!("**Tool call:** `{}`\n```json\n{}\n```", tc.name, tc.args),
+                execution_id,
+            )
+            .await
+            {
+                run_context.hidden_message_ids.push(id);
             }
+            if let Some(id) = persist_tool_message(
+                &state.pool,
+                thread_id,
+                "tool",
+                &format!("**Tool result** (`{}`):\n{}", tc.name, output),
+                execution_id,
+            )
+            .await
+            {
+                run_context.hidden_message_ids.push(id);
+            }
+
+            output
         } else {
             // ── Fall through to MCP routing ────────────────────────────────────
             let pending = PendingToolCall {

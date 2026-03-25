@@ -31,11 +31,36 @@ function AgentAvatar({
   );
 }
 
+export function ToolActivityBubble({ message }: { message: Message }) {
+  const isCall = message.role === "assistant";
+  const timeStr = formatMessageTime(message.created_at);
+
+  return (
+    <div className={styles.toolRow}>
+      <div className={styles.toolBubble}>
+        <div className={styles.toolLabel}>
+          {isCall ? "⚙ Tool call" : "⚙ Tool result"}
+        </div>
+        <div className={styles.toolContent}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            {message.content}
+          </ReactMarkdown>
+        </div>
+        <div className={styles.toolMeta}>{timeStr}</div>
+      </div>
+    </div>
+  );
+}
+
 export function MessageBubble({
   message,
   personaEmoji = "🤖",
   personaName = "Agent",
 }: MessageBubbleProps) {
+  if (message.source === "tool") {
+    return <ToolActivityBubble message={message} />;
+  }
+
   const isUser = message.role === "user";
   const isRoutine = message.source === "routine";
 

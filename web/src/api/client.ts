@@ -280,11 +280,12 @@ export const threadsApi = {
 export const messagesApi = {
   list(
     threadId: string,
-    opts: { limit?: number; before?: string } = {},
+    opts: { limit?: number; before?: string; include_hidden?: boolean } = {},
   ): Promise<{ data: Message[] }> {
     const params = new URLSearchParams();
     if (opts.limit != null) params.set("limit", String(opts.limit));
     if (opts.before) params.set("before", opts.before);
+    if (opts.include_hidden) params.set("include_hidden", "true");
     const qs = params.toString();
     return apiFetch(`/api/threads/${threadId}/messages${qs ? `?${qs}` : ""}`);
   },

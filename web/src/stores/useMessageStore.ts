@@ -62,7 +62,10 @@ const storeCreator: StateCreator<MessageStore> = (set, get) => ({
 
   loadMessages: async (threadId) => {
     try {
-      const res = await messagesApi.list(threadId, { limit: 100 });
+      const res = await messagesApi.list(threadId, {
+        limit: 100,
+        include_hidden: true,
+      });
       set((state) => {
         const thread = getThread(state.threads, threadId);
         return {
