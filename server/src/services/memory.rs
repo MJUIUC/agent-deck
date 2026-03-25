@@ -83,6 +83,48 @@ pub async fn save_memory(
 }
 
 /// Recall memories using FTS5 full-text search.
+/// Transform a raw user/model query string into a FTS5 OR expression with
+/// prefix matching on each token.
+///
+/// Rules:
+/// - If the query already contains explicit FTS5 operators (OR, AND, NOT, `"`,
+///   `*`, `-`) it is returned unchanged so callers can use advanced syntax.
+/// - Otherwise each whitespace-separated token is suffixed with `*` (prefix
+///   match) and joined with ` OR `.  This means a multi-word query like
+///   "dog name" becomes `dog* OR name*`, which surfaces any entry that
+///   contains *either* word rather than requiring all of them.
+///
+/// Examples:
+///   "typescript" → "typescript*"
+///   "dog name"   → "dog* OR name*"
+///   "user OR pet" → "user OR pet"   (unchanged — already has operator)
+fn build_fts_query(query: &str) -> String {
+    // Detect explicit FTS5 operator usage — leave those alone.
+    let has_operators = query.contains(" OR ")
+        || query.contains(" AND ")
+        || query.contains(" NOT ")
+        || query.contains('"')
+        || query.contains('*')
+        || query.contains('-');
+
+    if has_operators {
+        return query.to_string();
+    }
+
+    // Split on whitespace, drop empty tokens, append `*` to each.
+    let terms: Vec<String> = query
+        .split_whitespace()
+        .filter(|t| !t.is_empty())
+        .map(|t| format!("{}*", t))
+        .collect();
+
+    if terms.is_empty() {
+        return query.to_string();
+    }
+
+    terms.join(" OR ")
+}
+
 /// Results are returned in relevance order (FTS rank).
 #[allow(dead_code)]
 pub async fn recall_memory(
@@ -92,6 +134,8 @@ pub async fn recall_memory(
     query: &str,
     limit: i64,
 ) -> Result<Vec<MemoryEntry>> {
+    let fts_query = build_fts_query(query);
+
     let rows = sqlx::query_as::<_, (String, String, Option<String>, Option<String>, String)>(
         "SELECT m.id, m.content, m.thread_id, t.title, m.created_at
          FROM memory m
@@ -103,7 +147,7 @@ pub async fn recall_memory(
          ORDER BY rank
          LIMIT ?",
     )
-    .bind(query)
+    .bind(fts_query)
     .bind(user_id)
     .bind(persona_id)
     .bind(limit)
@@ -362,6 +406,57 @@ mod tests {
             count_after.0, 500,
             "entry count must not change when cap is reached (no eviction)"
         );
+    }
+
+    // ── build_fts_query unit tests ────────────────────────────────────────────
+
+    #[test]
+    fn single_keyword_gets_prefix_wildcard() {
+        assert_eq!(build_fts_query("typescript"), "typescript*");
+    }
+
+    #[test]
+    fn multi_word_becomes_or_with_wildcards() {
+        assert_eq!(build_fts_query("dog name"), "dog* OR name*");
+    }
+
+    #[test]
+    fn three_words_become_or_chain() {
+        assert_eq!(
+            build_fts_query("deadline march project"),
+            "deadline* OR march* OR project*"
+        );
+    }
+
+    #[test]
+    fn explicit_or_operator_passes_through_unchanged() {
+        assert_eq!(build_fts_query("user OR pet"), "user OR pet");
+    }
+
+    #[test]
+    fn explicit_and_operator_passes_through_unchanged() {
+        assert_eq!(
+            build_fts_query("user AND typescript"),
+            "user AND typescript"
+        );
+    }
+
+    #[test]
+    fn quoted_phrase_passes_through_unchanged() {
+        assert_eq!(
+            build_fts_query("\"prefers typescript\""),
+            "\"prefers typescript\""
+        );
+    }
+
+    #[test]
+    fn existing_wildcard_passes_through_unchanged() {
+        assert_eq!(build_fts_query("type*"), "type*");
+    }
+
+    #[test]
+    fn extra_whitespace_is_collapsed() {
+        assert_eq!(build_fts_query("dog  name"), "dog* OR name*");
     }
 
     /// FTS search must return entries whose content matches the query.

@@ -4,6 +4,8 @@ import path from "path";
 import http from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
+const apiTarget = process.env.API_TARGET || "http://localhost:7474";
+
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
@@ -27,7 +29,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       "/api": {
-        target: "http://localhost:7474",
+        target: apiTarget,
         changeOrigin: true,
         // Use a no-keepalive agent so every proxied request gets its own TCP
         // connection to the Rust server. Without this, the persistent SSE
@@ -66,7 +68,7 @@ export default defineConfig({
         },
       },
       "/health": {
-        target: "http://localhost:7474",
+        target: apiTarget,
         changeOrigin: true,
       },
     },

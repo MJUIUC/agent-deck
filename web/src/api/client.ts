@@ -57,17 +57,37 @@ export interface UpdateCredentialPayload {
   password?: string;
 }
 
+// Get auth token from localStorage or session
+function getAuthToken(): string | null {
+  try {
+    // Check localStorage first (set after successful login)
+    const token = localStorage.getItem("agent_deck_auth_token");
+    if (token) return token;
+  } catch {
+    // localStorage might not be available
+  }
+  return null;
+}
+
 // Base fetch helper — throws on non-OK responses with the error body
 async function apiFetch<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(options.headers ?? {}),
+  } as Record<string, string>;
+
+  // Include auth token if available
+  const token = getAuthToken();
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
   const res = await fetch(path, {
     ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers ?? {}),
-    },
+    headers,
   });
 
   if (!res.ok) {
@@ -480,6 +500,30 @@ export const authApi = {
     data: { setup_complete: boolean; port: number; version: string };
   }> {
     return apiFetch("/api/config");
+  },
+
+  // Login with token (for mobile/remote access)
+  login(token: string): void {
+    try {
+      localStorage.setItem("agent_deck_auth_token", token);
+    } catch {
+      // localStorage might not be available, that's ok
+      console.warn("Could not store auth token in localStorage");
+    }
+  },
+
+  // Get stored auth token
+  getToken(): string | null {
+    return getAuthToken();
+  },
+
+  // Clear auth token (logout)
+  logout(): void {
+    try {
+      localStorage.removeItem("agent_deck_auth_token");
+    } catch {
+      // localStorage might not be available
+    }
   },
 };
 
