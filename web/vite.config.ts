@@ -48,6 +48,10 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    // Allow access via Tailscale hostnames (*.ts.net) and any other
+    // external host — needed when using `tailscale serve` to proxy the
+    // dev server over HTTPS to a phone or other device on the tailnet.
+    allowedHosts: true,
     proxy: {
       "/api": {
         target: apiTarget,
