@@ -779,7 +779,7 @@ Acceptance criteria:
 
 ---
 
-**Story 5.7 — User profile**
+**Story 5.7 — User profile** ✅
 Branch: `feature/phase5-user-profile`
 
 Implement the user profile feature per section 7.11.
@@ -803,21 +803,45 @@ Add a Profile section to Settings → General. All fields are edit-in-place (blu
 Add the informational hint below the system prompt textarea in the persona form per section 7.11.7.
 
 Acceptance criteria:
-- [ ] Migration adds all profile columns to `users` with NULL defaults
-- [ ] `GET /api/profile` returns all fields; empty fields are `null`
-- [ ] `PUT /api/profile` updates only the provided fields; sending `null` clears the field
-- [ ] `profile_updated_at` is updated on every PUT
-- [ ] Context block is injected between persona prompt and thread addendum for non-default personas
-- [ ] Context block is NOT injected when only `display_name` is set (all other fields null/empty)
-- [ ] Context block is NOT injected for the Default persona
-- [ ] Only non-empty fields appear in the injected block
-- [ ] Timezone auto-detected from browser in setup wizard and settings
-- [ ] "About You" step is skippable from the setup wizard
-- [ ] Profile section appears in Settings → General
-- [ ] 500-character limit enforced on `about` field (server-side truncation, client-side counter)
-- [ ] Persona settings hint appears below the system prompt textarea
-- [ ] Unit tests for context block formatting (all fields, partial fields, no fields)
-- [ ] Unit tests for partial PUT update logic
+- [x] Migration adds all profile columns to `users` with NULL defaults
+- [x] `GET /api/profile` returns all fields; empty fields are `null`
+- [x] `PUT /api/profile` updates only the provided fields; sending `null` clears the field
+- [x] `profile_updated_at` is updated on every PUT
+- [x] Context block is injected between persona prompt and thread addendum for non-default personas
+- [x] Context block is NOT injected when only `display_name` is set (all other fields null/empty)
+- [x] Context block is NOT injected for the Default persona
+- [x] Only non-empty fields appear in the injected block
+- [x] Timezone auto-detected from browser in setup wizard and settings
+- [x] "About You" step is skippable from the setup wizard
+- [x] Profile section appears in Settings → General
+- [x] 500-character limit enforced on `about` field (server-side truncation, client-side counter)
+- [x] Persona settings hint appears below the system prompt textarea
+- [x] Unit tests for context block formatting (all fields, partial fields, no fields)
+- [x] Unit tests for partial PUT update logic
+
+### As-built notes (Story 5.7)
+
+- **Migration 009** adds 7 nullable `TEXT` columns to `users`: `pronouns`, `role`, `organization`, `location`, `timezone`, `about`, `profile_updated_at`. All default to `NULL` — existing users are unaffected.
+
+- **Partial-update pattern:** `PUT /api/profile` deserializes the body as `serde_json::Value` and checks each key explicitly — absent keys keep the current DB value, `null` clears the field, a string sets it (trimmed; empty string treated as null). This distinguishes "not sent" from "sent as null" without requiring `Option<Option<T>>` or a custom deserializer.
+
+- **`about` truncation:** Enforced server-side at 500 characters (char boundary, not byte boundary). Client-side counter in both the setup wizard step and the Settings profile card prevents the user reaching the limit accidentally.
+
+- **Context injection gating:** `format_user_profile_context()` in `agent.rs` builds the `## About the User` block. Returns `None` when only `display_name` is set — the name line alone is not worth injecting since the model already sees the user's name from conversation. Injection is also skipped entirely for the Default persona, consistent with memory and all other context enrichments.
+
+- **Setup wizard step numbering:** The new "About You" step is inserted as step 3, shifting Provider to 4, Persona to 5, and Done to 6. `STEPS` array updated accordingly. Profile is saved best-effort after `setupApi.complete()` in `handleComplete` — failure is non-fatal and the user can fill it in via Settings.
+
+- **Timezone detection:** Uses a lazy `useState` initializer (`() => Intl.DateTimeFormat().resolvedOptions().timeZone`) in `Step2bAboutYou` to avoid the synchronous-setState-in-effect lint warning. Settings profile card uses `useMemo` for the same detection.
+
+- **Bug fix (tool message freeze):** `ToolActivityBubble` now truncates content exceeding 4,000 characters before passing it to ReactMarkdown. Large MCP tool payloads (API responses, file listings) were causing the markdown parser to hang indefinitely.
+
+- **Bug fix (message list error boundary):** `MessageListErrorBoundary` (React class component) wraps the entire message list in `ChatView`. A render error in any single message now shows a recoverable error panel instead of freezing the whole app.
+
+- **Bug fix (MCP live status):** `mcp_status_changed` global SSE events were being emitted by the server but ignored by the client. Added handler in `useSseStore` that writes to `lastMcpStatusChange` state. `ConfigPane` subscribes and updates the status badge in-place; auto-loads tools when status transitions to `connected`.
+
+- **5.8 spec updated:** Story 5.8 redesigned during 5.7 planning to include a `thread_summaries` append-only log table, a `recall_conversation` built-in tool (cross-thread by default, per-persona toggle), and `MEMORY_INSTRUCTIONS` guidance distinguishing `recall_memory` (facts) from `recall_conversation` (narrative/history). Migration renumbered to 010.
+
+- **Test count:** 262 passing (unchanged from Story 5.6 — new tests added for profile context formatting, partial PUT logic, and endpoint integration).
 
 ---
 
