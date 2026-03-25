@@ -3,15 +3,69 @@ import { RefreshCw, ExternalLink, CheckCircle2, Loader2 } from "lucide-react";
 import { copilotApi } from "@/api/client";
 import { Btn, type CopilotAuthStep } from "./shared";
 
+// ── localStorage persistence for pending device-code auth ─────────────────────
+//
+// When the user taps the GitHub link, iOS suspends the PWA and may fully reload
+// it on return.  We persist the in-flight device code so the component can
+// resume polling immediately on remount instead of showing "idle".
+
+const PENDING_AUTH_KEY = "agent-deck:copilot-pending-auth";
+
+interface PendingAuth {
+  deviceCode: string;
+  userCode: string;
+  verificationUri: string;
+  expiresAt: number;
+  intervalMs: number;
+}
+
+function loadPendingAuth(): PendingAuth | null {
+  try {
+    const raw = localStorage.getItem(PENDING_AUTH_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw) as PendingAuth;
+    // Discard if already expired
+    if (Date.now() > data.expiresAt) {
+      localStorage.removeItem(PENDING_AUTH_KEY);
+      return null;
+    }
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+function savePendingAuth(data: PendingAuth) {
+  try {
+    localStorage.setItem(PENDING_AUTH_KEY, JSON.stringify(data));
+  } catch {
+    // ignore — storage quota or private browsing
+  }
+}
+
+function clearPendingAuth() {
+  try {
+    localStorage.removeItem(PENDING_AUTH_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
 /**
  * Inline GitHub device-auth flow widget.
  * Checks auth status on mount, then allows the user to connect (or re-connect)
  * their GitHub account via the Copilot device flow.
  *
  * Completely self-contained — owns all auth state and polling logic.
+ *
+ * PWA resilience: the pending device code is written to localStorage so that
+ * if iOS reloads the app while the user is on the GitHub auth page, polling
+ * resumes automatically on remount.
  */
 export function CopilotAuthSection() {
-  const [auth, setAuth] = useState<CopilotAuthStep>({ stage: "idle" });
+  const [auth, setAuth] = useState<CopilotAuthStep>({ stage: "checking" });
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Keep a ref so the polling interval callback always reads the latest stage
@@ -28,27 +82,83 @@ export function CopilotAuthSection() {
     }
   }, []);
 
-  // Check whether a token is already stored on mount
+  // Start (or resume) polling with a given device code.
+  const startPolling = useCallback(
+    (deviceCode: string, intervalMs: number) => {
+      stopPolling();
+      pollRef.current = setInterval(async () => {
+        const current = authRef.current;
+        if (current.stage !== "authorizing") {
+          stopPolling();
+          return;
+        }
+        if (Date.now() > current.expiresAt) {
+          stopPolling();
+          clearPendingAuth();
+          setAuth({
+            stage: "error",
+            message: "Authentication timed out. Please try again.",
+          });
+          return;
+        }
+        try {
+          const pollRes = await copilotApi.authPoll(deviceCode);
+          if (pollRes.data.authenticated) {
+            stopPolling();
+            clearPendingAuth();
+            setAuth({ stage: "authenticated" });
+          }
+          // "authorization_pending" or "slow_down" — keep waiting
+        } catch {
+          // network hiccup — keep polling
+        }
+      }, intervalMs);
+    },
+    [stopPolling],
+  );
+
+  // On mount: check token first, then resume any pending device-code flow.
   useEffect(() => {
     let cancelled = false;
-    setAuth({ stage: "checking" });
+
     copilotApi
       .authStatus()
       .then((res) => {
         if (cancelled) return;
-        setAuth(
-          res.data.authenticated
-            ? { stage: "authenticated" }
-            : { stage: "idle" },
-        );
+
+        if (res.data.authenticated) {
+          clearPendingAuth();
+          setAuth({ stage: "authenticated" });
+          return;
+        }
+
+        // Not yet authenticated — check for a pending device code to resume.
+        // This handles the case where the user left the PWA to visit the
+        // GitHub device-auth page and iOS reloaded the app on return.
+        const pending = loadPendingAuth();
+        if (pending) {
+          const resumedState: CopilotAuthStep = {
+            stage: "authorizing",
+            userCode: pending.userCode,
+            verificationUri: pending.verificationUri,
+            deviceCode: pending.deviceCode,
+            expiresAt: pending.expiresAt,
+          };
+          setAuth(resumedState);
+          authRef.current = resumedState;
+          startPolling(pending.deviceCode, pending.intervalMs);
+        } else {
+          setAuth({ stage: "idle" });
+        }
       })
       .catch(() => {
         if (!cancelled) setAuth({ stage: "idle" });
       });
+
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [startPolling]);
 
   // Clean up polling on unmount
   useEffect(() => () => stopPolling(), [stopPolling]);
@@ -60,6 +170,7 @@ export function CopilotAuthSection() {
       const res = await copilotApi.authStart();
       const d = res.data;
       const expiresAt = Date.now() + d.expires_in * 1000;
+      const intervalMs = (d.interval ?? 5) * 1000;
 
       const authorizingState: CopilotAuthStep = {
         stage: "authorizing",
@@ -68,38 +179,20 @@ export function CopilotAuthSection() {
         deviceCode: d.device_code,
         expiresAt,
       };
+
+      // Persist before setting state so the data is available if iOS suspends
+      // the app the moment the user taps the verification link.
+      savePendingAuth({
+        deviceCode: d.device_code,
+        userCode: d.user_code,
+        verificationUri: d.verification_uri,
+        expiresAt,
+        intervalMs,
+      });
+
       setAuth(authorizingState);
       authRef.current = authorizingState;
-
-      const intervalMs = (d.interval ?? 5) * 1000;
-      pollRef.current = setInterval(async () => {
-        const current = authRef.current;
-        // Stop if we've already moved out of the authorizing stage
-        if (current.stage !== "authorizing") {
-          stopPolling();
-          return;
-        }
-
-        if (Date.now() > current.expiresAt) {
-          stopPolling();
-          setAuth({
-            stage: "error",
-            message: "Authentication timed out. Please try again.",
-          });
-          return;
-        }
-
-        try {
-          const pollRes = await copilotApi.authPoll(current.deviceCode);
-          if (pollRes.data.authenticated) {
-            stopPolling();
-            setAuth({ stage: "authenticated" });
-          }
-          // "authorization_pending" or "slow_down" — keep waiting
-        } catch {
-          // network hiccup — keep polling
-        }
-      }, intervalMs);
+      startPolling(d.device_code, intervalMs);
     } catch (err) {
       setAuth({
         stage: "error",
@@ -109,7 +202,7 @@ export function CopilotAuthSection() {
             : "Failed to start authentication.",
       });
     }
-  }, [stopPolling]);
+  }, [stopPolling, startPolling]);
 
   return (
     <div
