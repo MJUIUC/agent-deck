@@ -15,7 +15,7 @@ interface ChatHeaderProps {
 let cachedProviders: Provider[] | null = null;
 let cachedModelsByProvider: Record<string, Model[]> = {};
 
-async function resolveDisplayNames(
+export async function resolveDisplayNames(
   providerUuid: string | null,
   modelUuid: string | null,
 ): Promise<{ providerName: string | null; modelName: string | null }> {

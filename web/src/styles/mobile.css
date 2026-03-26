@@ -1,0 +1,76 @@
+/* ── Safe-area inset custom properties ──────────────────────────────────── */
+/*
+ * These mirror the native env() inset values as CSS custom properties so that
+ * JS code (and any component that cannot use env() directly) can still read
+ * the values via getComputedStyle / CSS variables.
+ *
+ * Usage in CSS:  padding-top: var(--safe-area-inset-top);
+ * Usage in JS:   getComputedStyle(el).getPropertyValue('--safe-area-inset-top')
+ */
+
+:root {
+    --safe-area-inset-top: env(safe-area-inset-top);
+    --safe-area-inset-bottom: env(safe-area-inset-bottom);
+    --safe-area-inset-left: env(safe-area-inset-left);
+    --safe-area-inset-right: env(safe-area-inset-right);
+}
+
+/* ── Tap highlight removal ───────────────────────────────────────────────── */
+/*
+ * Removes the semi-transparent tap flash that WebKit/Blink overlays on
+ * tappable elements. Keeps interactions feeling native on iOS / Android.
+ */
+
+* {
+    -webkit-tap-highlight-color: transparent;
+}
+
+/* ── Minimum tap target ──────────────────────────────────────────────────── */
+/*
+ * Apple HIG / Material guidelines both recommend a minimum interactive area
+ * of 44 × 44 px. Apply .tap-target to any element that needs to meet this
+ * threshold without visually enlarging the element itself.
+ */
+
+.tap-target {
+    min-height: 44px;
+    min-width: 44px;
+}
+
+/* ── Momentum scrolling ──────────────────────────────────────────────────── */
+/*
+ * Enables native-feeling inertial (momentum) scrolling inside a container on
+ * iOS Safari. Also ensures the element scrolls vertically in all browsers.
+ */
+
+.scroll-momentum {
+    -webkit-overflow-scrolling: touch;
+    overflow-y: auto;
+}
+
+/* ── Full-bleed flex column fill ─────────────────────────────────────────── */
+/*
+ * Convenience utility for full-screen mobile panels that must stretch to fill
+ * their parent and stack children vertically (e.g. header + content + footer).
+ */
+
+.mobile-fill {
+    height: 100%;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+/* ── Safe area padding utilities ─────────────────────────────────────────── */
+/*
+ * Apply these to the outermost elements so that content is never obscured by
+ * the device status bar (top) or the home indicator / gesture bar (bottom).
+ */
+
+.safe-top {
+    padding-top: env(safe-area-inset-top);
+}
+
+.safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+}

@@ -1,0 +1,92 @@
+/* ─── Root container ─────────────────────────────────────────────────────────── */
+
+.mobileLayout {
+    /* 100vh fallback for browsers that don't support dvh */
+    height: 100vh;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    overflow: hidden;
+    position: relative;
+}
+
+/* ─── Content area ───────────────────────────────────────────────────────────── */
+
+.content {
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+}
+
+/* ─── Bottom tab bar ─────────────────────────────────────────────────────────── */
+
+.tabBar {
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    flex-shrink: 0;
+    /* Fixed height + safe area for home indicator (iPhone X+) */
+    min-height: 83px;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border-subtle);
+}
+
+/* ─── Individual tab button ──────────────────────────────────────────────────── */
+
+.tabItem {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    /* Minimum accessible touch target */
+    min-height: 44px;
+    padding: 10px 4px 8px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: var(--text-tertiary);
+    position: relative;
+    -webkit-tap-highlight-color: transparent;
+    transition: color 0.15s ease, opacity 0.1s ease;
+    /* Ensure the dot area doesn't clip */
+    overflow: visible;
+}
+
+.tabItem:active {
+    opacity: 0.65;
+}
+
+/* ─── Active tab state ───────────────────────────────────────────────────────── */
+
+.tabItemActive {
+    color: var(--accent-secondary);
+}
+
+/* ─── Tab label ──────────────────────────────────────────────────────────────── */
+
+.tabLabel {
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 1;
+    letter-spacing: 0.025em;
+    /* Prevent text selection on rapid taps */
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+/* ─── Active indicator dot ───────────────────────────────────────────────────── */
+
+.tabDot {
+    display: block;
+    width: 4px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--accent-primary);
+    /* Sits below the label */
+    margin-top: 1px;
+}
