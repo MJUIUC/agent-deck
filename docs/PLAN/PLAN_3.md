@@ -1048,23 +1048,90 @@ Acceptance criteria:
 
 ---
 
-**Story 6.2 — Mobile layout polish**  
+### As-built design note (Story 6.2 approach revision)
+
+After reviewing the mobile mockups (`mockups/mobile-chat.html`, `mobile-thread-list.html`, `mobile-thread-config.html`) and testing the PWA on a real device, the original "polish" approach for Story 6.2 was revised. The original plan assumed the existing desktop layout could be made mobile-friendly with media queries alone — patching `ConfigPane`, `SettingsModal`, and `ChatView` with breakpoint overrides.
+
+In practice, the desktop and mobile navigation models are fundamentally incompatible:
+- Desktop: persistent sidebar + main area side-by-side
+- Mobile: full-screen views + bottom tab bar + slide-up bottom sheet for config
+
+Fighting the desktop layout assumptions with media queries would produce fragile, hard-to-maintain code. Instead, Story 6.2 is rewritten as a **layout-level split**: a `useIsMobile()` hook selects between `DesktopLayout` (the current shell, unchanged) and a new `MobileLayout` at the `App.tsx` level. All business logic — stores, hooks, API calls — is shared between both layouts. Only the shell and navigation components differ.
+
+The mobile mockups are the source of truth for the mobile UI design. CSS custom properties (design tokens) are identical between desktop and mobile — no new colours are introduced.
+
+---
+
+**Story 6.2 — Mobile-first layout**  
 Branch: `feature/phase6-mobile-layout`
 
-Audit and fix any layout issues on small viewports (375px–430px). The sidebar, chat view, config pane, message input, and settings modal all need to feel correct on a phone screen. The existing mobile sidebar slide-in works — focus on the remaining gaps.
+Implement a dedicated mobile UI using a layout-level split. The desktop layout (`DesktopLayout`) is untouched. A new `MobileLayout` is rendered when `useIsMobile()` returns true (viewport width ≤ 768px or touch UA). All components are built mobile-first from the mockups.
 
-Specific items to address:
-- `ChatView`: messages should not be obscured by the keyboard on mobile — handle `visualViewport` resize or `env(keyboard-inset-height)` for the input bar
-- `ConfigPane`: on mobile (< 640px) should slide in full-width rather than as a side panel over the chat
-- `SettingsModal`: on mobile should be full-screen rather than a centered modal
-- Tap targets: all buttons must be at least 44×44px on mobile
-- No horizontal scroll anywhere on 375px viewport
+**New files:**
+
+`web/src/hooks/useIsMobile.ts`
+- Returns `true` when `window.innerWidth <= 768` OR the UA is a touch device
+- Listens to `window.resize` and updates reactively
+- Used in `App.tsx` to select between `DesktopLayout` and `MobileLayout`
+
+`web/src/styles/mobile.css`
+- Global mobile-only styles imported only by mobile components
+- Safe-area variables: `env(safe-area-inset-top/bottom/left/right)`
+- Tap highlight removal: `-webkit-tap-highlight-color: transparent`
+- Minimum tap target helper class: `.tap-target { min-height: 44px; min-width: 44px; }`
+- Momentum scrolling: `-webkit-overflow-scrolling: touch`
+
+`web/src/layouts/DesktopLayout.tsx`
+- Extract the current `App.tsx` shell (sidebar + main area) into this component
+- No behaviour change — purely a rename/extract refactor
+
+`web/src/layouts/MobileLayout.tsx`
+- Bottom tab bar (83px) with 3 tabs: **Threads**, **Chat**, **Settings**
+- Active tab indicator: accent-secondary label + 4px accent-primary dot below icon
+- Renders one full-screen view at a time based on active tab
+- Home indicator spacer at bottom (`env(safe-area-inset-bottom)`)
+- Tab state is URL-driven (`?tab=threads|chat|settings`) so the back button works
+
+`web/src/layouts/mobile/MobileThreadList.tsx`
+- Nav bar: large bold "agent-deck" title (22px, weight 700) + icon buttons (filter, new thread)
+- Search bar below nav (fake input, opens filter on tap)
+- Thread rows matching `mobile-thread-list.html`: avatar, name, timestamp, preview, unread badge, routine tag
+- Unread indicator: 3px left-edge dot in accent-primary
+- FAB (floating action button): 56px rounded-square, accent-primary, "+" — creates new thread, positioned above bottom nav
+- Tapping a thread navigates to Chat tab and opens that thread
+
+`web/src/layouts/mobile/MobileChatView.tsx`
+- Nav header: back arrow (accent-secondary) → returns to Threads tab, agent avatar + name + status dot, config icon → opens `MobileConfigSheet`
+- Full-screen scrollable message area, no visible scrollbar
+- Message bubbles matching `mobile-chat.html`: user (right, bubble-user), agent (left with avatar, bubble-agent), routine (bubble-routine + label)
+- Streaming indicator: three animated dots
+- Input area: pill-shaped wrap (`border-radius: 22px`), auto-growing textarea, slash hint button, circular send button (40px, accent-primary)
+- Input bar lifts above keyboard using `visualViewport` resize listener + `padding-bottom: env(safe-area-inset-bottom)`
+- No active thread selected: shows empty state with prompt to select or create a thread
+
+`web/src/layouts/mobile/MobileConfigSheet.tsx`
+- Slide-up bottom sheet over `MobileChatView` (matches `mobile-thread-config.html` exactly)
+- Dark backdrop (`rgba(0,0,0,0.55)`), sheet `border-radius: 20px 20px 0 0`
+- Drag handle bar (36×4px) at top; drag-to-dismiss with touch events
+- `max-height: 88%`, scrollable body with `-webkit-overflow-scrolling: touch`
+- Sections: Persona row, Model picker (tap-to-expand inline list), Routines list, "Full settings →" deep-link
+- Close button (circular ×) in sheet header
+
+`web/src/layouts/mobile/MobileSettings.tsx` _(replaces existing `MobileSettings.tsx`)_
+- Full-screen settings view rendered in the Settings tab
+- Content defined by Story 6.3 — this story creates the shell and nav chrome only
 
 Acceptance criteria:
+- `useIsMobile()` correctly detects phone viewports and touch devices
+- Desktop layout is pixel-identical to pre-6.2 at viewports > 768px
+- Mobile layout renders at 375px, 390px, and 430px with no horizontal scroll
+- Bottom tab bar is always visible and above the iOS home indicator
 - Chat input stays above the keyboard when it opens on iOS and Android
-- Config pane and settings modal are full-screen on mobile
-- No layout bugs at 375px, 390px, or 430px viewport widths
-- All interactive elements meet minimum tap target size
+- Config sheet slides up/down smoothly and dismisses on drag-down or backdrop tap
+- All interactive elements meet 44×44px minimum tap target size
+- Thread list FAB creates a new thread and switches to Chat tab
+- Back arrow in chat nav returns to Threads tab
+- No regressions on desktop (sidebar, ConfigPane, SettingsModal all unchanged)
 
 ---
 
