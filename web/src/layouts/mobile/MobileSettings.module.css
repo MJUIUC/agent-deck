@@ -18,7 +18,7 @@
 }
 
 .navTitle {
-    font-size: 22px;
+    font-size: 1.375rem;
     font-weight: 700;
     color: var(--text-primary);
     letter-spacing: -0.02em;
@@ -46,7 +46,7 @@
 }
 
 .sectionLabel {
-    font-size: 11px;
+    font-size: 0.6875rem;
     font-weight: 600;
     color: var(--text-tertiary);
     text-transform: uppercase;
@@ -75,7 +75,7 @@
 }
 
 .rowTitle {
-    font-size: 14px;
+    font-size: 0.875rem;
     font-weight: 500;
     color: var(--text-primary);
     margin-bottom: 4px;
@@ -83,7 +83,7 @@
 }
 
 .rowDesc {
-    font-size: 13px;
+    font-size: 0.8125rem;
     color: var(--text-tertiary);
     line-height: 1.55;
 }
@@ -103,7 +103,7 @@
     color: #ffffff;
     border: none;
     border-radius: 10px;
-    font-size: 14px;
+    font-size: 0.875rem;
     font-weight: 600;
     font-family: inherit;
     cursor: pointer;

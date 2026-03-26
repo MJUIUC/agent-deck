@@ -30,20 +30,20 @@
 }
 
 .noThreadEmoji {
-    font-size: 48px;
+    font-size: 3rem;
     line-height: 1;
     margin-bottom: 4px;
 }
 
 .noThreadTitle {
-    font-size: 17px;
+    font-size: 1.0625rem;
     font-weight: 600;
     color: var(--text-primary);
     letter-spacing: -0.01em;
 }
 
 .noThreadSubtext {
-    font-size: 13px;
+    font-size: 0.8125rem;
     color: var(--text-tertiary);
     line-height: 1.5;
     max-width: 220px;
@@ -112,7 +112,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 17px;
+    font-size: 1.0625rem;
     flex-shrink: 0;
     line-height: 1;
 }
@@ -125,7 +125,7 @@
 }
 
 .agentName {
-    font-size: 15px;
+    font-size: 0.9375rem;
     font-weight: 600;
     color: var(--text-primary);
     white-space: nowrap;
@@ -136,7 +136,7 @@
 }
 
 .agentStatus {
-    font-size: 11px;
+    font-size: 0.6875rem;
     color: var(--text-tertiary);
     display: flex;
     align-items: center;
@@ -168,7 +168,7 @@
     border: none;
     border-radius: 10px;
     color: var(--text-secondary);
-    font-size: 18px;
+    font-size: 1.125rem;
     cursor: pointer;
     transition:
         background 0.15s,
@@ -218,7 +218,7 @@
 }
 
 .conversationEmptyText {
-    font-size: 14px;
+    font-size: 0.875rem;
     color: var(--text-tertiary);
     font-style: italic;
     text-align: center;
@@ -271,7 +271,7 @@
     outline: none;
     /* Spec: text-primary, 15px */
     color: var(--text-primary);
-    font-size: 15px;
+    font-size: 1rem;
     font-family: inherit;
     line-height: 1.4;
     resize: none;
