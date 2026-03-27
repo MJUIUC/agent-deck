@@ -232,6 +232,13 @@ export interface ThreadState {
   phase: ThreadPhase;
   /** Number of messages queued behind the currently active run. */
   queuedCount?: number;
+  // ── Pagination ──────────────────────────────────────────────────────────────
+  /** ID of the oldest loaded message — used as `before` cursor for load-more */
+  oldestLoadedId: string | null;
+  /** Whether older messages exist on the server beyond what's loaded */
+  hasMore: boolean;
+  /** True while a load-more fetch is in progress (prevents double-fetch) */
+  isLoadingMore: boolean;
 }
 
 export type ThreadMap = Record<string, ThreadState>;

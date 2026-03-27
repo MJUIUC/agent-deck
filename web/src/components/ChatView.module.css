@@ -75,3 +75,11 @@
     color: var(--error);
     line-height: 1.45;
 }
+
+/* ── Load-more indicator ── */
+.loadingMore {
+    text-align: center;
+    padding: 8px 0;
+    font-size: 0.75rem;
+    color: var(--text-tertiary);
+}

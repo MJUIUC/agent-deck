@@ -3,7 +3,13 @@
 // auto-growing input, keyboard lift, and the config bottom-sheet.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import {
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useCallback,
+} from "react";
 import type { Thread } from "@/types";
 import { useMessageStore } from "@/stores/useMessageStore";
 import { useSseStore } from "@/stores/useSseStore";
@@ -117,6 +123,12 @@ export function MobileChatView({
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesAreaRef = useRef<HTMLDivElement>(null);
+  const topSentinelRef = useRef<HTMLDivElement>(null);
+  const scrollAdjustRef = useRef<{
+    prevScrollHeight: number;
+    prevScrollTop: number;
+  } | null>(null);
 
   const threadId = thread?.id ?? null;
 
@@ -128,6 +140,14 @@ export function MobileChatView({
   const sendMessage = useMessageStore((s) => s.sendMessage);
   const loadMessages = useMessageStore((s) => s.loadMessages);
   const cancelRun = useMessageStore((s) => s.cancelRun);
+
+  const hasMore = useMessageStore((s) =>
+    threadId != null ? (s.threads[threadId]?.hasMore ?? false) : false,
+  );
+  const isLoadingMore = useMessageStore((s) =>
+    threadId != null ? (s.threads[threadId]?.isLoadingMore ?? false) : false,
+  );
+  const loadMoreMessages = useMessageStore((s) => s.loadMoreMessages);
 
   const connectThread = useSseStore((s) => s.connectThread);
   const disconnectThread = useSseStore((s) => s.disconnectThread);
@@ -185,11 +205,27 @@ export function MobileChatView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadId]);
 
-  // ── Auto-scroll to bottom on new messages or streaming content ────────────────
+  // ── Scroll management ────────────────────────────────────────────────────────
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [visibleMessages.length, streamingContent]);
+  // Runs on every render: restores scroll position after a load-more prepend,
+  // or scrolls to bottom instantly on thread change / new messages.
+  // No dep array — mirrors the desktop pattern; scrollAdjustRef suppresses it
+  // during prepends so the viewport doesn't jump.
+  useLayoutEffect(() => {
+    const adj = scrollAdjustRef.current;
+    if (adj !== null) {
+      // Load-more prepend: restore scroll position so content doesn't jump
+      const el = messagesAreaRef.current;
+      if (el) {
+        el.scrollTop =
+          adj.prevScrollTop + (el.scrollHeight - adj.prevScrollHeight);
+      }
+      scrollAdjustRef.current = null;
+    } else {
+      // Normal: scroll to bottom instantly (avoids "scroll from top" animation)
+      messagesEndRef.current?.scrollIntoView({ behavior: "instant" });
+    }
+  });
 
   // ── Keyboard lift via visualViewport ─────────────────────────────────────────
 
@@ -219,6 +255,33 @@ export function MobileChatView({
     ta.style.height = "auto";
     ta.style.height = Math.min(ta.scrollHeight, MAX_TEXTAREA_HEIGHT) + "px";
   }, []);
+
+  // ── Load-more handler & top-sentinel IntersectionObserver ────────────────────
+
+  const handleLoadMore = useCallback(async () => {
+    if (!hasMore || isLoadingMore || !threadId || threadId === "pending")
+      return;
+    const el = messagesAreaRef.current;
+    if (!el) return;
+    scrollAdjustRef.current = {
+      prevScrollHeight: el.scrollHeight,
+      prevScrollTop: el.scrollTop,
+    };
+    await loadMoreMessages(threadId);
+  }, [hasMore, isLoadingMore, threadId, loadMoreMessages]);
+
+  useEffect(() => {
+    const sentinel = topSentinelRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) void handleLoadMore();
+      },
+      { threshold: 0 },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [handleLoadMore]);
 
   // ── Send handler ─────────────────────────────────────────────────────────────
 
@@ -326,7 +389,12 @@ export function MobileChatView({
       </header>
 
       {/* ── Messages area ── */}
-      <div className={styles.messagesArea} aria-label="Messages" role="log">
+      <div
+        ref={messagesAreaRef}
+        className={styles.messagesArea}
+        aria-label="Messages"
+        role="log"
+      >
         {visibleMessages.length === 0 && !isStreaming ? (
           <div className={styles.conversationEmpty} aria-live="polite">
             <p className={styles.conversationEmptyText}>
@@ -335,6 +403,15 @@ export function MobileChatView({
           </div>
         ) : (
           <>
+            {/* Top sentinel — triggers load-more when scrolled into view */}
+            <div
+              ref={topSentinelRef}
+              style={{ height: 1 }}
+              aria-hidden="true"
+            />
+            {isLoadingMore && (
+              <p className={styles.loadingMore}>Loading older messages…</p>
+            )}
             {visibleMessages.map((message) => (
               <MessageBubble
                 key={message.id}

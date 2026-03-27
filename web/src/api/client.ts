@@ -283,7 +283,7 @@ export const messagesApi = {
   list(
     threadId: string,
     opts: { limit?: number; before?: string; include_hidden?: boolean } = {},
-  ): Promise<{ data: Message[] }> {
+  ): Promise<{ data: Message[]; has_more: boolean }> {
     const params = new URLSearchParams();
     if (opts.limit != null) params.set("limit", String(opts.limit));
     if (opts.before) params.set("before", opts.before);

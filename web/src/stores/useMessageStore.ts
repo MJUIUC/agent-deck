@@ -15,7 +15,16 @@ import type {
 const IDLE: ThreadPhase = { status: "idle" };
 
 function getThread(threads: ThreadMap, threadId: string): ThreadState {
-  return threads[threadId] ?? { messages: [], phase: IDLE, queuedCount: 0 };
+  return (
+    threads[threadId] ?? {
+      messages: [],
+      phase: IDLE,
+      queuedCount: 0,
+      oldestLoadedId: null,
+      hasMore: false,
+      isLoadingMore: false,
+    }
+  );
 }
 
 function setThread(
@@ -36,6 +45,7 @@ interface MessageStore {
   threads: ThreadMap;
 
   loadMessages: (threadId: string) => Promise<void>;
+  loadMoreMessages: (threadId: string) => Promise<void>;
   sendMessage: (threadId: string, content: string) => Promise<void>;
   sendCommand: (
     threadId: string,
@@ -63,15 +73,21 @@ const storeCreator: StateCreator<MessageStore> = (set, get) => ({
   loadMessages: async (threadId) => {
     try {
       const res = await messagesApi.list(threadId, {
-        limit: 100,
+        limit: 50,
         include_hidden: true,
       });
+      const msgs = res.data;
+      const hasMore = res.has_more;
+      const oldestLoadedId = msgs[0]?.id ?? null;
       set((state) => {
         const thread = getThread(state.threads, threadId);
         return {
           threads: setThread(state.threads, threadId, {
-            messages: res.data,
+            messages: msgs,
             phase: thread.phase,
+            oldestLoadedId,
+            hasMore,
+            isLoadingMore: false,
           }),
         };
       });
@@ -79,6 +95,45 @@ const storeCreator: StateCreator<MessageStore> = (set, get) => ({
       // Silently swallow — callers can handle UI feedback independently.
       // We do not transition to an error phase here because loadMessages
       // is not part of the phase model.
+    }
+  },
+
+  // ── loadMoreMessages ─────────────────────────────────────────────────────────
+  // Fetches the next page of older messages using the oldest loaded message ID
+  // as the `before` cursor. Prepends results to the existing message list.
+  // Guards against double-fetching via isLoadingMore.
+
+  loadMoreMessages: async (threadId) => {
+    const thread = getThread(get().threads, threadId);
+    if (!thread.hasMore || thread.isLoadingMore || !thread.oldestLoadedId)
+      return;
+
+    set((state) => ({
+      threads: setThread(state.threads, threadId, { isLoadingMore: true }),
+    }));
+
+    try {
+      const res = await messagesApi.list(threadId, {
+        limit: 50,
+        before: thread.oldestLoadedId,
+        include_hidden: true,
+      });
+
+      set((state) => {
+        const current = getThread(state.threads, threadId);
+        return {
+          threads: setThread(state.threads, threadId, {
+            messages: [...res.data, ...current.messages],
+            oldestLoadedId: res.data[0]?.id ?? current.oldestLoadedId,
+            hasMore: res.has_more,
+            isLoadingMore: false,
+          }),
+        };
+      });
+    } catch {
+      set((state) => ({
+        threads: setThread(state.threads, threadId, { isLoadingMore: false }),
+      }));
     }
   },
 

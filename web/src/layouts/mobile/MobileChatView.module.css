@@ -298,9 +298,8 @@
 /* ── Send button (inside pill) ───────────────────────────────────────────── */
 
 .sendBtn {
-    /* Spec: 40×40px circle */
-    width: 40px;
-    height: 40px;
+    width: 32px;
+    height: 32px;
     border-radius: 50%;
     flex-shrink: 0;
     /* Spec: accent-primary background, text-inverse color */
@@ -335,8 +334,8 @@
 /* ── Stop button (replaces send while streaming) ─────────────────────────── */
 
 .stopBtn {
-    width: 40px;
-    height: 40px;
+    width: 32px;
+    height: 32px;
     border-radius: 50%;
     flex-shrink: 0;
     background: var(--bg-elevated);
@@ -358,4 +357,14 @@
 
 .stopBtn:active {
     transform: scale(0.92);
+}
+
+/* ── Load-more indicator ─────────────────────────────────────────────────── */
+
+.loadingMore {
+    text-align: center;
+    padding: 8px 0;
+    font-size: 0.75rem;
+    color: var(--text-tertiary);
+    margin: 0;
 }

@@ -74,7 +74,7 @@ pub async fn list(
         "visibility = 'visible'"
     };
 
-    let messages: Vec<Message> = if let Some(before_id) = &query.before {
+    let mut messages: Vec<Message> = if let Some(before_id) = &query.before {
         // Cursor pagination: get messages older than the cursor message
         let cursor_time: Option<(String,)> =
             sqlx::query_as("SELECT created_at FROM messages WHERE id = ? AND thread_id = ?")
@@ -96,7 +96,7 @@ pub async fn list(
                 ))
                 .bind(&thread_id)
                 .bind(&cursor_created_at)
-                .bind(limit)
+                .bind(limit + 1)
                 .fetch_all(&state.pool)
                 .await?
                 // Reverse so results come back oldest-first
@@ -128,14 +128,21 @@ pub async fn list(
             visibility_filter
         ))
         .bind(&thread_id)
-        .bind(limit)
+        .bind(limit + 1)
         .fetch_all(&state.pool)
         .await?
     };
 
+    let has_more = messages.len() > limit as usize;
+    if has_more {
+        messages.remove(0); // drop the extra-oldest sentinel
+    }
     let responses: Vec<MessageResponse> = messages.into_iter().map(Into::into).collect();
 
-    Ok((StatusCode::OK, Json(json!({ "data": responses }))))
+    Ok((
+        StatusCode::OK,
+        Json(json!({ "data": responses, "has_more": has_more })),
+    ))
 }
 
 /// POST /api/threads/:id/messages
