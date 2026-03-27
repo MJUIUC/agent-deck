@@ -1,3 +1,4 @@
+import { useState, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Message } from "@/types";
@@ -31,6 +32,55 @@ function AgentAvatar({
   );
 }
 
+function CodeBlock({
+  children,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  node: _node,
+  ...props
+}: React.HTMLAttributes<HTMLPreElement> & { node?: unknown }) {
+  const [copied, setCopied] = useState(false);
+  const preRef = useRef<HTMLPreElement>(null);
+
+  const handleCopy = () => {
+    const text = preRef.current?.innerText ?? "";
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  return (
+    <div style={{ position: "relative" }}>
+      <pre ref={preRef} {...props}>
+        {children}
+      </pre>
+      <button
+        onClick={handleCopy}
+        style={{
+          position: "absolute",
+          top: "6px",
+          right: "6px",
+          padding: "3px 8px",
+          fontSize: "0.7rem",
+          fontFamily: "inherit",
+          background: copied ? "var(--accent-primary)" : "var(--bg-elevated)",
+          color: copied ? "#fff" : "var(--text-secondary)",
+          border: "1px solid var(--border-subtle)",
+          borderRadius: "4px",
+          cursor: "pointer",
+          opacity: 0.9,
+          transition: "background 0.15s ease, color 0.15s ease",
+          lineHeight: 1.4,
+          userSelect: "none",
+        }}
+        aria-label="Copy code"
+      >
+        {copied ? "✓ Copied" : "Copy"}
+      </button>
+    </div>
+  );
+}
+
 const TOOL_CONTENT_LIMIT = 4000;
 
 export function ToolActivityBubble({ message }: { message: Message }) {
@@ -51,7 +101,10 @@ export function ToolActivityBubble({ message }: { message: Message }) {
           {isCall ? "⚙ Tool call" : "⚙ Tool result"}
         </div>
         <div className={styles.toolContent}>
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{ pre: CodeBlock }}
+          >
             {displayContent}
           </ReactMarkdown>
         </div>
@@ -110,7 +163,10 @@ export function MessageBubble({
             message.content
           ) : (
             <div className={styles.markdown}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{ pre: CodeBlock }}
+              >
                 {message.content}
               </ReactMarkdown>
             </div>
@@ -143,7 +199,10 @@ export function StreamingBubble({
         <div className={`${styles.bubble} ${styles.bubbleAgent}`}>
           {content && (
             <div className={styles.markdown}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{ pre: CodeBlock }}
+              >
                 {content}
               </ReactMarkdown>
             </div>
