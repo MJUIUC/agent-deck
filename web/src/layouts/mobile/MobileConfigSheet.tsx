@@ -1,12 +1,20 @@
 // Slide-up bottom sheet rendered over MobileChatView.
-// Shows thread configuration: persona, model (read-only), routines (with toggles).
+// Shows thread configuration: persona, model (interactive selects), routines (with toggles).
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import cronstrue from "cronstrue";
-import type { Thread, Routine } from "@/types";
-import { routinesApi } from "@/api/client";
+import type { Thread, Routine, Provider, Model } from "@/types";
+import { routinesApi, providersApi, modelsApi, threadsApi } from "@/api/client";
+import { useThreadStore } from "@/stores/useThreadStore";
 import styles from "./MobileConfigSheet.module.css";
+
+// ─── Internal types ───────────────────────────────────────────────────────────
+
+interface ProviderWithModels {
+  provider: Provider;
+  models: Model[];
+}
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -51,6 +59,80 @@ function Toggle({ checked, onChange, disabled = false, label }: ToggleProps) {
   );
 }
 
+// ─── PickerDrawer sub-component ───────────────────────────────────────────────
+
+interface PickerDrawerProps {
+  label: string;
+  value: string | null; // currently selected option id
+  displayValue: string; // text to show on the collapsed row
+  options: { id: string; label: string }[];
+  onChange: (id: string) => void;
+  disabled?: boolean;
+}
+
+function PickerDrawer({
+  label,
+  value,
+  displayValue,
+  options,
+  onChange,
+  disabled = false,
+}: PickerDrawerProps) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className={styles.pickerWrap}>
+      {/* Collapsed trigger row */}
+      <button
+        type="button"
+        className={cx(styles.pickerTrigger, open && styles.pickerTriggerOpen)}
+        onClick={() => !disabled && setOpen((o) => !o)}
+        disabled={disabled}
+        aria-expanded={open}
+        aria-label={`${label}: ${displayValue}`}
+      >
+        <span className={styles.pickerTriggerValue}>{displayValue}</span>
+        <span
+          className={cx(styles.pickerChevron, open && styles.pickerChevronOpen)}
+          aria-hidden="true"
+        >
+          ›
+        </span>
+      </button>
+
+      {/* Expandable drawer */}
+      <div
+        className={cx(styles.pickerDrawer, open && styles.pickerDrawerOpen)}
+        aria-hidden={!open}
+      >
+        <div className={styles.pickerList}>
+          {options.map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              className={cx(
+                styles.pickerItem,
+                opt.id === value && styles.pickerItemActive,
+              )}
+              onClick={() => {
+                onChange(opt.id);
+                setOpen(false);
+              }}
+            >
+              <span className={styles.pickerItemLabel}>{opt.label}</span>
+              {opt.id === value && (
+                <span className={styles.pickerItemCheck} aria-hidden="true">
+                  ✓
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Converts a cron expression to a human-readable string, or returns "" on failure. */
@@ -77,10 +159,19 @@ export function MobileConfigSheet({
   isOpen,
   onClose,
 }: MobileConfigSheetProps) {
-  // ── State ────────────────────────────────────────────────────────────────
+  // ── Routines state ───────────────────────────────────────────────────────
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [routinesLoading, setRoutinesLoading] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+
+  // ── Model/provider state ─────────────────────────────────────────────────
+  const [providers, setProviders] = useState<Provider[]>([]);
+  const [allModels, setAllModels] = useState<ProviderWithModels[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(
+    null,
+  );
+  const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
 
   // ── Refs ─────────────────────────────────────────────────────────────────
   const sheetRef = useRef<HTMLDivElement>(null);
@@ -113,6 +204,61 @@ export function MobileConfigSheet({
         setRoutinesLoading(false);
       });
   }, [isOpen, thread.id]);
+
+  // ── Fetch providers + models when sheet opens ─────────────────────────────
+  useEffect(() => {
+    if (!isOpen) return;
+
+    setModelsLoading(true);
+
+    providersApi
+      .list()
+      .then(async (res) => {
+        const enabledProviders = res.data.filter((p) => p.enabled);
+        setProviders(enabledProviders);
+
+        // Fetch models for each enabled provider in parallel
+        const entries = await Promise.all(
+          enabledProviders.map((p) =>
+            modelsApi
+              .list(p.id)
+              .then((r) => ({
+                provider: p,
+                models: r.data.filter((m) => m.enabled),
+              }))
+              .catch(() => ({ provider: p, models: [] as Model[] })),
+          ),
+        );
+        setAllModels(entries);
+
+        // Initialise selections: prefer thread active values, fall back to persona defaults
+        const initProvider =
+          thread.active_provider ??
+          thread.persona?.default_provider ??
+          enabledProviders[0]?.id ??
+          null;
+
+        const initModel =
+          thread.active_model ?? thread.persona?.default_model ?? null;
+
+        setSelectedProviderId(initProvider);
+
+        // If we have an init model, use it; otherwise pick the first model of the provider
+        if (initModel) {
+          setSelectedModelId(initModel);
+        } else {
+          const entry = entries.find((e) => e.provider.id === initProvider);
+          setSelectedModelId(entry?.models[0]?.id ?? null);
+        }
+      })
+      .catch(() => {
+        setProviders([]);
+        setAllModels([]);
+      })
+      .finally(() => {
+        setModelsLoading(false);
+      });
+  }, [isOpen, thread.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Lock body scroll while sheet is open ─────────────────────────────────
   useEffect(() => {
@@ -147,17 +293,40 @@ export function MobileConfigSheet({
     [thread.id, togglingId],
   );
 
-  // ── Open-settings dispatcher ──────────────────────────────────────────────
-  const openSettings = useCallback(
-    (tab?: string) => {
-      window.dispatchEvent(
-        new CustomEvent("agent-deck:open-settings", {
-          detail: tab ? { tab } : undefined,
-        }),
-      );
-      onClose();
+  // ── Provider/model change handlers ────────────────────────────────────────
+  const handleProviderChange = useCallback(
+    (provId: string) => {
+      setSelectedProviderId(provId);
+      const entry = allModels.find((e) => e.provider.id === provId);
+      const firstModel = entry?.models[0] ?? null;
+      setSelectedModelId(firstModel?.id ?? null);
+      if (firstModel) {
+        threadsApi
+          .update(thread.id, {
+            active_provider: provId,
+            active_model: firstModel.id,
+          })
+          .then((res) => useThreadStore.getState().upsertThread(res.data))
+          .catch(() => {});
+      }
     },
-    [onClose],
+    [allModels, thread.id],
+  );
+
+  const handleModelChange = useCallback(
+    (modelId: string) => {
+      setSelectedModelId(modelId);
+      if (selectedProviderId) {
+        threadsApi
+          .update(thread.id, {
+            active_provider: selectedProviderId,
+            active_model: modelId,
+          })
+          .then((res) => useThreadStore.getState().upsertThread(res.data))
+          .catch(() => {});
+      }
+    },
+    [selectedProviderId, thread.id],
   );
 
   // ── Drag-to-dismiss (touch) ───────────────────────────────────────────────
@@ -274,52 +443,62 @@ export function MobileConfigSheet({
                     : "No persona description"}
                 </div>
               </div>
-
-              {/* "Full settings →" badge-link */}
-              <button
-                type="button"
-                className={styles.personaBadge}
-                onClick={() => openSettings("personas")}
-                aria-label="Open persona settings"
-              >
-                Full settings →
-              </button>
             </div>
           </section>
 
           <div className={styles.divider} aria-hidden="true" />
 
-          {/* ── Model (read-only) ────────────────────────────────────── */}
+          {/* ── Model ────────────────────────────────────────────────── */}
           <section className={styles.section} aria-labelledby="mcs-label-model">
             <div id="mcs-label-model" className={styles.sectionLabel}>
               Model
             </div>
 
-            <div className={styles.modelCurrent}>
-              <div className={styles.modelIcon} aria-hidden="true">
-                🤖
-              </div>
-              <div className={styles.modelInfo}>
-                <div className={styles.modelName}>
-                  {thread.active_model ?? "Default model"}
-                </div>
-                <div className={styles.modelProvider}>
-                  {thread.active_provider ?? "Default provider"}
-                </div>
-              </div>
-            </div>
-
-            <p className={styles.modelNote}>
-              Change model in{" "}
-              <button
-                type="button"
-                className={styles.inlineLink}
-                onClick={() => openSettings("models")}
+            {modelsLoading ? (
+              <div
+                className={styles.stateText}
+                role="status"
+                aria-live="polite"
               >
-                full settings
-              </button>
-              .
-            </p>
+                Loading models…
+              </div>
+            ) : providers.length === 0 ? (
+              <div className={styles.stateText}>No providers configured.</div>
+            ) : (
+              <div className={styles.modelPickerGroup}>
+                <PickerDrawer
+                  label="Provider"
+                  value={selectedProviderId}
+                  displayValue={
+                    providers.find((p) => p.id === selectedProviderId)?.name ??
+                    "Select provider…"
+                  }
+                  options={providers.map((p) => ({ id: p.id, label: p.name }))}
+                  onChange={handleProviderChange}
+                />
+                <PickerDrawer
+                  label="Model"
+                  value={selectedModelId}
+                  displayValue={(() => {
+                    const models =
+                      allModels.find(
+                        (e) => e.provider.id === selectedProviderId,
+                      )?.models ?? [];
+                    const m = models.find((m) => m.id === selectedModelId);
+                    return m ? m.display_name || m.model_id : "Select model…";
+                  })()}
+                  options={(
+                    allModels.find((e) => e.provider.id === selectedProviderId)
+                      ?.models ?? []
+                  ).map((m) => ({
+                    id: m.id,
+                    label: m.display_name || m.model_id,
+                  }))}
+                  onChange={handleModelChange}
+                  disabled={!selectedProviderId}
+                />
+              </div>
+            )}
           </section>
 
           <div className={styles.divider} aria-hidden="true" />
@@ -331,24 +510,6 @@ export function MobileConfigSheet({
           >
             <div id="mcs-label-routines" className={styles.sectionLabel}>
               Routines
-            </div>
-
-            {/* View-only notice */}
-            <div className={styles.viewOnlyNotice} role="note">
-              <span className={styles.viewOnlyIcon} aria-hidden="true">
-                ℹ️
-              </span>
-              <span className={styles.viewOnlyText}>
-                Toggle routines below. To add or edit schedules,{" "}
-                <button
-                  type="button"
-                  className={styles.noticeLink}
-                  onClick={() => openSettings("routines")}
-                >
-                  open full settings
-                </button>
-                .
-              </span>
             </div>
 
             {routinesLoading ? (
@@ -424,20 +585,6 @@ export function MobileConfigSheet({
                 })}
               </div>
             )}
-          </section>
-
-          <div className={styles.divider} aria-hidden="true" />
-
-          {/* ── Full settings link ───────────────────────────────────── */}
-          <section className={styles.section}>
-            <button
-              type="button"
-              className={styles.settingsLink}
-              onClick={() => openSettings()}
-            >
-              <span aria-hidden="true">⚙️</span>
-              Full settings →
-            </button>
           </section>
         </div>
         {/* /body */}
