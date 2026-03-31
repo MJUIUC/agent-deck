@@ -364,15 +364,6 @@ pub async fn build_router(
             "/api/device-tokens",
             axum::routing::post(tokens::register_device).delete(tokens::unregister_device),
         )
-        // Mobile pairing
-        .route(
-            "/api/pairing/generate",
-            axum::routing::post(tokens::generate_pairing),
-        )
-        .route(
-            "/api/pairing/complete",
-            axum::routing::post(tokens::complete_pairing),
-        )
         // App config
         .route("/api/config", get(config::get_config))
         .route(

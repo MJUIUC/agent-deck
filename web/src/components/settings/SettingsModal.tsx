@@ -6,7 +6,7 @@ import { ProviderSettings } from "./ProviderSettings";
 import { PersonaSettings } from "./PersonaSettings";
 import { CredentialsSettings } from "./CredentialsSettings";
 import { McpServerSettings } from "./McpServerSettings";
-import { MobileSettings } from "./MobileSettings";
+
 import { GeneralSettings } from "./GeneralSettings";
 import { ArchivedThreadsSettings } from "./ArchivedThreadsSettings";
 
@@ -130,7 +130,7 @@ export function SettingsModal({
                 <PersonaSettings onDataChanged={handleDataChanged} />
               )}
               {tab === "mcp-servers" && <McpServerSettings />}
-              {tab === "mobile" && <MobileSettings />}
+
               {tab === "general" && <GeneralSettings />}
               {tab === "archived-threads" && <ArchivedThreadsSettings />}
             </div>

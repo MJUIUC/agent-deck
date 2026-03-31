@@ -7,7 +7,6 @@ export type SettingsTab =
   | "credentials"
   | "personas"
   | "mcp-servers"
-  | "mobile"
   | "general"
   | "archived-threads";
 
