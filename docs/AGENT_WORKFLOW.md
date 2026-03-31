@@ -433,13 +433,14 @@ The suite must report `0 failed`. If a test was already failing before your chan
 
 - Run `diagnostics` on every `.tsx` / `.ts` file you touch after editing it.
 - Fix all errors in files you authored or modified. Pre-existing warnings in files you did not touch can be left.
+- **Always run `nvm use 24` before any `node`, `npm`, or `npx` command.**
 
 ```bash
 # Full type-check and bundle
-cd web && npm run build 2>&1 | tail -20
+nvm use 24 && cd web && npm run build 2>&1 | tail -20
 
 # Unit tests
-cd web && npm run test 2>&1 | tail -20
+nvm use 24 && cd web && npm run test 2>&1 | tail -20
 ```
 
 ### Definition of done (coding complete)
