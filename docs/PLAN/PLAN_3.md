@@ -88,7 +88,7 @@ Acceptance criteria:
 **Story 1.x — Tailscale server integration**  
 Branch: `feature/phase1-tailscale-integration`
 
-Implement Tailscale detection and management on the server side. This is a prerequisite for the setup wizard Tailscale step and for the QR pairing endpoint returning a correct server URL.
+Implement Tailscale detection and management on the server side. This is a prerequisite for the setup wizard Tailscale step and for the server URL being available in app_config.
 
 **Tailscale status detection:**
 - On server startup, attempt to run `tailscale status --json` via `tokio::process::Command`
@@ -115,16 +115,12 @@ Streams output to a temporary log, returns status on completion. macOS only — 
 
 `POST /api/tailscale/connect` — runs `tailscale up`, captures the auth URL from stdout/stderr if the machine is not yet authenticated, and returns it. Once connected, stores the hostname in `app_config`.
 
-**Update `GET /api/pairing/qr`:**
-Read `tailscale_hostname` from `app_config`. If present, use `http://{tailscale_hostname}:7474` as the `server_url` in the QR payload. If absent (Tailscale not set up), fall back to the machine's local IP address with a note that Tailscale is required for remote access.
-
 Acceptance criteria:
 - `GET /api/tailscale/status` returns correct state when Tailscale is installed and connected
 - `GET /api/tailscale/status` returns `installed: false` when `tailscale` binary is not found
 - `POST /api/tailscale/install` runs the install script and returns updated status
 - `POST /api/tailscale/connect` returns an `auth_url` when machine is not yet authenticated
 - `POST /api/tailscale/connect` stores `tailscale_hostname` in `app_config` once connected
-- `GET /api/pairing/qr` uses `tailscale_hostname` when available
 - Server startup Tailscale check is non-blocking
 - Unit test: status parsing handles connected, disconnected, and not-installed states
 
@@ -370,7 +366,7 @@ Acceptance criteria:
 **Story 3.4 — Settings: MCP, Mobile, General**  
 Branch: `feature/phase3-settings-remaining`
 
-Implement `/settings/mcp-servers`, `/settings/mobile` (QR code display for pairing), and `/settings/general` (server name, auth token rotation). MCP settings is a full management surface: add/edit/delete servers (local and remote types), per-server tool inspector (fetched from the server connection), source URL display.
+Implement `/settings/mcp-servers`, `/settings/mobile`, and `/settings/general` (server name, auth token rotation). MCP settings is a full management surface: add/edit/delete servers (local and remote types), per-server tool inspector (fetched from the server connection), source URL display.
 
 Acceptance criteria:
 - MCP server CRUD works for both local and remote types
@@ -378,7 +374,6 @@ Acceptance criteria:
 - Remote server config fields: URL, auth header name, credential key reference
 - Source URL field is displayed as a clickable link when set
 - Tool inspector shows tools for connected servers
-- QR code displays and encodes correct pairing data
 - General settings show auth token (masked) with rotation button
 
 ---
@@ -1162,21 +1157,33 @@ Acceptance criteria:
 **Story 6.3 — Updated mobile settings page**  
 Branch: `feature/phase6-mobile-settings`
 
-Update `MobileSettings.tsx` to replace the Android-only QR pairing instructions with the PWA install flow. The page should help users install the PWA and enable notifications.
+Update `MobileSettings.tsx` to replace the placeholder sections with real content. Also removes all dead pairing infrastructure (server endpoints, API client, desktop settings tab) that was built for a native app no longer in the plan.
 
 Content:
 - Platform detection (iOS vs Android via user agent) to show the correct install steps
 - **iOS:** "Open in Safari → tap Share → Add to Home Screen → open from home screen"
 - **Android:** "Open in Chrome → tap menu → Add to Home Screen"
+- Simplified QR code: encodes `window.location.origin` as a plain URL — no API call, no auth token. Scanning it with a phone camera opens agent-deck in the browser. One-time convenience for getting the URL onto the phone before the PWA is installed.
 - Notification subscription status: "Notifications enabled" / "Notifications not enabled" / "Permission denied"
-- "Enable Notifications" button — only shown if status is not yet subscribed and permission not denied. Triggers the push permission prompt (must be a user gesture). Disabled and hidden until Phase 7 VAPID endpoint is available — render a placeholder for now.
-- QR code section remains for sharing the server URL to new devices (unchanged from existing implementation)
+- "Enable Notifications" button — disabled with a "coming soon" label until Story 7.3 wires up the VAPID endpoint.
+
+Pairing cleanup (dead code removal):
+- Delete `web/src/components/settings/MobileSettings.tsx` (native app QR pairing component)
+- Remove "Mobile Pairing" tab from desktop `SettingsNav`
+- Remove `pairingApi` from `web/src/api/client.ts`
+- Remove `POST /api/pairing/generate` and `POST /api/pairing/complete` server routes and handlers
+- Remove `PAIRING_TOKEN` / `PAIRING_TOKEN_EXPIRES_AT` constants from `app_config.rs`
 
 Acceptance criteria:
-- iOS and Android show different install instructions based on user agent
+- iOS and Android show different PWA install instructions based on user agent
+- QR code renders on page load encoding `window.location.origin` — no API call made
+- Scanning the QR with a phone camera opens agent-deck in the browser
 - Notification status section renders correctly in all three states
-- "Enable Notifications" button is present but clearly marked as coming in a future update (or hidden, TBD in Phase 7)
-- QR code generation still works
+- "Enable Notifications" button is present but disabled with a "coming soon" label
+- Old `components/settings/MobileSettings.tsx` is deleted
+- "Mobile Pairing" tab is removed from desktop Settings nav
+- `/api/pairing/generate` and `/api/pairing/complete` routes are removed
+- `cargo build` passes after server cleanup
 
 ---
 

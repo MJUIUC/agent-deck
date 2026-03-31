@@ -8,7 +8,7 @@
 
 ## Summary
 
-Replace the two placeholder sections in `MobileSettings.tsx` with real content: platform-specific PWA install instructions (iOS vs Android), a three-state notification status section with a deferred "Enable Notifications" button, and a QR code section ported from the old `components/settings/MobileSettings.tsx`. After this story, the Settings tab is fully functional for helping users install the PWA and understand notification status.
+Replace the two placeholder sections in `MobileSettings.tsx` with real content: platform-specific PWA install instructions (iOS vs Android), a simplified client-side QR code showing the server URL for first-time phone setup, and a three-state notification status section with a deferred "Enable Notifications" button. Also removes all dead pairing infrastructure (server endpoints, API client code, desktop settings tab) that was built for a native app that no longer exists in the plan.
 
 ---
 
@@ -18,11 +18,17 @@ Replace the two placeholder sections in `MobileSettings.tsx` with real content: 
 - **"Install as App"** — single row reading "Setup instructions coming soon."
 - **"Notifications"** — single row reading "Push notification setup coming soon."
 
-`web/src/layouts/mobile/MobileSettings.module.css` already has all structural styles needed: `.section`, `.sectionLabel`, `.sectionCard`, `.row`, `.rowTitle`, `.rowDesc`. A few new classes will be needed for step rows, a copy-to-clipboard button, and notification status badges.
+`web/src/layouts/mobile/MobileSettings.module.css` already has all structural styles needed: `.section`, `.sectionLabel`, `.sectionCard`, `.row`, `.rowTitle`, `.rowDesc`. A few new classes will be needed for step rows and notification status badges.
 
-The QR code generation logic (canvas renderer, `pairingApi.generate()` call, loading/error states, refresh button) lives in `web/src/components/settings/MobileSettings.tsx`. That component will not be deleted — it is still referenced by the desktop SettingsModal — but the QR logic will be ported into the new layout component.
+**Dead code to remove:**
+- `web/src/components/settings/MobileSettings.tsx` — the old QR pairing component, built for a native Android app that is no longer in the plan. It calls `pairingApi.generate()` which exchanges an auth token via a QR scan. The PWA model does not need this.
+- `web/src/api/client.ts` — `pairingApi` export (the two pairing endpoints it calls are being removed).
+- `web/src/components/settings/SettingsNav.tsx` — "Mobile Pairing" nav tab that renders the old component.
+- `server/src/routes/tokens.rs` — `generate_pairing` and `complete_pairing` handlers.
+- `server/src/routes/mod.rs` — route registrations for `/api/pairing/generate` and `/api/pairing/complete`.
+- `server/src/models/app_config.rs` — `PAIRING_TOKEN` and `PAIRING_TOKEN_EXPIRES_AT` key constants.
 
-`web/src/api/client.ts` exports `pairingApi.generate()` which POSTs to `/api/pairing/generate` and returns `{ data: { pairing_payload: { server_url: string; token: string }, hint: string } }`.
+The `qrcode` npm package stays — it is still used to render the simplified URL QR.
 
 ---
 
@@ -31,16 +37,7 @@ The QR code generation logic (canvas renderer, `pairingApi.generate()` call, loa
 ### Task 1 — Platform detection utility
 
 - **File:** `web/src/hooks/usePlatform.ts` (new)
-- **Change:** Export a `usePlatform()` hook that reads `navigator.userAgent` once on mount and returns `"ios" | "android" | "other"`. iOS is detected by `/iphone|ipad|ipod/i`. Android by `/android/i`. Used only by `MobileSettings` at this stage but written as a reusable hook.
-
-```ts
-export function usePlatform(): "ios" | "android" | "other" {
-  const ua = navigator.userAgent;
-  if (/iphone|ipad|ipod/i.test(ua)) return "ios";
-  if (/android/i.test(ua)) return "android";
-  return "other";
-}
-```
+- **Change:** Export a `usePlatform()` hook that reads `navigator.userAgent` once and returns `"ios" | "android" | "other"`. iOS is detected by `/iphone|ipad|ipod/i`, Android by `/android/i`. Written as a reusable hook for future use.
 
 No reactive updates needed — the UA does not change during a session.
 
@@ -66,26 +63,23 @@ Call `usePlatform()` at the top of the component. Render a numbered step list in
 **Other (desktop or unknown):**
 A single row: "Visit this page on your iOS or Android device to install agent-deck as an app."
 
-Add `.stepRow`, `.stepNum`, `.stepText` classes to the CSS module for the numbered step layout. Steps use the same `.sectionCard` + `.row` wrapper as the rest of the page.
+Add `.stepRow`, `.stepNum`, `.stepText` CSS classes for the numbered step layout.
 
-### Task 3 — QR code section (port from old component)
+### Task 3 — Simplified URL QR code section
 
 - **Files:** `web/src/layouts/mobile/MobileSettings.tsx`, `web/src/layouts/mobile/MobileSettings.module.css`
-- **Change:** Add a "Connect a Device" section below the install section. Port the `QrCanvas` component and generate/refresh logic from `web/src/components/settings/MobileSettings.tsx`, adapting the visual style to the new card layout.
+- **Change:** Add an "Open on Your Phone" section. The QR encodes `window.location.origin` as a plain URL string — no API call, no auth token, no server involvement. When scanned with a standard phone camera, it opens agent-deck directly in the phone browser.
 
-The section contains:
-- A `.sectionCard` with a single `.row` that holds:
-  - The 220×220 QR canvas (centred), or a placeholder box when not yet generated
-  - A "Generate QR Code" primary button below the canvas (becomes "⟳ Refresh" after first generation)
-  - Error message display if generation fails
-- A second `.sectionCard` with step rows for "How to connect":
-  1. Make sure **Tailscale** is running on both devices and signed in to the same account
-  2. Tap "Generate QR Code" above
-  3. On your phone, open the server URL shown in the QR code in Safari (iOS) or Chrome (Android)
+The section contains a single `.sectionCard` with:
+- A 220×220 `<canvas>` rendered immediately on mount (no button press needed — the URL is always known)
+- The URL printed as copyable text below the canvas
+- A brief caption: "Scan with your phone camera to open agent-deck. Make sure Tailscale is running on both devices first."
 
-The `QrCanvas` sub-component is defined locally in `MobileSettings.tsx` — no separate file needed. QR colours stay consistent with the existing implementation: dots `#F0EDE4`, background `#242422`.
+QR canvas colours stay consistent: dots `#F0EDE4`, background `#242422`.
 
-Add `.qrWrap`, `.qrPlaceholder`, `.qrActions` CSS classes. The generate/refresh button uses the existing `.btn` pattern or inline styles matching the rest of the page — prefer a small reusable `<ActionBtn>` element defined locally using `var(--accent-primary)` for the primary style.
+The `QrCanvas` sub-component is defined locally in `MobileSettings.tsx`. Add `.qrWrap`, `.qrUrl`, `.qrCaption` CSS classes.
+
+**Note:** This section is only meaningful before the PWA is installed. Once installed, the user already has the URL pinned. No need to hide it after install — it is low-noise and harmless to leave visible.
 
 ### Task 4 — Notification status section (replace placeholder)
 
@@ -99,34 +93,54 @@ Derive a display state:
 - **Not enabled** (`permission !== "denied"` and no subscription): yellow dot + "Notifications not enabled" + "Enable Notifications" button
 - **Blocked** (`permission === "denied"`): red dot + "Notifications blocked — enable in your browser settings"
 
-The "Enable Notifications" button renders but is **disabled** with tooltip text "Available after setup is complete" — the VAPID endpoint (`GET /api/push/vapid-public-key`) does not exist yet and will be wired up in Story 7.3. The button must be a real `<button>` element (not hidden) so the UI shape is correct from day one. Add a small `(coming soon)` label in `var(--text-tertiary)` beneath it.
+The "Enable Notifications" button renders but is **disabled** with a `(coming soon)` label in `var(--text-tertiary)` beneath it — the VAPID endpoint does not exist until Story 7.3. It must be a real `<button>` element so the UI shape is correct from day one.
 
-If `Notification` or `navigator.serviceWorker` is not available (non-HTTPS, old browser), show a neutral grey dot + "Notifications unavailable in this browser."
+If `Notification` or `navigator.serviceWorker` is unavailable, show a grey dot + "Notifications unavailable in this browser."
 
 Add `.statusRow`, `.statusDot`, `.statusDotGreen`, `.statusDotYellow`, `.statusDotRed`, `.statusDotGrey` CSS classes. Dots are `8px` circles with a subtle glow (`box-shadow: 0 0 4px <colour>`).
+
+### Task 5 — Remove dead pairing infrastructure
+
+**Frontend:**
+- Delete `web/src/components/settings/MobileSettings.tsx`
+- In `web/src/components/settings/SettingsNav.tsx`: remove the "Mobile Pairing" `<NavItem>` entry and its `"mobile"` tab case. Also remove it from wherever the desktop `SettingsModal` switches on tab names.
+- In `web/src/api/client.ts`: delete the `pairingApi` export block.
+
+**Server:**
+- In `server/src/routes/tokens.rs`: delete `generate_pairing` and `complete_pairing` functions.
+- In `server/src/routes/mod.rs`: delete the two `/api/pairing/*` route registrations.
+- In `server/src/models/app_config.rs`: delete the `PAIRING_TOKEN` and `PAIRING_TOKEN_EXPIRES_AT` constants from the `keys` module.
+
+Run `cargo build` after server edits to confirm no remaining references.
 
 ---
 
 ## Schema Changes
 
-None. No server changes in this story.
+None. The pairing token was stored in `app_config` (key-value table), not a dedicated migration, so no migration is needed to remove it.
 
 ---
 
 ## Parallelisation Note
 
-All four tasks touch the same two files (`MobileSettings.tsx` and `MobileSettings.module.css`), so they must run sequentially. The logical order is Task 1 → Task 2 → Task 3 → Task 4. Task 1 is a separate new file and could technically be written in parallel with Tasks 2–4, but since it is trivial (< 15 lines), sequential execution is fine.
+Tasks 1–4 all touch `MobileSettings.tsx` / `MobileSettings.module.css` and must run sequentially. Task 5 (cleanup) touches different files and could run in parallel with Tasks 1–4 since there is no overlap, but sequential is fine given the small scope.
+
+Logical order: Task 1 → Task 2 → Task 3 → Task 4 → Task 5.
 
 ---
 
 ## Acceptance Criteria
 
-*(copied verbatim from PLAN_3)*
-
-- [ ] iOS and Android show different install instructions based on user agent
-- [ ] Notification status section renders correctly in all three states
-- [ ] "Enable Notifications" button is present but clearly marked as coming in a future update (or hidden, TBD in Phase 7)
-- [ ] QR code generation still works
+- [ ] iOS and Android show different PWA install instructions based on user agent
+- [ ] QR code renders automatically on page load and encodes `window.location.origin` as a plain URL — scanning it with a phone camera opens agent-deck in the browser
+- [ ] No API call is made to generate the QR code
+- [ ] Notification status section renders correctly in all three states (enabled, not enabled, blocked)
+- [ ] "Enable Notifications" button is present but disabled with a "coming soon" label
+- [ ] Old `components/settings/MobileSettings.tsx` is deleted
+- [ ] "Mobile Pairing" tab is removed from desktop Settings nav
+- [ ] `pairingApi` is removed from `client.ts`
+- [ ] `/api/pairing/generate` and `/api/pairing/complete` routes are removed from the server
+- [ ] `cargo build` passes with no errors after server cleanup
 
 ---
 
