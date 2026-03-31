@@ -209,8 +209,8 @@ The "enabled" state (green dot) will be testable once Story 7.3 wires up the VAP
 curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:7474/api/pairing/generate
 ```
 
-**Expected:** `404`
-**Failure sign:** `200` or `401`
+**Expected:** `405` — the API route is gone; the static file server fallback (`ServeDir`) rejects POST requests, confirming no API handler matched.
+**Failure sign:** `200` or `401` (would mean the route still exists and is hitting the auth middleware).
 
 ---
 
