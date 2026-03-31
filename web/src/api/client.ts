@@ -530,19 +530,6 @@ export const authApi = {
   },
 };
 
-// ── Pairing ───────────────────────────────────────────────────────────────────
-
-export const pairingApi = {
-  generate(): Promise<{
-    data: {
-      pairing_payload: { server_url: string; token: string };
-      hint: string;
-    };
-  }> {
-    return apiFetch("/api/pairing/generate", { method: "POST" });
-  },
-};
-
 // ── Credentials ───────────────────────────────────────────────────────────────
 
 export const credentialsApi = {

@@ -171,12 +171,7 @@ export function SettingsSidebar({
         active={tab === "mcp-servers"}
         onClick={() => onTabChange("mcp-servers")}
       />
-      <NavItem
-        icon="📱"
-        label="Mobile Pairing"
-        active={tab === "mobile"}
-        onClick={() => onTabChange("mobile")}
-      />
+
       <NavItem
         icon="⚙️"
         label="General"

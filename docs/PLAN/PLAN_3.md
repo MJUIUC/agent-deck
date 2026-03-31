@@ -12,13 +12,15 @@ Each story maps to one feature branch. Complete all stories in a phase before st
 
 ---
 
-### Phase 1 — Skeleton That Runs
+### Phase 1 — Skeleton That Runs ✅ Complete
 
 **Goal:** A Rust server that boots with SQLite, serves a React SPA shell, and has all tables in place. Tailscale integration is wired in so the server knows its own hostname from the start. Nothing functional yet, but the entire foundation is solid and both projects compile.
 
+**Status:** All stories complete. Rust/Axum server boots with SQLite WAL, static file serving, auth middleware, and full entity CRUD. React SPA scaffolded with Vite/TypeScript, API client and Zustand stores in place. All UI mockups built. Tailscale detection wired in at startup.
+
 ---
 
-**Story 1.1 — Cargo workspace and project scaffolding**  
+**Story 1.1 — Cargo workspace and project scaffolding** ✅ Complete  
 Branch: `feature/phase1-cargo-workspace`
 
 Set up the Cargo workspace with a single `server` member. Add all production dependencies to `Cargo.toml`. Create the directory structure under `server/src/`. Add `.env.example`. Verify the project compiles with `cargo build`.
@@ -30,7 +32,7 @@ Acceptance criteria:
 
 ---
 
-**Story 1.2 — SQLite schema and migrations**  
+**Story 1.2 — SQLite schema and migrations** ✅ Complete  
 Branch: `feature/phase1-sqlite-schema`
 
 Create all SQLx migration files under `server/src/db/migrations/`. Include all tables from section 5.1 (including the updated `memory` table with `persona_id`). Enable WAL mode and foreign keys. Write a database module that initializes the connection pool.
@@ -44,7 +46,7 @@ Acceptance criteria:
 
 ---
 
-**Story 1.3 — Configuration and server bootstrap**  
+**Story 1.3 — Configuration and server bootstrap** ✅ Complete  
 Branch: `feature/phase1-server-bootstrap`
 
 Load config from `.env` using `dotenvy`. Set up `tracing` for structured logging. Create the main `axum` router. Add a health check endpoint at `GET /health`. Serve static files from a configurable `public/` directory. Start the server on port 7474.
@@ -56,7 +58,7 @@ Acceptance criteria:
 
 ---
 
-**Story 1.4 — Auth middleware**  
+**Story 1.4 — Auth middleware** ✅ Complete  
 Branch: `feature/phase1-auth-middleware`
 
 Implement the authentication system per section 6.0. Bearer token auth middleware that checks the `Authorization` header OR the `agent_deck_session` cookie. Token is stored in `app_config` table under key `auth_token`. Generate a random 64-character hex token on first run if none exists, log it to the terminal at startup. Localhost requests (origin `127.0.0.1` or `::1`) bypass auth entirely. Implement `POST /api/auth/token` (validates token, sets `httpOnly` cookie) and `POST /api/auth/logout` (clears cookie). All `/api/*` routes require auth except `GET /api/setup/status` and `POST /api/auth/token`.
@@ -73,7 +75,7 @@ Acceptance criteria:
 
 ---
 
-**Story 1.5 — Setup endpoint and first-run detection**  
+**Story 1.5 — Setup endpoint and first-run detection** ✅ Complete  
 Branch: `feature/phase1-setup-endpoint`
 
 Implement `GET /api/setup/status` and `POST /api/setup/complete`. On first run (no user row in DB), setup status returns `{ "complete": false }`. `POST /api/setup/complete` accepts a display name, creates the user row, and marks setup complete.
@@ -85,10 +87,10 @@ Acceptance criteria:
 
 ---
 
-**Story 1.x — Tailscale server integration**  
+**Story 1.x — Tailscale server integration** ✅ Complete  
 Branch: `feature/phase1-tailscale-integration`
 
-Implement Tailscale detection and management on the server side. This is a prerequisite for the setup wizard Tailscale step and for the QR pairing endpoint returning a correct server URL.
+Implement Tailscale detection and management on the server side. This is a prerequisite for the setup wizard Tailscale step and for the server URL being available in app_config.
 
 **Tailscale status detection:**
 - On server startup, attempt to run `tailscale status --json` via `tokio::process::Command`
@@ -115,22 +117,18 @@ Streams output to a temporary log, returns status on completion. macOS only — 
 
 `POST /api/tailscale/connect` — runs `tailscale up`, captures the auth URL from stdout/stderr if the machine is not yet authenticated, and returns it. Once connected, stores the hostname in `app_config`.
 
-**Update `GET /api/pairing/qr`:**
-Read `tailscale_hostname` from `app_config`. If present, use `http://{tailscale_hostname}:7474` as the `server_url` in the QR payload. If absent (Tailscale not set up), fall back to the machine's local IP address with a note that Tailscale is required for remote access.
-
 Acceptance criteria:
 - `GET /api/tailscale/status` returns correct state when Tailscale is installed and connected
 - `GET /api/tailscale/status` returns `installed: false` when `tailscale` binary is not found
 - `POST /api/tailscale/install` runs the install script and returns updated status
 - `POST /api/tailscale/connect` returns an `auth_url` when machine is not yet authenticated
 - `POST /api/tailscale/connect` stores `tailscale_hostname` in `app_config` once connected
-- `GET /api/pairing/qr` uses `tailscale_hostname` when available
 - Server startup Tailscale check is non-blocking
 - Unit test: status parsing handles connected, disconnected, and not-installed states
 
 ---
 
-**Story 1.6 — Core entity CRUD (providers, personas, threads, skills, MCP servers)**  
+**Story 1.6 — Core entity CRUD (providers, personas, threads, skills, MCP servers)** ✅ Complete  
 Branch: `feature/phase1-core-crud`
 
 Implement all REST endpoints for providers (section 6.2, excluding Copilot auth), personas (section 6.4 including avatar upload), threads (section 6.7 including archive/unarchive and skill/MCP attachment), skills (section 6.5), and MCP servers (section 6.6). Implement API key encryption using a machine-derived secret. Include `POST /api/providers/:id/test` which calls the provider's `/v1/models` endpoint.
@@ -146,7 +144,7 @@ Acceptance criteria:
 
 ---
 
-**Story 1.7 — React SPA scaffolding**  
+**Story 1.7 — React SPA scaffolding** ✅ Complete  
 Branch: `feature/phase1-web-scaffolding`
 
 Initialize the React app in `web/`. Set up Vite, TypeScript, Tailwind CSS, and shadcn/ui. Configure Tailwind with the color tokens from section 4.1. Set up React Router with placeholder routes for all main sections. Configure Vite to proxy `/api` to `localhost:7474` in development. Set up the Vite build to output to `server/public/` so the Rust server serves it.
@@ -160,7 +158,7 @@ Acceptance criteria:
 
 ---
 
-**Story 1.8 — API client and Zustand store shell**  
+**Story 1.8 — API client and Zustand store shell** ✅ Complete  
 Branch: `feature/phase1-api-client`
 
 Implement a typed API client service that wraps all API calls. On `401` response, show a **token entry screen** — a single input field where the user pastes their auth token, which is validated via `POST /api/auth/token` and stored as a cookie. On localhost, this screen is never shown (auth is bypassed). Create Zustand store shells for threads, messages, and UI state.
@@ -174,7 +172,7 @@ Acceptance criteria:
 
 ---
 
-**Story 1.9 — UI mockups (all screens)**  
+**Story 1.9 — UI mockups (all screens)** ✅ Complete  
 Branch: `feature/phase1-ui-mockups`
 
 Create static HTML mockups for every major screen in the application. These serve as the approved visual reference for all subsequent UI implementation. Mockups live in a `mockups/` directory at the project root. Each file is self-contained (inline CSS, no external dependencies) and uses the color tokens from section 4.1 as CSS custom properties. Includes light JavaScript for key interactions — hover states, transitions, dropdowns — but no API calls or real data. Dummy data is hardcoded.
@@ -222,13 +220,15 @@ Acceptance criteria:
 
 ---
 
-### Phase 2 — First Chat
+### Phase 2 — First Chat ✅ Complete
 
 **Goal:** You can talk to an LLM through your own UI. This is the milestone that makes the project feel real. By the end of this phase you can bootstrap a provider and persona via curl, then chat in the browser.
 
+**Status:** All stories complete. End-to-end streaming chat works with OpenAI, Anthropic, and Copilot providers. SSE infrastructure in place. Context assembly, agent run-loop, and message persistence all complete. Thread list and chat UI match approved mockups.
+
 ---
 
-**Story 2.1 — copilot-api vendor submodule and process management**  
+**Story 2.1 — copilot-api vendor submodule and process management** ✅ Complete  
 Branch: `feature/phase2-copilot-process`
 
 Add `copilot-api` as a git submodule at `vendor/copilot-api/`. Implement the service that manages it as a child process using `tokio::process`. Start it when Copilot is the active provider, stop it when not needed, restart on crash. Implement `GET /api/providers/copilot/auth-status` and `POST /api/providers/copilot/auth-start`.
@@ -242,7 +242,7 @@ Acceptance criteria:
 
 ---
 
-**Story 2.2 — Provider abstraction layer**  
+**Story 2.2 — Provider abstraction layer** ✅ Complete  
 Branch: `feature/phase2-provider-abstraction`
 
 Implement the provider service using `async-openai`. It should accept a provider record from the DB (base URL + API key) and expose a unified interface for: listing models, and sending a chat completion request with streaming. Write the service so that pointing it at `http://localhost:4141/v1` (Copilot proxy) works identically to pointing it at `https://api.openai.com/v1`.
@@ -254,7 +254,7 @@ Acceptance criteria:
 
 ---
 
-**Story 2.3 — SSE infrastructure**  
+**Story 2.3 — SSE infrastructure** ✅ Complete  
 Branch: `feature/phase2-sse-infrastructure`
 
 Implement the two SSE endpoints from section 6.9. Create a channel-based event broadcaster in the server that routes events to the correct SSE streams. The per-thread stream should be created on connection and cleaned up on disconnect. Track connected SSE clients per thread (needed later for push notification decisions).
@@ -267,7 +267,7 @@ Acceptance criteria:
 
 ---
 
-**Story 2.4 — Context assembly**  
+**Story 2.4 — Context assembly** ✅ Complete  
 Branch: `feature/phase2-context-assembly`
 
 Implement the function that builds the message array for an LLM request. It should combine: persona system prompt + thread addendum + last N messages from DB (configurable, default 20). Write this as a pure function that is easy to unit test.
@@ -280,7 +280,7 @@ Acceptance criteria:
 
 ---
 
-**Story 2.5 — Agent run-loop and message endpoint**  
+**Story 2.5 — Agent run-loop and message endpoint** ✅ Complete  
 Branch: `feature/phase2-agent-runloop`
 
 Implement `POST /api/threads/:id/messages`. The handler should:
@@ -302,7 +302,7 @@ Acceptance criteria:
 
 ---
 
-**Story 2.6 — Thread list and chat UI**  
+**Story 2.6 — Thread list and chat UI** ✅ Complete  
 Branch: `feature/phase2-chat-ui`
 
 Implement the sidebar thread list and main chat view in the React SPA, matching the approved mockups in `mockups/chat-view.html`. Thread list shows active threads with agent emoji, name, and last message preview. Include a "New Chat" button that opens a persona picker. Chat view shows message history with user messages right-aligned and agent messages left-aligned with avatar. Connect to the per-thread SSE stream for token streaming. Message input with send on Enter. Connect to the global SSE stream to update thread list previews in real time.
@@ -370,7 +370,7 @@ Acceptance criteria:
 **Story 3.4 — Settings: MCP, Mobile, General**  
 Branch: `feature/phase3-settings-remaining`
 
-Implement `/settings/mcp-servers`, `/settings/mobile` (QR code display for pairing), and `/settings/general` (server name, auth token rotation). MCP settings is a full management surface: add/edit/delete servers (local and remote types), per-server tool inspector (fetched from the server connection), source URL display.
+Implement `/settings/mcp-servers`, `/settings/mobile`, and `/settings/general` (server name, auth token rotation). MCP settings is a full management surface: add/edit/delete servers (local and remote types), per-server tool inspector (fetched from the server connection), source URL display.
 
 Acceptance criteria:
 - MCP server CRUD works for both local and remote types
@@ -378,7 +378,6 @@ Acceptance criteria:
 - Remote server config fields: URL, auth header name, credential key reference
 - Source URL field is displayed as a clickable link when set
 - Tool inspector shows tools for connected servers
-- QR code displays and encodes correct pairing data
 - General settings show auth token (masked) with rotation button
 
 ---
@@ -428,13 +427,15 @@ Acceptance criteria:
 
 ---
 
-### Phase 4 — Credentials and MCP Integration
+### Phase 4 — Credentials and MCP Integration ✅ Complete
 
 **Goal:** Establish encrypted credential storage for static secrets (API keys, PATs, bearer tokens), then wire up real MCP server integration with credential resolution, tool discovery, and agent integration. After this phase, agents can use external tools in chat.
 
+**Status:** All stories complete. AES-256-GCM credential store in place with provider key migration. MCP connection manager handles local (stdio) and remote (HTTP/SSE) servers with reconnect backoff. Tool discovery, namespaced tool dispatch, and agent integration all complete. Credentials UI and MCP UI fully polished.
+
 ---
 
-**Story 4.1 — Credential store and encryption**
+**Story 4.1 — Credential store and encryption** ✅ Complete
 Branch: `feature/phase4-credential-store`
 
 Implement the credential storage infrastructure. On first server run, generate a 256-bit master key and store it in `app_config` as `credential_master_key`. Implement AES-256-GCM encrypt/decrypt helpers. Implement `credentials` table CRUD with all data encrypted at rest. The `GET /api/credentials` endpoint returns metadata only — `encrypted_data` is never included in any API response.
@@ -456,7 +457,7 @@ Acceptance criteria:
 
 ---
 
-**Story 4.2 — Credentials settings UI**
+**Story 4.2 — Credentials settings UI** ✅ Complete
 Branch: `feature/phase4-credentials-ui`
 
 Implement `/settings/credentials` page for managing MCP and service credentials. This is separate from the existing provider settings page (which continues to own the provider key entry UX, but now reads/writes through the credential store under the hood).
@@ -473,7 +474,7 @@ Acceptance criteria:
 
 ---
 
-**Story 4.3 — MCP connection manager**
+**Story 4.3 — MCP connection manager** ✅ Complete
 Branch: `feature/phase4-mcp-connection-manager`
 
 Implement the server-side MCP connection manager in `services/mcp.rs`. This maintains a pool of active connections keyed by `mcp_server_id` and handles connect, disconnect, and reconnect on error.
@@ -556,9 +557,11 @@ Acceptance criteria:
 
 ---
 
-### Phase 5 — Memory and Routines
+### Phase 5 — Memory and Routines ✅ Complete
 
 **Goal:** Add persistent memory and autonomous scheduled routines. This is what differentiates agent-deck from a chat wrapper — agents remember things across conversations and can act on their own schedule.
+
+**Status:** All stories complete. Per-thread run management with cancellation and queuing in place. Memory tools (save, recall, delete) wired into agent context for non-default personas. Routine CRUD, cron scheduler, and two-phase execution complete. Memory and routine UI fully integrated. User profile context injection in place. Rolling context-window summarization and `recall_conversation` tool complete.
 
 **Depends on:** Phase 4 (credential store and MCP integration complete).
 
@@ -729,7 +732,7 @@ Acceptance criteria:
 
 ---
 
-**Story 5.5 — Routine UI integration**
+**Story 5.5 — Routine UI integration** ✅ Complete
 Branch: `feature/phase5-routine-ui`
 
 Wire routines into the thread config pane (the shell from Story 3.5 — now with full add/edit/delete/toggle functionality). Routine-generated messages in the chat view should be visually distinct (subtle different background using `bubble_routine` color, small "routine" label).
@@ -742,7 +745,7 @@ Acceptance criteria:
 
 ---
 
-**Story 5.6 — Memory UI integration**
+**Story 5.6 — Memory UI integration** ✅ Complete
 Branch: `feature/phase5-memory-ui`
 
 Add memory viewer per section 7.6.7:
@@ -845,7 +848,7 @@ Acceptance criteria:
 
 ---
 
-**Story 5.8 — Context window summarization and conversation recall**
+**Story 5.8 — Context window summarization and conversation recall** ✅ Complete
 Branch: `feature/phase5-summarization`
 
 Implement rolling context-window summarization and a `recall_conversation` agent tool. Replaces the current silent sliding-window discard with a two-trigger system: proactive (message count threshold) and reactive (context-length 400 error detection and retry). Summaries are persisted to a log table so the agent can look back at past conversations by date range.
@@ -1024,7 +1027,7 @@ Acceptance criteria:
 
 ---
 
-**Story 6.1 — PWA manifest and installability**  
+**Story 6.1 — PWA manifest and installability** ✅ Complete  
 Branch: `feature/phase6-pwa-manifest`
 
 Add `web/public/manifest.json` with the correct fields for installability. Link it from `index.html`. Add app icons (192×192 and 512×512, generated from the agent-deck emoji/theme). Install `vite-plugin-pwa` as a dev dependency and configure it to inject the manifest link and register the service worker. The service worker at this stage only needs to handle the `push` event (implemented in Phase 7) — a minimal stub is sufficient now.
@@ -1045,6 +1048,17 @@ Acceptance criteria:
 - `vite-plugin-pwa` is in devDependencies and configured in `vite.config.ts`
 - Service worker is registered without errors (stub is fine at this stage)
 - Lighthouse PWA audit passes installability checks
+
+---
+
+### As-built notes (Story 6.1)
+
+- **`manifest.json`:** All required fields present — `name`, `short_name`, `display: standalone`, `start_url: "/"`, `background_color: "#1C1C1A"`, `theme_color: "#1C1C1A"`, 192×192 and 512×512 icon entries.
+- **Icons:** `web/public/icon-192.png` and `icon-512.png` added (dark `#1C1C1A` background, AD monogram). Regeneration script at `scripts/generate_icons.py`.
+- **Service worker:** `web/public/sw.js` — stub handles `push` and `notificationclick` events. Full implementation deferred to Phase 7 as specified.
+- **`vite-plugin-pwa` ^1.2.0:** Installed as devDependency, configured in `vite.config.ts` with `injectManifest` strategy. `devOptions.enabled: true` so the SW registers in dev mode.
+- **`web/index.html`:** Manifest linked, `apple-touch-icon` added, iOS PWA meta tags added (`apple-mobile-web-app-capable`, `status-bar-style`, `title`).
+- **No deviations** from the spec.
 
 ---
 
@@ -1146,71 +1160,49 @@ Acceptance criteria:
 
 ---
 
-**Story 6.x — Tailscale wizard step and mobile settings**  
-Branch: `feature/phase6-tailscale-wizard`
 
-Wire the Tailscale setup step into the setup wizard and update the mobile settings page with Tailscale install guidance.
 
-**Setup wizard — Tailscale step (new Step 2, between Welcome and Provider):**
-
-Add a new `Step2Tailscale.tsx` wizard step. On mount, call `GET /api/tailscale/status`.
-
-- **Connected state:** Green status box showing "✓ Connected · {hostname}". "Next →" button. Auto-advances after 1.5 seconds.
-- **Installed, not connected state:** "Connect to Tailscale" primary button. On click, call `POST /api/tailscale/connect`. If response contains `auth_url`, show:
-  ```
-  Open this link in your browser to authorise this machine:
-  [Open Tailscale login →]  (opens in new tab)
-  ```
-  Poll `GET /api/tailscale/status` every 2 seconds. When `connected: true`, auto-advance.
-- **Not installed state:** Brief explanation ("Tailscale is required for your phone and other devices to reach agent-deck privately."). "Install Tailscale" primary button — calls `POST /api/tailscale/install`, shows spinner with status text. On success transitions to "not connected" state.
-- **Skip link** always visible at bottom in tertiary text: "Skip — set up Tailscale later". Skipping advances the wizard without storing a hostname.
-
-**Mobile settings page — Tailscale section:**
-
-Add a new "Tailscale" section to `MobileSettings.tsx` above the existing QR code section.
-
-Content:
-- Current connection status (fetched from `GET /api/tailscale/status`)
-  - Connected: "✓ mac-mini.tail1234.ts.net" in accent color
-  - Not connected: "Not connected" with a "Connect in wizard" link that re-opens the setup wizard at the Tailscale step
-- **Install on your phone:** Two buttons/links:
-  - "Tailscale for iOS" → `https://apps.apple.com/app/tailscale/id1470499037`
-  - "Tailscale for Android" → `https://play.google.com/store/apps/details?id=com.tailscale.ipn.android`
-- Brief instruction: "Sign in to Tailscale on your phone using the same account as this Mac Mini. Then open the server URL below in Safari (iOS) or Chrome (Android)."
-- Server URL displayed as copyable text: the `tailscale_hostname`-based URL, or a placeholder if not connected
-
-**Update QR code label:**
-The existing QR code section should update its "How to pair" instructions to mention Tailscale step 1: "Make sure Tailscale is running on your phone and you're signed in to the same account."
-
-Acceptance criteria:
-- Tailscale wizard step renders all three states correctly (connected, installed/not-connected, not-installed)
-- Polling works and auto-advances when connection is established
-- Skip link works and advances wizard without error
-- Mobile settings Tailscale section shows correct connection status
-- App Store and Play Store links open correctly
-- Server URL in mobile settings uses `tailscale_hostname` when available
-- QR code "How to pair" instructions include Tailscale prerequisite
-
----
-
-**Story 6.3 — Updated mobile settings page**  
+**Story 6.3 — Updated mobile settings page** ✅ Complete  
 Branch: `feature/phase6-mobile-settings`
 
-Update `MobileSettings.tsx` to replace the Android-only QR pairing instructions with the PWA install flow. The page should help users install the PWA and enable notifications.
+Update `MobileSettings.tsx` to replace the placeholder sections with real content. Also removes all dead pairing infrastructure (server endpoints, API client, desktop settings tab) that was built for a native app no longer in the plan.
 
 Content:
 - Platform detection (iOS vs Android via user agent) to show the correct install steps
 - **iOS:** "Open in Safari → tap Share → Add to Home Screen → open from home screen"
 - **Android:** "Open in Chrome → tap menu → Add to Home Screen"
+- Simplified QR code: encodes `window.location.origin` as a plain URL — no API call, no auth token. Scanning it with a phone camera opens agent-deck in the browser. One-time convenience for getting the URL onto the phone before the PWA is installed.
+- QR code also present in desktop **General Settings** ("Open on Phone" card) — the primary use case is a desktop user scanning to open the server URL on their phone after Tailscale is set up
 - Notification subscription status: "Notifications enabled" / "Notifications not enabled" / "Permission denied"
-- "Enable Notifications" button — only shown if status is not yet subscribed and permission not denied. Triggers the push permission prompt (must be a user gesture). Disabled and hidden until Phase 7 VAPID endpoint is available — render a placeholder for now.
-- QR code section remains for sharing the server URL to new devices (unchanged from existing implementation)
+- "Enable Notifications" button — disabled with a "coming soon" label until Story 7.3 wires up the VAPID endpoint.
+
+Pairing cleanup (dead code removal):
+- Delete `web/src/components/settings/MobileSettings.tsx` (native app QR pairing component)
+- Remove "Mobile Pairing" tab from desktop `SettingsNav`
+- Remove `pairingApi` from `web/src/api/client.ts`
+- Remove `POST /api/pairing/generate` and `POST /api/pairing/complete` server routes and handlers
+- Remove `PAIRING_TOKEN` / `PAIRING_TOKEN_EXPIRES_AT` constants from `app_config.rs`
 
 Acceptance criteria:
-- iOS and Android show different install instructions based on user agent
+- iOS and Android show different PWA install instructions based on user agent
+- QR code renders on page load encoding `window.location.origin` — no API call made
+- Scanning the QR with a phone camera opens agent-deck in the browser
 - Notification status section renders correctly in all three states
-- "Enable Notifications" button is present but clearly marked as coming in a future update (or hidden, TBD in Phase 7)
-- QR code generation still works
+- "Enable Notifications" button is present but disabled with a "coming soon" label
+- Old `components/settings/MobileSettings.tsx` is deleted
+- "Mobile Pairing" tab is removed from desktop Settings nav
+- `/api/pairing/generate` and `/api/pairing/complete` routes are removed
+- `cargo build` passes after server cleanup
+- Desktop General Settings shows an "Open on Phone" QR section encoding `window.location.origin`
+
+### As-built notes (Story 6.3)
+
+- **`usePlatform()` hook:** New `web/src/hooks/usePlatform.ts` — reads `navigator.userAgent` once, returns `"ios" | "android" | "other"`. Reusable for future work.
+- **Install steps:** iOS and Android each have a four-step numbered list with platform-specific instructions. Desktop/unknown shows a single nudge row.
+- **Notification status:** `useNotificationStatus()` hook checks `Notification.permission` + `pushManager.getSubscription()`. Four states: enabled (green dot), not-enabled (yellow dot + disabled button), blocked (red dot), unavailable (grey dot). "Enable Notifications" button renders in the not-enabled state with `disabled` + "(coming soon)" label — will be wired up in Story 7.3.
+- **QR removed from mobile settings:** During human review the "Open on Your Phone" QR section was removed from `MobileSettings.tsx` — it is redundant once you are already on the phone.
+- **QR added to desktop General Settings:** An "Open on Phone" `SectionCard` with a `QrCanvas` component (inline styles, matching the file's existing pattern) was added to `web/src/components/settings/GeneralSettings.tsx`. Encodes `window.location.origin` client-side — no API call. Primary use case: desktop user scanning after Tailscale setup.
+- **Dead pairing infrastructure removed:** `components/settings/MobileSettings.tsx` deleted; "Mobile Pairing" tab removed from `SettingsNav` and `SettingsModal`; `pairingApi` removed from `client.ts`; `generate_pairing` and `complete_pairing` handlers and route registrations removed from server; `PAIRING_TOKEN` / `PAIRING_TOKEN_EXPIRES_AT` constants removed from `app_config.rs`. `cargo build` passes with 271 tests passing.
 
 ---
 
@@ -1414,6 +1406,12 @@ The following items are explicitly out of scope for v1. They are documented here
 
 ### Status Bar App (Phase 10)
 A native macOS Swift/SwiftUI app that lives in the menu bar. It manages the Rust server process and optionally the `copilot-api` process. Shows server status (running/stopped), active thread count, and allows starting/stopping the server. Registers as a Login Item so it starts on boot. The `.app` bundle allows it to appear in Launchpad and Spotlight. Planned for after all other phases are complete.
+
+### Tailscale Onboarding (macOS app installer)
+
+The original Story 6.x planned a Tailscale setup step inside the web setup wizard. This was deferred because the right place for Tailscale onboarding is the initial application install — before the user opens the web UI for the first time. The intended delivery model is a macOS DMG: the user double-clicks the installer, a native setup assistant walks them through installing Tailscale, signing in, and verifying connectivity. Once that completes, the agent-deck server starts and the user opens the web UI already connected over Tailscale.
+
+This work belongs with the macOS packaging story (see Status Bar App / Phase 10) rather than as a web feature. When tackled, the existing Tailscale server-side routes (`GET /api/tailscale/status`, `POST /api/tailscale/connect`, `POST /api/tailscale/install`) can remain — they are still useful for displaying connection status in mobile settings. Only the in-web-wizard setup step is out of scope.
 
 ### OAuth and Third-Party App Credentials
 Browser-based OAuth flows (Google, GitHub, etc.) with token refresh, consent screens, and callback handling. Required to unlock Gmail, Google Calendar, Google Drive, and any MCP server that authenticates via OAuth rather than static tokens. Includes: OAuth provider trait and registry, token refresh on credential resolution, `/settings/accounts` page for connected accounts, and the Google app verification process for consumer distribution. This is a significant UX and infrastructure investment — deferred until the core platform is stable and the credential store, MCP integration, and agent runtime are proven out. When ready, the credential store already supports the encrypted storage layer; the work is in adding the browser flow, refresh logic, and new credential types (`oauth2` with `scopes`, `expires_at`, `refresh_token`).
