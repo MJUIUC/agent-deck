@@ -255,6 +255,7 @@ struct RemoteConfig {
 #[derive(Debug, sqlx::FromRow)]
 struct McpServerRow {
     id: String,
+    tag: String,
     server_type: String,
     config: String,
     enabled: bool,
@@ -304,7 +305,7 @@ impl McpConnectionManager {
         }
 
         let rows: Vec<McpServerRow> = match sqlx::query_as(
-            "SELECT id, server_type, config, enabled FROM mcp_servers WHERE enabled = 1",
+            "SELECT id, tag, server_type, config, enabled FROM mcp_servers WHERE enabled = 1",
         )
         .fetch_all(&self.pool)
         .await
@@ -387,13 +388,128 @@ impl McpConnectionManager {
                 }
             };
 
-            let id = match entry_path.file_name().and_then(|n| n.to_str()) {
+            let dir_name = match entry_path.file_name().and_then(|n| n.to_str()) {
                 Some(s) => s.to_string(),
                 None => continue,
             };
 
-            let name = v["name"].as_str().unwrap_or(&id).to_string();
-            let tag = v["tag"].as_str().unwrap_or(&id).to_string();
+            // ── Migration: rename UUID-named dirs to tag-based names ──────────
+            if is_uuid_like(&dir_name) {
+                let tag_in_config = v["tag"]
+                    .as_str()
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| {
+                        v["name"]
+                            .as_str()
+                            .unwrap_or(&dir_name)
+                            .to_lowercase()
+                            .replace(' ', "-")
+                    });
+                let new_dir = self.mcp_dir.join(&tag_in_config);
+                if !new_dir.exists() {
+                    if let Err(e) = tokio::fs::rename(&entry_path, &new_dir).await {
+                        warn!(
+                            "mcp: startup_sync: failed to rename '{}' -> '{}': {}",
+                            dir_name, tag_in_config, e
+                        );
+                        continue;
+                    }
+                    // Rewrite config.json in new location to include "id" if missing.
+                    let id_in_config = v["id"].as_str().unwrap_or(&dir_name).to_string();
+                    let updated_v = {
+                        let mut obj = v.clone();
+                        obj["id"] = serde_json::Value::String(id_in_config.clone());
+                        obj
+                    };
+                    if let Ok(json) = serde_json::to_string_pretty(&updated_v) {
+                        let new_config_path = new_dir.join("config.json");
+                        let _ = tokio::fs::write(&new_config_path, json.as_bytes()).await;
+                    }
+                    info!(
+                        "mcp: startup_sync: migrated '{}' -> '{}'",
+                        dir_name, tag_in_config
+                    );
+                    // Re-parse from the migrated data.
+                    let id = id_in_config;
+                    let name = v["name"].as_str().unwrap_or(&tag_in_config).to_string();
+                    let tag = tag_in_config;
+                    let server_type = v["server_type"].as_str().unwrap_or("local").to_string();
+                    let config_inner = v["config"].to_string();
+
+                    let now = chrono::Utc::now().to_rfc3339();
+
+                    // DB upsert using the migrated variables.
+                    let existing: Option<(String,)> =
+                        sqlx::query_as("SELECT id FROM mcp_servers WHERE id = ?")
+                            .bind(&id)
+                            .fetch_optional(&self.pool)
+                            .await?;
+
+                    if existing.is_some() {
+                        if let Err(e) = sqlx::query(
+                            "UPDATE mcp_servers SET name = ?, tag = ?, server_type = ?, config = ?, updated_at = ? WHERE id = ?",
+                        )
+                        .bind(&name)
+                        .bind(&tag)
+                        .bind(&server_type)
+                        .bind(&config_inner)
+                        .bind(&now)
+                        .bind(&id)
+                        .execute(&self.pool)
+                        .await
+                        {
+                            warn!("mcp: startup_sync: failed to update row {}: {}", id, e);
+                        }
+                    } else {
+                        let user_id: Option<(String,)> =
+                            sqlx::query_as("SELECT id FROM users LIMIT 1")
+                                .fetch_optional(&self.pool)
+                                .await
+                                .unwrap_or(None);
+
+                        let user_id = match user_id {
+                            Some((uid,)) => uid,
+                            None => {
+                                warn!(
+                                    "mcp: startup_sync: skipping insert for '{}' — no user in DB yet",
+                                    id
+                                );
+                                continue;
+                            }
+                        };
+
+                        if let Err(e) = sqlx::query(
+                            "INSERT INTO mcp_servers (id, user_id, name, tag, server_type, config, status, enabled, created_at, updated_at)
+                             VALUES (?, ?, ?, ?, ?, ?, 'inactive', 1, ?, ?)",
+                        )
+                        .bind(&id)
+                        .bind(&user_id)
+                        .bind(&name)
+                        .bind(&tag)
+                        .bind(&server_type)
+                        .bind(&config_inner)
+                        .bind(&now)
+                        .bind(&now)
+                        .execute(&self.pool)
+                        .await
+                        {
+                            warn!("mcp: startup_sync: failed to insert row {}: {}", id, e);
+                        }
+                    }
+                    info!("mcp: startup_sync: synced server '{}'", id);
+                }
+                // If new_dir already exists (collision), skip.
+                continue; // After migration, pick up cleanly on the next startup.
+            }
+
+            // ── Normal (tag-named) dir ────────────────────────────────────────
+            let id = v["id"]
+                .as_str()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+            let name = v["name"].as_str().unwrap_or(&dir_name).to_string();
+            let tag = v["tag"].as_str().unwrap_or(&dir_name).to_string();
             let server_type = v["server_type"].as_str().unwrap_or("local").to_string();
             let config_inner = v["config"].to_string();
 
@@ -470,15 +586,16 @@ impl McpConnectionManager {
         #[derive(sqlx::FromRow)]
         struct EnabledRow {
             id: String,
+            tag: String,
         }
 
         let enabled_rows: Vec<EnabledRow> =
-            sqlx::query_as("SELECT id FROM mcp_servers WHERE enabled = 1")
+            sqlx::query_as("SELECT id, tag FROM mcp_servers WHERE enabled = 1")
                 .fetch_all(&self.pool)
                 .await?;
 
         for row in enabled_rows {
-            let config_path = self.mcp_dir.join(&row.id).join("config.json");
+            let config_path = self.mcp_dir.join(&row.tag).join("config.json");
             if !config_path.exists() {
                 let now = chrono::Utc::now().to_rfc3339();
                 if let Err(e) = sqlx::query(
@@ -505,7 +622,7 @@ impl McpConnectionManager {
         Ok(())
     }
 
-    /// Write `mcp_dir/<id>/config.json` for the given server.
+    /// Write `mcp_dir/<tag>/config.json` for the given server.
     ///
     /// The file captures enough information to reconstruct the DB row on the
     /// next `startup_sync`.
@@ -513,7 +630,7 @@ impl McpConnectionManager {
         &self,
         server: &crate::models::mcp_server::McpServer,
     ) -> Result<()> {
-        let dir = self.mcp_dir.join(&server.id);
+        let dir = self.mcp_dir.join(&server.tag);
         tokio::fs::create_dir_all(&dir).await.map_err(|e| {
             anyhow!(
                 "write_config_file: failed to create dir {}: {}",
@@ -526,6 +643,7 @@ impl McpConnectionManager {
             serde_json::from_str(&server.config).unwrap_or(serde_json::Value::Null);
 
         let payload = serde_json::json!({
+            "id": server.id,
             "name": server.name,
             "tag": server.tag,
             "server_type": server.server_type,
@@ -553,13 +671,13 @@ impl McpConnectionManager {
             })?;
         tokio::io::AsyncWriteExt::flush(&mut file).await?;
 
-        info!("mcp: wrote config file for server '{}'", server.id);
+        info!("mcp: wrote config file for server '{}'", server.tag);
         Ok(())
     }
 
-    /// Remove `mcp_dir/<id>/` and all its contents.
-    pub async fn delete_config_dir(&self, server_id: &str) -> Result<()> {
-        let dir = self.mcp_dir.join(server_id);
+    /// Remove `mcp_dir/<tag>/` and all its contents.
+    pub async fn delete_config_dir(&self, tag: &str) -> Result<()> {
+        let dir = self.mcp_dir.join(tag);
         if dir.exists() {
             tokio::fs::remove_dir_all(&dir).await.map_err(|e| {
                 anyhow!(
@@ -568,7 +686,7 @@ impl McpConnectionManager {
                     e
                 )
             })?;
-            info!("mcp: removed config dir for server '{}'", server_id);
+            info!("mcp: removed config dir for tag '{}'", tag);
         }
         Ok(())
     }
@@ -952,11 +1070,11 @@ impl McpConnectionManager {
         }
 
         // Resolve the working directory for the child process.
-        // Prefer the explicitly configured working_dir; fall back to mcp_dir/<id>.
+        // Prefer the explicitly configured working_dir; fall back to mcp_dir/<tag>.
         let working_dir = if let Some(ref wd) = cfg.working_dir {
             PathBuf::from(wd)
         } else {
-            self.mcp_dir.join(&row.id)
+            self.mcp_dir.join(&row.tag)
         };
         tokio::fs::create_dir_all(&working_dir).await.map_err(|e| {
             anyhow!(
@@ -1418,7 +1536,7 @@ impl McpConnectionManager {
     // ─── DB helpers ───────────────────────────────────────────────────────────
 
     async fn fetch_server_row(&self, server_id: &str) -> Option<McpServerRow> {
-        sqlx::query_as("SELECT id, server_type, config, enabled FROM mcp_servers WHERE id = ?")
+        sqlx::query_as("SELECT id, tag, server_type, config, enabled FROM mcp_servers WHERE id = ?")
             .bind(server_id)
             .fetch_optional(&self.pool)
             .await
@@ -1481,6 +1599,17 @@ async fn read_json_rpc_response(
 }
 
 /// Kill a local child process if one is present, waiting up to 5 s for exit.
+fn is_uuid_like(s: &str) -> bool {
+    let parts: Vec<&str> = s.split('-').collect();
+    parts.len() == 5
+        && parts[0].len() == 8
+        && parts[1].len() == 4
+        && parts[2].len() == 4
+        && parts[3].len() == 4
+        && parts[4].len() == 12
+        && s.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
+}
+
 async fn kill_child_if_any(inner: &mut McpConnectionInner) {
     if let Some(child) = &mut inner.child {
         if let Err(e) = child.start_kill() {
@@ -1689,11 +1818,19 @@ mod tests {
             .await
             .expect("write_config_file");
 
-        let config_path = mcp_dir.join("srv-001").join("config.json");
-        assert!(config_path.exists(), "config.json should exist");
+        // Directory should be named after the tag, not the id.
+        let config_path = mcp_dir.join("github").join("config.json");
+        assert!(
+            config_path.exists(),
+            "config.json should exist under tag-named dir"
+        );
 
         let raw = tokio::fs::read_to_string(&config_path).await.unwrap();
         let v: serde_json::Value = serde_json::from_str(&raw).expect("valid JSON");
+        assert_eq!(
+            v["id"], "srv-001",
+            "config.json should contain the server id"
+        );
         assert_eq!(v["name"], "github");
         assert_eq!(v["tag"], "github");
         assert_eq!(v["server_type"], "local");
@@ -1742,9 +1879,11 @@ mod tests {
         let mgr = make_test_manager(mcp_dir.clone()).await;
 
         // Write a config.json for a server that has no DB row.
+        // The folder is named after the tag; the config includes an explicit id.
         let srv_dir = mcp_dir.join("github");
         tokio::fs::create_dir_all(&srv_dir).await.unwrap();
         let cfg = serde_json::json!({
+            "id": "github-srv-id",
             "name": "github",
             "tag": "github",
             "server_type": "local",
@@ -1759,16 +1898,16 @@ mod tests {
 
         mgr.startup_sync().await.expect("startup_sync");
 
-        // The row should now exist in the DB.
+        // The row should now exist in the DB, keyed by the "id" field in config.json.
         let row: Option<(String, String)> =
-            sqlx::query_as("SELECT id, name FROM mcp_servers WHERE id = 'github'")
+            sqlx::query_as("SELECT id, name FROM mcp_servers WHERE id = 'github-srv-id'")
                 .fetch_optional(&mgr.pool)
                 .await
                 .unwrap();
 
         assert!(row.is_some(), "row should have been inserted");
         let (id, name) = row.unwrap();
-        assert_eq!(id, "github");
+        assert_eq!(id, "github-srv-id");
         assert_eq!(name, "github");
     }
 
@@ -1791,9 +1930,12 @@ mod tests {
         .await;
 
         // Write a config.json with updated values.
+        // The folder is named after the tag; include "id" so startup_sync can
+        // match the pre-existing DB row.
         let srv_dir = mcp_dir.join("my-srv");
         tokio::fs::create_dir_all(&srv_dir).await.unwrap();
         let cfg = serde_json::json!({
+            "id": "my-srv",
             "name": "new-name",
             "tag": "my-srv",
             "server_type": "local",

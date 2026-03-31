@@ -214,6 +214,21 @@ pub async fn update_mcp(
         tracing::warn!("mcp: failed to write config file: {}", e);
     }
 
+    // If the tag changed, remove the old tag-named directory.
+    if payload.tag.is_some() && existing.tag != updated.tag {
+        let mcp3 = state.mcp.clone();
+        let old_tag = existing.tag.clone();
+        tokio::spawn(async move {
+            if let Err(e) = mcp3.delete_config_dir(&old_tag).await {
+                tracing::warn!(
+                    "mcp: failed to remove old config dir for tag '{}': {}",
+                    old_tag,
+                    e
+                );
+            }
+        });
+    }
+
     // Reconnect if anything that affects the connection changed.
     let config_changed = payload.config.is_some();
     let tag_changed = payload.tag.is_some();
@@ -266,6 +281,14 @@ pub async fn delete_mcp(
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
 
+    // Fetch tag before deleting so we can remove the correct directory.
+    let existing_for_delete: Option<(String,)> =
+        sqlx::query_as("SELECT tag FROM mcp_servers WHERE id = ? AND user_id = ?")
+            .bind(&id)
+            .bind(&user_id)
+            .fetch_optional(&state.pool)
+            .await?;
+
     let result = sqlx::query("DELETE FROM mcp_servers WHERE id = ? AND user_id = ?")
         .bind(&id)
         .bind(&user_id)
@@ -277,12 +300,11 @@ pub async fn delete_mcp(
     }
 
     // Remove the config directory from the filesystem (best-effort).
-    {
+    if let Some((tag,)) = existing_for_delete {
         let mcp2 = state.mcp.clone();
-        let id2 = id.clone();
         tokio::spawn(async move {
-            if let Err(e) = mcp2.delete_config_dir(&id2).await {
-                tracing::warn!("mcp: failed to delete config dir for '{}': {}", id2, e);
+            if let Err(e) = mcp2.delete_config_dir(&tag).await {
+                tracing::warn!("mcp: failed to delete config dir for tag '{}': {}", tag, e);
             }
         });
     }
