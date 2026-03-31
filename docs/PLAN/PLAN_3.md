@@ -1024,7 +1024,7 @@ Acceptance criteria:
 
 ---
 
-**Story 6.1 — PWA manifest and installability**  
+**Story 6.1 — PWA manifest and installability** ✅ Complete  
 Branch: `feature/phase6-pwa-manifest`
 
 Add `web/public/manifest.json` with the correct fields for installability. Link it from `index.html`. Add app icons (192×192 and 512×512, generated from the agent-deck emoji/theme). Install `vite-plugin-pwa` as a dev dependency and configure it to inject the manifest link and register the service worker. The service worker at this stage only needs to handle the `push` event (implemented in Phase 7) — a minimal stub is sufficient now.
@@ -1045,6 +1045,17 @@ Acceptance criteria:
 - `vite-plugin-pwa` is in devDependencies and configured in `vite.config.ts`
 - Service worker is registered without errors (stub is fine at this stage)
 - Lighthouse PWA audit passes installability checks
+
+---
+
+### As-built notes (Story 6.1)
+
+- **`manifest.json`:** All required fields present — `name`, `short_name`, `display: standalone`, `start_url: "/"`, `background_color: "#1C1C1A"`, `theme_color: "#1C1C1A"`, 192×192 and 512×512 icon entries.
+- **Icons:** `web/public/icon-192.png` and `icon-512.png` added (dark `#1C1C1A` background, AD monogram). Regeneration script at `scripts/generate_icons.py`.
+- **Service worker:** `web/public/sw.js` — stub handles `push` and `notificationclick` events. Full implementation deferred to Phase 7 as specified.
+- **`vite-plugin-pwa` ^1.2.0:** Installed as devDependency, configured in `vite.config.ts` with `injectManifest` strategy. `devOptions.enabled: true` so the SW registers in dev mode.
+- **`web/index.html`:** Manifest linked, `apple-touch-icon` added, iOS PWA meta tags added (`apple-mobile-web-app-capable`, `status-bar-style`, `title`).
+- **No deviations** from the spec.
 
 ---
 
