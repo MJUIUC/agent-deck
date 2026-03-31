@@ -1214,7 +1214,7 @@ Acceptance criteria:
 
 ---
 
-**Story 7.1 — VAPID key generation and server endpoints**  
+**Story 7.1 — VAPID key generation and server endpoints** ✅ Complete  
 Branch: `feature/phase7-vapid-server`
 
 On server startup, check `app_config` for `vapid_public_key` and `vapid_private_key`. If absent, generate a new VAPID P-256 key pair using the `web-push` crate and store both in `app_config`. The private key must never be logged or returned by any API endpoint.
@@ -1250,9 +1250,17 @@ Acceptance criteria:
 - `push_subscriptions` table is created by migration (add migration `009_push_subscriptions.sql`)
 - Unit tests for key generation idempotency (calling generate twice returns the same key)
 
+### As-built notes (Story 7.1)
+
+- **Key generation via `p256` crate, not `web-push` directly:** `web-push` does not expose a key-generation API — it expects a pre-existing PEM. Used `p256 = "0.13"` (which is what `web-push` uses internally) to generate the key pair. Private key stored as PKCS8 PEM so `VapidSignatureBuilder::from_pem()` can load it in Story 7.2. Both crates added to workspace deps (`web-push = "0.11.0"` with `default-features = false` — no HTTP client yet).
+- **Migration number:** Spec referenced `009_push_subscriptions.sql` but the correct sequential number is `011_push_subscriptions.sql` (migrations 009 and 010 were already used by Phase 5). File created as `011`.
+- **Response envelope:** `GET /api/push/vapid-public-key` returns `{ "data": { "public_key": "..." } }` (standard project envelope), not the bare `{ "public_key": "..." }` shown in the spec.
+- **`vapid_public_key` cached in `AppState`:** Added `vapid_public_key: String` field so the public-key endpoint reads from memory rather than making a DB query on every request. Private PEM is not stored in `AppState` — it will be loaded from `app_config` in Story 7.2 when the dispatch service initialises.
+- **274 tests, 0 failed.** All three VAPID unit tests pass (`stable_across_calls`, `valid_base64url`, `private_key_is_pem`).
+
 ---
 
-**Story 7.2 — Web Push dispatch from server**  
+**Story 7.2 — Web Push dispatch from server**
 Branch: `feature/phase7-web-push-dispatch`
 
 In the routine execution service, after persisting the routine response, check whether any SSE client is currently connected for the thread. If not, send a Web Push notification to all `push_subscriptions` rows for the user using the `web-push` crate.
