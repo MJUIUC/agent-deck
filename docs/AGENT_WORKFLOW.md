@@ -40,6 +40,13 @@ Cross-reference the branch name against the story. If the current branch matches
 
 ## Step 2 — Check Out a Branch (new stories only)
 
+**Before creating a new branch**, confirm the previous story's branch is in a clean state:
+1. All changes are committed (`git status --short` shows nothing).
+2. The branch has been pushed to origin (`git push origin <branch>`).
+3. A pull request to `dev` is open. If `gh` is available: `gh pr create --base dev …`. If not, push the branch and tell the human the branch name so they can open the PR manually.
+
+Do not start a new story branch until these three conditions are met.
+
 If the story is **not yet started**, create a feature branch from the current base branch:
 
 ```bash
