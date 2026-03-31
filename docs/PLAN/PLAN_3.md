@@ -1162,7 +1162,7 @@ Acceptance criteria:
 
 
 
-**Story 6.3 — Updated mobile settings page**  
+**Story 6.3 — Updated mobile settings page** ✅ Complete  
 Branch: `feature/phase6-mobile-settings`
 
 Update `MobileSettings.tsx` to replace the placeholder sections with real content. Also removes all dead pairing infrastructure (server endpoints, API client, desktop settings tab) that was built for a native app no longer in the plan.
@@ -1194,6 +1194,15 @@ Acceptance criteria:
 - `/api/pairing/generate` and `/api/pairing/complete` routes are removed
 - `cargo build` passes after server cleanup
 - Desktop General Settings shows an "Open on Phone" QR section encoding `window.location.origin`
+
+### As-built notes (Story 6.3)
+
+- **`usePlatform()` hook:** New `web/src/hooks/usePlatform.ts` — reads `navigator.userAgent` once, returns `"ios" | "android" | "other"`. Reusable for future work.
+- **Install steps:** iOS and Android each have a four-step numbered list with platform-specific instructions. Desktop/unknown shows a single nudge row.
+- **Notification status:** `useNotificationStatus()` hook checks `Notification.permission` + `pushManager.getSubscription()`. Four states: enabled (green dot), not-enabled (yellow dot + disabled button), blocked (red dot), unavailable (grey dot). "Enable Notifications" button renders in the not-enabled state with `disabled` + "(coming soon)" label — will be wired up in Story 7.3.
+- **QR removed from mobile settings:** During human review the "Open on Your Phone" QR section was removed from `MobileSettings.tsx` — it is redundant once you are already on the phone.
+- **QR added to desktop General Settings:** An "Open on Phone" `SectionCard` with a `QrCanvas` component (inline styles, matching the file's existing pattern) was added to `web/src/components/settings/GeneralSettings.tsx`. Encodes `window.location.origin` client-side — no API call. Primary use case: desktop user scanning after Tailscale setup.
+- **Dead pairing infrastructure removed:** `components/settings/MobileSettings.tsx` deleted; "Mobile Pairing" tab removed from `SettingsNav` and `SettingsModal`; `pairingApi` removed from `client.ts`; `generate_pairing` and `complete_pairing` handlers and route registrations removed from server; `PAIRING_TOKEN` / `PAIRING_TOKEN_EXPIRES_AT` constants removed from `app_config.rs`. `cargo build` passes with 271 tests passing.
 
 ---
 
