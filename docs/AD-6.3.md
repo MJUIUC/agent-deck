@@ -129,6 +129,12 @@ Logical order: Task 1 → Task 2 → Task 3 → Task 4 → Task 5.
 
 ---
 
+## Deviations from Plan
+
+- **QR also added to desktop General Settings:** During human review it was identified that the "Open on Phone" QR belongs on the desktop settings page — the primary use case is a desktop user who has just set up Tailscale and needs to get the server URL onto their phone. A `QrCanvas` component and "Open on Phone" `SectionCard` were added to `web/src/components/settings/GeneralSettings.tsx` using inline styles (matching the existing file's pattern). The mobile settings QR is retained as it is harmless there.
+
+---
+
 ## Acceptance Criteria
 
 - [x] iOS and Android show different PWA install instructions based on user agent
@@ -141,6 +147,7 @@ Logical order: Task 1 → Task 2 → Task 3 → Task 4 → Task 5.
 - [x] `pairingApi` is removed from `client.ts`
 - [x] `/api/pairing/generate` and `/api/pairing/complete` routes are removed from the server
 - [x] `cargo build` passes with no errors after server cleanup
+- [x] Desktop General Settings shows an "Open on Phone" QR section encoding `window.location.origin`
 
 ---
 
@@ -211,6 +218,17 @@ curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:7474/api/pairing
 
 **Expected:** `405` — the API route is gone; the static file server fallback (`ServeDir`) rejects POST requests, confirming no API handler matched.
 **Failure sign:** `200` or `401` (would mean the route still exists and is hitting the auth middleware).
+
+---
+
+**7 — Desktop: Open on Phone QR**
+
+Open the app in a desktop browser → Settings → General → scroll to the bottom.
+
+**Expected:** An "Open on Phone" card is visible with a QR code rendering automatically, the server URL printed below it in monospace, and a hint about iOS/Android PWA install steps.
+**Failure sign:** Card missing, blank canvas, or QR only visible in mobile settings.
+
+Bonus: scan the QR with a phone — it should open the server URL directly.
 
 ---
 

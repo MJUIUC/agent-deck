@@ -1,4 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import QRCode from "qrcode";
 import { authApi, profileApi } from "@/api/client";
 import type { UserProfile } from "@/types";
 import {
@@ -296,6 +303,25 @@ function ToggleRow({
   );
 }
 
+// ─── QR canvas ───────────────────────────────────────────────────────────────
+
+function QrCanvas({ url }: { url: string }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    if (!canvasRef.current) return;
+    QRCode.toCanvas(canvasRef.current, url, {
+      width: 200,
+      color: {
+        dark: "#F0EDE4",
+        light: "#242422",
+      },
+    }).catch((err) => console.error("QR generation error:", err));
+  }, [url]);
+
+  return <canvas ref={canvasRef} width={200} height={200} />;
+}
+
 // ─── Server info row ──────────────────────────────────────────────────────────
 
 function InfoRow({ label, value }: { label: string; value: string }) {
@@ -359,7 +385,8 @@ export function GeneralSettings() {
       const res = await authApi.getConfig();
       setServerInfo({
         version: res.data.version,
-        database_path: res.data.database_path,
+        database_path:
+          (res.data as unknown as Record<string, string>).database_path ?? "",
       });
     } catch {
       // non-critical — server info card will just not render
@@ -722,6 +749,38 @@ export function GeneralSettings() {
           </div>
         </SectionCard>
       )}
+
+      {/* ── Open on Phone card ── */}
+      <SectionCard
+        title="Open on Phone"
+        subtitle="Scan to open agent-deck in your phone browser. Make sure Tailscale is running on both devices first."
+      >
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <QrCanvas url={window.location.origin} />
+          <span
+            style={{
+              fontSize: 11,
+              fontFamily: '"SF Mono","Fira Code",monospace',
+              color: "var(--text-tertiary)",
+              wordBreak: "break-all",
+              marginTop: 10,
+            }}
+          >
+            {window.location.origin}
+          </span>
+          <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
+            Once on your phone, go through Share → Add to Home Screen (iOS) or
+            menu → Install app (Android) to install as a PWA.
+          </span>
+        </div>
+      </SectionCard>
     </div>
   );
 }

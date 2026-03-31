@@ -1172,6 +1172,7 @@ Content:
 - **iOS:** "Open in Safari → tap Share → Add to Home Screen → open from home screen"
 - **Android:** "Open in Chrome → tap menu → Add to Home Screen"
 - Simplified QR code: encodes `window.location.origin` as a plain URL — no API call, no auth token. Scanning it with a phone camera opens agent-deck in the browser. One-time convenience for getting the URL onto the phone before the PWA is installed.
+- QR code also present in desktop **General Settings** ("Open on Phone" card) — the primary use case is a desktop user scanning to open the server URL on their phone after Tailscale is set up
 - Notification subscription status: "Notifications enabled" / "Notifications not enabled" / "Permission denied"
 - "Enable Notifications" button — disabled with a "coming soon" label until Story 7.3 wires up the VAPID endpoint.
 
@@ -1192,6 +1193,7 @@ Acceptance criteria:
 - "Mobile Pairing" tab is removed from desktop Settings nav
 - `/api/pairing/generate` and `/api/pairing/complete` routes are removed
 - `cargo build` passes after server cleanup
+- Desktop General Settings shows an "Open on Phone" QR section encoding `window.location.origin`
 
 ---
 
