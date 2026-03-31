@@ -1,30 +1,7 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import QRCode from "qrcode";
+import { useEffect, useState, type ReactNode } from "react";
+
 import { usePlatform } from "../../hooks/usePlatform";
 import styles from "./MobileSettings.module.css";
-
-// ─── QrCanvas ─────────────────────────────────────────────────────────────────
-
-function QrCanvas({ url }: { url: string }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    QRCode.toCanvas(canvas, url, {
-      width: 200,
-      margin: 1,
-      color: {
-        dark: "#F0EDE4",
-        light: "#242422",
-      },
-    }).catch((err: unknown) => {
-      console.error("QRCode.toCanvas failed:", err);
-    });
-  }, [url]);
-
-  return <canvas ref={canvasRef} width={200} height={200} />;
-}
 
 // ─── Notification status ──────────────────────────────────────────────────────
 
@@ -116,7 +93,6 @@ const ANDROID_STEPS: ReactNode[] = [
 export function MobileSettings() {
   const platform = usePlatform();
   const notifState = useNotificationStatus();
-  const origin = window.location.origin;
 
   const steps =
     platform === "ios"
@@ -181,23 +157,6 @@ export function MobileSettings() {
                 </div>
               </div>
             )}
-          </div>
-        </section>
-
-        {/* ── Open on Your Phone ── */}
-        <section className={styles.section}>
-          <div className={styles.sectionLabel}>Open on Your Phone</div>
-          <div className={styles.sectionCard}>
-            <div className={styles.row}>
-              <div className={styles.qrWrap}>
-                <QrCanvas url={origin} />
-                <div className={styles.qrUrl}>{origin}</div>
-                <div className={styles.qrCaption}>
-                  Scan with your phone camera. Make sure Tailscale is running on
-                  both devices first.
-                </div>
-              </div>
-            </div>
           </div>
         </section>
 
