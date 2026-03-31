@@ -38,6 +38,7 @@ pub mod notify;
 pub mod personas;
 pub mod profile;
 pub mod providers;
+pub mod push;
 pub mod routines;
 pub mod setup;
 
@@ -133,6 +134,9 @@ pub struct AppState {
     /// task receives on the other end and reacts by registering or removing
     /// cron jobs.
     pub scheduler_tx: tokio::sync::mpsc::Sender<SchedulerCommand>,
+    /// VAPID public key (base64url, no padding). Cached from app_config at startup.
+    /// Served by GET /api/push/vapid-public-key without a DB round-trip.
+    pub vapid_public_key: String,
 }
 
 impl AppState {
@@ -173,6 +177,11 @@ pub async fn build_router(
 
     // ── MCP connection manager ────────────────────────────────────────────────
     let master_key = credentials_service::get_or_create_master_key(&pool).await?;
+
+    // ── VAPID key pair ────────────────────────────────────────────────────────
+    let (_vapid_private_pem, vapid_public_key) =
+        crate::services::vapid::get_or_create_vapid_keys(&pool).await?;
+    tracing::info!("vapid: public key loaded ({}…)", &vapid_public_key[..8]);
     let mcp = McpConnectionManager::new(
         pool.clone(),
         master_key.clone(),
@@ -196,6 +205,7 @@ pub async fn build_router(
         mcp: mcp.clone(),
         built_in_tools: Arc::new(tools_service::built_in_tools()),
         scheduler_tx,
+        vapid_public_key,
     });
 
     // Start copilot-api supervision in the background.
@@ -219,7 +229,11 @@ pub async fn build_router(
         .route("/api/setup/complete", axum::routing::post(setup::complete))
         .route("/api/auth/token", axum::routing::post(auth::login))
         .route("/api/auth/logout", axum::routing::post(auth::logout))
-        .route("/health", get(health::health_check));
+        .route("/health", get(health::health_check))
+        .route(
+            "/api/push/vapid-public-key",
+            get(push::get_vapid_public_key),
+        );
 
     // Protected API routes (auth required)
     let protected_api = Router::new()
@@ -363,6 +377,11 @@ pub async fn build_router(
         .route(
             "/api/device-tokens",
             axum::routing::post(tokens::register_device).delete(tokens::unregister_device),
+        )
+        // Push subscriptions (Web Push / VAPID)
+        .route(
+            "/api/push/subscribe",
+            axum::routing::post(push::subscribe).delete(push::unsubscribe),
         )
         // App config
         .route("/api/config", get(config::get_config))
@@ -702,6 +721,7 @@ mod tests {
             mcp,
             built_in_tools: std::sync::Arc::new(vec![]),
             scheduler_tx: tokio::sync::mpsc::channel(1).0,
+            vapid_public_key: String::new(),
         };
 
         let rs1 = app_state.get_run_state("thread-abc");
@@ -750,6 +770,7 @@ mod tests {
             mcp,
             built_in_tools: std::sync::Arc::new(vec![]),
             scheduler_tx: tokio::sync::mpsc::channel(1).0,
+            vapid_public_key: String::new(),
         };
 
         let rs_a = app_state.get_run_state("thread-aaa");
@@ -809,6 +830,7 @@ mod tests {
             mcp,
             built_in_tools: std::sync::Arc::new(vec![]),
             scheduler_tx: tokio::sync::mpsc::channel(1).0,
+            vapid_public_key: String::new(),
         });
 
         // Simulate two requests receiving their own clone of the Arc —

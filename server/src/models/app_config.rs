@@ -34,6 +34,14 @@ pub mod keys {
     /// Stored as a 64-character hex string (32 bytes). Generated once on first
     /// server run and never included in any log output or API response.
     pub const CREDENTIAL_MASTER_KEY: &str = "credential_master_key";
+
+    /// PKCS8 PEM-encoded VAPID private key. Generated once on first server run.
+    /// Never logged or returned by any API endpoint.
+    pub const VAPID_PRIVATE_KEY: &str = "vapid_private_key";
+
+    /// Base64url-encoded (no padding) uncompressed P-256 public key (65 raw bytes).
+    /// Safe to expose publicly — returned by GET /api/push/vapid-public-key.
+    pub const VAPID_PUBLIC_KEY: &str = "vapid_public_key";
 }
 
 #[derive(Debug, Serialize)]

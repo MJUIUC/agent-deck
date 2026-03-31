@@ -340,6 +340,7 @@ mod tests {
             mcp,
             built_in_tools: std::sync::Arc::new(vec![]),
             scheduler_tx: tokio::sync::mpsc::channel(1).0,
+            vapid_public_key: String::new(),
         }
     }
 

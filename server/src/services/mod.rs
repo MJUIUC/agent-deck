@@ -12,3 +12,4 @@ pub mod scheduler;
 pub mod summarization;
 pub mod title;
 pub mod tools;
+pub mod vapid;
