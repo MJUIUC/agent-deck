@@ -270,9 +270,13 @@ pub async fn test_connection(
         None => None,
     };
 
-    let models = provider_service::test_provider(&provider.base_url, decrypted_key.as_deref())
-        .await
-        .map_err(|e| AppError::Provider(e.to_string()))?;
+    let models = provider_service::test_provider(
+        &provider.base_url,
+        decrypted_key.as_deref(),
+        &provider.kind,
+    )
+    .await
+    .map_err(|e| AppError::Provider(e.to_string()))?;
 
     Ok((
         StatusCode::OK,

@@ -656,13 +656,23 @@ impl ProviderRegistry {
 
 /// Test a provider connection by hitting its /v1/models endpoint.
 /// Returns a list of available models on success.
-pub async fn test_provider(base_url: &str, api_key: Option<&str>) -> Result<Vec<RemoteModel>> {
+pub async fn test_provider(
+    base_url: &str,
+    api_key: Option<&str>,
+    kind: &str,
+) -> Result<Vec<RemoteModel>> {
     let client = reqwest::Client::new();
     let url = format!("{}/models", base_url.trim_end_matches('/'));
 
     let mut req = client.get(&url);
     if let Some(key) = api_key {
-        req = req.bearer_auth(key);
+        if kind == "anthropic" {
+            req = req
+                .header("x-api-key", key)
+                .header("anthropic-version", "2023-06-01");
+        } else {
+            req = req.bearer_auth(key);
+        }
     }
 
     let response = req
