@@ -1,20 +1,8 @@
-import { useCallback } from "react";
 import styles from "./MobileSettings.module.css";
-
-// ─── Props ────────────────────────────────────────────────────────────────────
-
-interface MobileSettingsProps {
-  onOpenFullSettings?: () => void;
-}
 
 // ─── MobileSettings ───────────────────────────────────────────────────────────
 
-export function MobileSettings({ onOpenFullSettings }: MobileSettingsProps) {
-  const handleFullSettings = useCallback(() => {
-    onOpenFullSettings?.();
-    window.dispatchEvent(new CustomEvent("agent-deck:open-settings"));
-  }, [onOpenFullSettings]);
-
+export function MobileSettings() {
   return (
     <div className={styles.container}>
       {/* ── Nav bar ── */}
@@ -24,7 +12,6 @@ export function MobileSettings({ onOpenFullSettings }: MobileSettingsProps) {
 
       {/* ── Scrollable body ── */}
       <div className={`${styles.body} scrollbar-thin`}>
-
         {/* ── Install as App ── */}
         <section className={styles.section}>
           <div className={styles.sectionLabel}>Install as App</div>
@@ -53,29 +40,6 @@ export function MobileSettings({ onOpenFullSettings }: MobileSettingsProps) {
             </div>
           </div>
         </section>
-
-        {/* ── Connection ── */}
-        <section className={styles.section}>
-          <div className={styles.sectionLabel}>Connection</div>
-          <div className={styles.sectionCard}>
-            <div className={styles.row}>
-              <div className={styles.rowDesc}>
-                Configure AI providers, personas, credentials, MCP servers, and
-                other server settings.
-              </div>
-            </div>
-            <div className={styles.rowAction}>
-              <button
-                type="button"
-                className={styles.fullSettingsBtn}
-                onClick={handleFullSettings}
-              >
-                ⚙︎ Full Settings
-              </button>
-            </div>
-          </div>
-        </section>
-
       </div>
     </div>
   );

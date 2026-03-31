@@ -163,11 +163,6 @@ export function MobileLayout() {
     [pendingPersona, createThread, promotePendingThread, sendMessage],
   );
 
-  // ── Open settings ────────────────────────────────────────────────────────────
-  const handleOpenSettings = useCallback(() => {
-    setActiveTab("settings");
-  }, []);
-
   // ── Tab helpers ──────────────────────────────────────────────────────────────
   const handleBack = useCallback(() => {
     setPendingPersona(null);
@@ -199,9 +194,7 @@ export function MobileLayout() {
           />
         )}
 
-        {activeTab === "settings" && (
-          <MobileSettings onOpenFullSettings={handleOpenSettings} />
-        )}
+        {activeTab === "settings" && <MobileSettings />}
       </div>
 
       {/* ── Bottom tab bar ── */}
