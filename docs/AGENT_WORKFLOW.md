@@ -258,25 +258,26 @@ While waiting:
 
 Once `Human review approved` is checked, close out the story:
 
-### 7a — Move the plan file to deprecated
+### 7a — Archive the plan file and mark PLAN_3 complete (one commit)
 
+These two actions are inseparable — do them together in a single commit. Never archive the AD file without also updating PLAN_3 in the same operation.
+
+1. Move the plan file to deprecated:
 ```bash
 mv docs/AD-xxx.md docs/deprecated/AD-xxx.md
+```
+
+2. Open `docs/PLAN/PLAN_3.md` and mark the story ✅ complete. Add a one-line as-built note if any implementation deviated from the spec.
+
+3. Stage and commit both changes together:
+```bash
 git add docs/deprecated/AD-xxx.md
 git add docs/AD-xxx.md        # stage the deletion
-git commit -m "docs: archive AD-xxx.md — story complete"
-```
-
-### 7b — Mark the story complete in PLAN_3
-
-Open `docs/PLAN/PLAN_3.md` and mark the story ✅ complete. Add a one-line as-built note if any implementation deviated from the spec. Commit:
-
-```bash
 git add docs/PLAN/PLAN_3.md
-git commit -m "docs: mark Story X.Y complete in PLAN_3"
+git commit -m "docs: close Story X.Y — archive plan, mark complete in PLAN_3"
 ```
 
-### 7c — Open a pull request to `dev`
+### 7b — Open a pull request to `dev`
 
 Push the branch and open a PR:
 
