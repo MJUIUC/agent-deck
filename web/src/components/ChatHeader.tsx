@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import type { Thread, Provider, Model } from "@/types";
 import { providersApi, modelsApi } from "@/api/client";
-import { Settings, Menu } from "lucide-react";
+import { Menu } from "lucide-react";
 import styles from "./ChatHeader.module.css";
 
 interface ChatHeaderProps {
@@ -134,7 +134,7 @@ export function ChatHeader({
           }
           className={styles.iconBtn}
         >
-          <Settings size={16} />
+          <Menu size={16} />
         </button>
       </div>
     </div>
