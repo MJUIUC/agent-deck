@@ -152,6 +152,6 @@ Logical order: Task 1 → Task 2 → Task 3 → Task 4 → Task 5.
 
 ## Approval
 
-- [ ] **Implementation plan approved** — human has reviewed this plan and confirmed coding can begin
+- [x] **Implementation plan approved** — human has reviewed this plan and confirmed coding can begin
 - [ ] **Coding complete** — all tests pass, agent has verified against every acceptance criterion
 - [ ] **Human review approved** — human has tested the changes live and signed off
