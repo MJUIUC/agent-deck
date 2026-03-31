@@ -158,6 +158,8 @@ Once the file is written, **stop**. Present the plan to the human and wait for t
 
 Only begin this step after `Implementation plan approved` is checked in `AD-xxx.md`.
 
+> **⚠️ Never write code directly in this conversation thread.** All implementation must go through sub-agents. Writing code inline burns context tokens rapidly, shortens the available window for coordination and review, and makes it hard to track what changed. If a fix is one line, spawn an agent for it anyway.
+
 ### Break into parallel tasks
 
 Review the parallelisation note in the plan. Spawn one sub-agent per independent task. Tasks that touch different files with no shared state can always run in parallel. Typical splits:
