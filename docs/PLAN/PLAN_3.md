@@ -12,13 +12,15 @@ Each story maps to one feature branch. Complete all stories in a phase before st
 
 ---
 
-### Phase 1 — Skeleton That Runs
+### Phase 1 — Skeleton That Runs ✅ Complete
 
 **Goal:** A Rust server that boots with SQLite, serves a React SPA shell, and has all tables in place. Tailscale integration is wired in so the server knows its own hostname from the start. Nothing functional yet, but the entire foundation is solid and both projects compile.
 
+**Status:** All stories complete. Rust/Axum server boots with SQLite WAL, static file serving, auth middleware, and full entity CRUD. React SPA scaffolded with Vite/TypeScript, API client and Zustand stores in place. All UI mockups built. Tailscale detection wired in at startup.
+
 ---
 
-**Story 1.1 — Cargo workspace and project scaffolding**  
+**Story 1.1 — Cargo workspace and project scaffolding** ✅ Complete  
 Branch: `feature/phase1-cargo-workspace`
 
 Set up the Cargo workspace with a single `server` member. Add all production dependencies to `Cargo.toml`. Create the directory structure under `server/src/`. Add `.env.example`. Verify the project compiles with `cargo build`.
@@ -30,7 +32,7 @@ Acceptance criteria:
 
 ---
 
-**Story 1.2 — SQLite schema and migrations**  
+**Story 1.2 — SQLite schema and migrations** ✅ Complete  
 Branch: `feature/phase1-sqlite-schema`
 
 Create all SQLx migration files under `server/src/db/migrations/`. Include all tables from section 5.1 (including the updated `memory` table with `persona_id`). Enable WAL mode and foreign keys. Write a database module that initializes the connection pool.
@@ -44,7 +46,7 @@ Acceptance criteria:
 
 ---
 
-**Story 1.3 — Configuration and server bootstrap**  
+**Story 1.3 — Configuration and server bootstrap** ✅ Complete  
 Branch: `feature/phase1-server-bootstrap`
 
 Load config from `.env` using `dotenvy`. Set up `tracing` for structured logging. Create the main `axum` router. Add a health check endpoint at `GET /health`. Serve static files from a configurable `public/` directory. Start the server on port 7474.
@@ -56,7 +58,7 @@ Acceptance criteria:
 
 ---
 
-**Story 1.4 — Auth middleware**  
+**Story 1.4 — Auth middleware** ✅ Complete  
 Branch: `feature/phase1-auth-middleware`
 
 Implement the authentication system per section 6.0. Bearer token auth middleware that checks the `Authorization` header OR the `agent_deck_session` cookie. Token is stored in `app_config` table under key `auth_token`. Generate a random 64-character hex token on first run if none exists, log it to the terminal at startup. Localhost requests (origin `127.0.0.1` or `::1`) bypass auth entirely. Implement `POST /api/auth/token` (validates token, sets `httpOnly` cookie) and `POST /api/auth/logout` (clears cookie). All `/api/*` routes require auth except `GET /api/setup/status` and `POST /api/auth/token`.
@@ -73,7 +75,7 @@ Acceptance criteria:
 
 ---
 
-**Story 1.5 — Setup endpoint and first-run detection**  
+**Story 1.5 — Setup endpoint and first-run detection** ✅ Complete  
 Branch: `feature/phase1-setup-endpoint`
 
 Implement `GET /api/setup/status` and `POST /api/setup/complete`. On first run (no user row in DB), setup status returns `{ "complete": false }`. `POST /api/setup/complete` accepts a display name, creates the user row, and marks setup complete.
@@ -85,7 +87,7 @@ Acceptance criteria:
 
 ---
 
-**Story 1.x — Tailscale server integration**  
+**Story 1.x — Tailscale server integration** ✅ Complete  
 Branch: `feature/phase1-tailscale-integration`
 
 Implement Tailscale detection and management on the server side. This is a prerequisite for the setup wizard Tailscale step and for the server URL being available in app_config.
@@ -126,7 +128,7 @@ Acceptance criteria:
 
 ---
 
-**Story 1.6 — Core entity CRUD (providers, personas, threads, skills, MCP servers)**  
+**Story 1.6 — Core entity CRUD (providers, personas, threads, skills, MCP servers)** ✅ Complete  
 Branch: `feature/phase1-core-crud`
 
 Implement all REST endpoints for providers (section 6.2, excluding Copilot auth), personas (section 6.4 including avatar upload), threads (section 6.7 including archive/unarchive and skill/MCP attachment), skills (section 6.5), and MCP servers (section 6.6). Implement API key encryption using a machine-derived secret. Include `POST /api/providers/:id/test` which calls the provider's `/v1/models` endpoint.
@@ -142,7 +144,7 @@ Acceptance criteria:
 
 ---
 
-**Story 1.7 — React SPA scaffolding**  
+**Story 1.7 — React SPA scaffolding** ✅ Complete  
 Branch: `feature/phase1-web-scaffolding`
 
 Initialize the React app in `web/`. Set up Vite, TypeScript, Tailwind CSS, and shadcn/ui. Configure Tailwind with the color tokens from section 4.1. Set up React Router with placeholder routes for all main sections. Configure Vite to proxy `/api` to `localhost:7474` in development. Set up the Vite build to output to `server/public/` so the Rust server serves it.
@@ -156,7 +158,7 @@ Acceptance criteria:
 
 ---
 
-**Story 1.8 — API client and Zustand store shell**  
+**Story 1.8 — API client and Zustand store shell** ✅ Complete  
 Branch: `feature/phase1-api-client`
 
 Implement a typed API client service that wraps all API calls. On `401` response, show a **token entry screen** — a single input field where the user pastes their auth token, which is validated via `POST /api/auth/token` and stored as a cookie. On localhost, this screen is never shown (auth is bypassed). Create Zustand store shells for threads, messages, and UI state.
@@ -170,7 +172,7 @@ Acceptance criteria:
 
 ---
 
-**Story 1.9 — UI mockups (all screens)**  
+**Story 1.9 — UI mockups (all screens)** ✅ Complete  
 Branch: `feature/phase1-ui-mockups`
 
 Create static HTML mockups for every major screen in the application. These serve as the approved visual reference for all subsequent UI implementation. Mockups live in a `mockups/` directory at the project root. Each file is self-contained (inline CSS, no external dependencies) and uses the color tokens from section 4.1 as CSS custom properties. Includes light JavaScript for key interactions — hover states, transitions, dropdowns — but no API calls or real data. Dummy data is hardcoded.
@@ -218,13 +220,15 @@ Acceptance criteria:
 
 ---
 
-### Phase 2 — First Chat
+### Phase 2 — First Chat ✅ Complete
 
 **Goal:** You can talk to an LLM through your own UI. This is the milestone that makes the project feel real. By the end of this phase you can bootstrap a provider and persona via curl, then chat in the browser.
 
+**Status:** All stories complete. End-to-end streaming chat works with OpenAI, Anthropic, and Copilot providers. SSE infrastructure in place. Context assembly, agent run-loop, and message persistence all complete. Thread list and chat UI match approved mockups.
+
 ---
 
-**Story 2.1 — copilot-api vendor submodule and process management**  
+**Story 2.1 — copilot-api vendor submodule and process management** ✅ Complete  
 Branch: `feature/phase2-copilot-process`
 
 Add `copilot-api` as a git submodule at `vendor/copilot-api/`. Implement the service that manages it as a child process using `tokio::process`. Start it when Copilot is the active provider, stop it when not needed, restart on crash. Implement `GET /api/providers/copilot/auth-status` and `POST /api/providers/copilot/auth-start`.
@@ -238,7 +242,7 @@ Acceptance criteria:
 
 ---
 
-**Story 2.2 — Provider abstraction layer**  
+**Story 2.2 — Provider abstraction layer** ✅ Complete  
 Branch: `feature/phase2-provider-abstraction`
 
 Implement the provider service using `async-openai`. It should accept a provider record from the DB (base URL + API key) and expose a unified interface for: listing models, and sending a chat completion request with streaming. Write the service so that pointing it at `http://localhost:4141/v1` (Copilot proxy) works identically to pointing it at `https://api.openai.com/v1`.
@@ -250,7 +254,7 @@ Acceptance criteria:
 
 ---
 
-**Story 2.3 — SSE infrastructure**  
+**Story 2.3 — SSE infrastructure** ✅ Complete  
 Branch: `feature/phase2-sse-infrastructure`
 
 Implement the two SSE endpoints from section 6.9. Create a channel-based event broadcaster in the server that routes events to the correct SSE streams. The per-thread stream should be created on connection and cleaned up on disconnect. Track connected SSE clients per thread (needed later for push notification decisions).
@@ -263,7 +267,7 @@ Acceptance criteria:
 
 ---
 
-**Story 2.4 — Context assembly**  
+**Story 2.4 — Context assembly** ✅ Complete  
 Branch: `feature/phase2-context-assembly`
 
 Implement the function that builds the message array for an LLM request. It should combine: persona system prompt + thread addendum + last N messages from DB (configurable, default 20). Write this as a pure function that is easy to unit test.
@@ -276,7 +280,7 @@ Acceptance criteria:
 
 ---
 
-**Story 2.5 — Agent run-loop and message endpoint**  
+**Story 2.5 — Agent run-loop and message endpoint** ✅ Complete  
 Branch: `feature/phase2-agent-runloop`
 
 Implement `POST /api/threads/:id/messages`. The handler should:
@@ -298,7 +302,7 @@ Acceptance criteria:
 
 ---
 
-**Story 2.6 — Thread list and chat UI**  
+**Story 2.6 — Thread list and chat UI** ✅ Complete  
 Branch: `feature/phase2-chat-ui`
 
 Implement the sidebar thread list and main chat view in the React SPA, matching the approved mockups in `mockups/chat-view.html`. Thread list shows active threads with agent emoji, name, and last message preview. Include a "New Chat" button that opens a persona picker. Chat view shows message history with user messages right-aligned and agent messages left-aligned with avatar. Connect to the per-thread SSE stream for token streaming. Message input with send on Enter. Connect to the global SSE stream to update thread list previews in real time.
@@ -423,13 +427,15 @@ Acceptance criteria:
 
 ---
 
-### Phase 4 — Credentials and MCP Integration
+### Phase 4 — Credentials and MCP Integration ✅ Complete
 
 **Goal:** Establish encrypted credential storage for static secrets (API keys, PATs, bearer tokens), then wire up real MCP server integration with credential resolution, tool discovery, and agent integration. After this phase, agents can use external tools in chat.
 
+**Status:** All stories complete. AES-256-GCM credential store in place with provider key migration. MCP connection manager handles local (stdio) and remote (HTTP/SSE) servers with reconnect backoff. Tool discovery, namespaced tool dispatch, and agent integration all complete. Credentials UI and MCP UI fully polished.
+
 ---
 
-**Story 4.1 — Credential store and encryption**
+**Story 4.1 — Credential store and encryption** ✅ Complete
 Branch: `feature/phase4-credential-store`
 
 Implement the credential storage infrastructure. On first server run, generate a 256-bit master key and store it in `app_config` as `credential_master_key`. Implement AES-256-GCM encrypt/decrypt helpers. Implement `credentials` table CRUD with all data encrypted at rest. The `GET /api/credentials` endpoint returns metadata only — `encrypted_data` is never included in any API response.
@@ -451,7 +457,7 @@ Acceptance criteria:
 
 ---
 
-**Story 4.2 — Credentials settings UI**
+**Story 4.2 — Credentials settings UI** ✅ Complete
 Branch: `feature/phase4-credentials-ui`
 
 Implement `/settings/credentials` page for managing MCP and service credentials. This is separate from the existing provider settings page (which continues to own the provider key entry UX, but now reads/writes through the credential store under the hood).
@@ -468,7 +474,7 @@ Acceptance criteria:
 
 ---
 
-**Story 4.3 — MCP connection manager**
+**Story 4.3 — MCP connection manager** ✅ Complete
 Branch: `feature/phase4-mcp-connection-manager`
 
 Implement the server-side MCP connection manager in `services/mcp.rs`. This maintains a pool of active connections keyed by `mcp_server_id` and handles connect, disconnect, and reconnect on error.
@@ -551,9 +557,11 @@ Acceptance criteria:
 
 ---
 
-### Phase 5 — Memory and Routines
+### Phase 5 — Memory and Routines ✅ Complete
 
 **Goal:** Add persistent memory and autonomous scheduled routines. This is what differentiates agent-deck from a chat wrapper — agents remember things across conversations and can act on their own schedule.
+
+**Status:** All stories complete. Per-thread run management with cancellation and queuing in place. Memory tools (save, recall, delete) wired into agent context for non-default personas. Routine CRUD, cron scheduler, and two-phase execution complete. Memory and routine UI fully integrated. User profile context injection in place. Rolling context-window summarization and `recall_conversation` tool complete.
 
 **Depends on:** Phase 4 (credential store and MCP integration complete).
 
@@ -724,7 +732,7 @@ Acceptance criteria:
 
 ---
 
-**Story 5.5 — Routine UI integration**
+**Story 5.5 — Routine UI integration** ✅ Complete
 Branch: `feature/phase5-routine-ui`
 
 Wire routines into the thread config pane (the shell from Story 3.5 — now with full add/edit/delete/toggle functionality). Routine-generated messages in the chat view should be visually distinct (subtle different background using `bubble_routine` color, small "routine" label).
@@ -737,7 +745,7 @@ Acceptance criteria:
 
 ---
 
-**Story 5.6 — Memory UI integration**
+**Story 5.6 — Memory UI integration** ✅ Complete
 Branch: `feature/phase5-memory-ui`
 
 Add memory viewer per section 7.6.7:
@@ -840,7 +848,7 @@ Acceptance criteria:
 
 ---
 
-**Story 5.8 — Context window summarization and conversation recall**
+**Story 5.8 — Context window summarization and conversation recall** ✅ Complete
 Branch: `feature/phase5-summarization`
 
 Implement rolling context-window summarization and a `recall_conversation` agent tool. Replaces the current silent sliding-window discard with a two-trigger system: proactive (message count threshold) and reactive (context-length 400 error detection and retry). Summaries are persisted to a log table so the agent can look back at past conversations by date range.
