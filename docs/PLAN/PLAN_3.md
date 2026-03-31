@@ -1157,52 +1157,7 @@ Acceptance criteria:
 
 ---
 
-**Story 6.x — Tailscale wizard step and mobile settings**  
-Branch: `feature/phase6-tailscale-wizard`
 
-Wire the Tailscale setup step into the setup wizard and update the mobile settings page with Tailscale install guidance.
-
-**Setup wizard — Tailscale step (new Step 2, between Welcome and Provider):**
-
-Add a new `Step2Tailscale.tsx` wizard step. On mount, call `GET /api/tailscale/status`.
-
-- **Connected state:** Green status box showing "✓ Connected · {hostname}". "Next →" button. Auto-advances after 1.5 seconds.
-- **Installed, not connected state:** "Connect to Tailscale" primary button. On click, call `POST /api/tailscale/connect`. If response contains `auth_url`, show:
-  ```
-  Open this link in your browser to authorise this machine:
-  [Open Tailscale login →]  (opens in new tab)
-  ```
-  Poll `GET /api/tailscale/status` every 2 seconds. When `connected: true`, auto-advance.
-- **Not installed state:** Brief explanation ("Tailscale is required for your phone and other devices to reach agent-deck privately."). "Install Tailscale" primary button — calls `POST /api/tailscale/install`, shows spinner with status text. On success transitions to "not connected" state.
-- **Skip link** always visible at bottom in tertiary text: "Skip — set up Tailscale later". Skipping advances the wizard without storing a hostname.
-
-**Mobile settings page — Tailscale section:**
-
-Add a new "Tailscale" section to `MobileSettings.tsx` above the existing QR code section.
-
-Content:
-- Current connection status (fetched from `GET /api/tailscale/status`)
-  - Connected: "✓ mac-mini.tail1234.ts.net" in accent color
-  - Not connected: "Not connected" with a "Connect in wizard" link that re-opens the setup wizard at the Tailscale step
-- **Install on your phone:** Two buttons/links:
-  - "Tailscale for iOS" → `https://apps.apple.com/app/tailscale/id1470499037`
-  - "Tailscale for Android" → `https://play.google.com/store/apps/details?id=com.tailscale.ipn.android`
-- Brief instruction: "Sign in to Tailscale on your phone using the same account as this Mac Mini. Then open the server URL below in Safari (iOS) or Chrome (Android)."
-- Server URL displayed as copyable text: the `tailscale_hostname`-based URL, or a placeholder if not connected
-
-**Update QR code label:**
-The existing QR code section should update its "How to pair" instructions to mention Tailscale step 1: "Make sure Tailscale is running on your phone and you're signed in to the same account."
-
-Acceptance criteria:
-- Tailscale wizard step renders all three states correctly (connected, installed/not-connected, not-installed)
-- Polling works and auto-advances when connection is established
-- Skip link works and advances wizard without error
-- Mobile settings Tailscale section shows correct connection status
-- App Store and Play Store links open correctly
-- Server URL in mobile settings uses `tailscale_hostname` when available
-- QR code "How to pair" instructions include Tailscale prerequisite
-
----
 
 **Story 6.3 — Updated mobile settings page**  
 Branch: `feature/phase6-mobile-settings`
@@ -1425,6 +1380,12 @@ The following items are explicitly out of scope for v1. They are documented here
 
 ### Status Bar App (Phase 10)
 A native macOS Swift/SwiftUI app that lives in the menu bar. It manages the Rust server process and optionally the `copilot-api` process. Shows server status (running/stopped), active thread count, and allows starting/stopping the server. Registers as a Login Item so it starts on boot. The `.app` bundle allows it to appear in Launchpad and Spotlight. Planned for after all other phases are complete.
+
+### Tailscale Onboarding (macOS app installer)
+
+The original Story 6.x planned a Tailscale setup step inside the web setup wizard. This was deferred because the right place for Tailscale onboarding is the initial application install — before the user opens the web UI for the first time. The intended delivery model is a macOS DMG: the user double-clicks the installer, a native setup assistant walks them through installing Tailscale, signing in, and verifying connectivity. Once that completes, the agent-deck server starts and the user opens the web UI already connected over Tailscale.
+
+This work belongs with the macOS packaging story (see Status Bar App / Phase 10) rather than as a web feature. When tackled, the existing Tailscale server-side routes (`GET /api/tailscale/status`, `POST /api/tailscale/connect`, `POST /api/tailscale/install`) can remain — they are still useful for displaying connection status in mobile settings. Only the in-web-wizard setup step is out of scope.
 
 ### OAuth and Third-Party App Credentials
 Browser-based OAuth flows (Google, GitHub, etc.) with token refresh, consent screens, and callback handling. Required to unlock Gmail, Google Calendar, Google Drive, and any MCP server that authenticates via OAuth rather than static tokens. Includes: OAuth provider trait and registry, token refresh on credential resolution, `/settings/accounts` page for connected accounts, and the Google app verification process for consumer distribution. This is a significant UX and infrastructure investment — deferred until the core platform is stable and the credential store, MCP integration, and agent runtime are proven out. When ready, the credential store already supports the encrypted storage layer; the work is in adding the browser flow, refresh logic, and new credential types (`oauth2` with `scopes`, `expires_at`, `refresh_token`).
