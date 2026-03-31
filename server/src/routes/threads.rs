@@ -52,6 +52,7 @@ pub async fn list(
     let threads: Vec<Thread> = sqlx::query_as(
         "SELECT id, user_id, persona_id, title, active_model, active_provider,
                 system_prompt_addendum, status, show_tool_activity, show_system_events,
+                summary, summary_updated_at, summary_message_count, auto_summarize,
                 created_at, updated_at
          FROM threads
          WHERE user_id = ? AND status = ?
@@ -130,6 +131,7 @@ pub async fn get(
     let thread: Option<Thread> = sqlx::query_as(
         "SELECT id, user_id, persona_id, title, active_model, active_provider,
                 system_prompt_addendum, status, show_tool_activity, show_system_events,
+                summary, summary_updated_at, summary_message_count, auto_summarize,
                 created_at, updated_at
          FROM threads
          WHERE id = ? AND user_id = ?",
@@ -194,8 +196,9 @@ pub async fn create(
         "INSERT INTO threads
              (id, user_id, persona_id, title, active_model, active_provider,
               system_prompt_addendum, status, show_tool_activity, show_system_events,
+              summary, summary_updated_at, summary_message_count, auto_summarize,
               created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&thread.id)
     .bind(&thread.user_id)
@@ -207,6 +210,10 @@ pub async fn create(
     .bind(&thread.status)
     .bind(thread.show_tool_activity)
     .bind(thread.show_system_events)
+    .bind(&thread.summary)
+    .bind(&thread.summary_updated_at)
+    .bind(thread.summary_message_count)
+    .bind(thread.auto_summarize)
     .bind(&thread.created_at)
     .bind(&thread.updated_at)
     .execute(&state.pool)
@@ -250,6 +257,7 @@ pub async fn update(
     let existing: Option<Thread> = sqlx::query_as(
         "SELECT id, user_id, persona_id, title, active_model, active_provider,
                 system_prompt_addendum, status, show_tool_activity, show_system_events,
+                summary, summary_updated_at, summary_message_count, auto_summarize,
                 created_at, updated_at
          FROM threads
          WHERE id = ? AND user_id = ?",
@@ -289,6 +297,8 @@ pub async fn update(
         .show_system_events
         .unwrap_or(existing.show_system_events);
 
+    let auto_summarize = payload.auto_summarize.unwrap_or(existing.auto_summarize);
+
     let now = chrono::Utc::now()
         .format("%Y-%m-%dT%H:%M:%S%.3fZ")
         .to_string();
@@ -297,7 +307,7 @@ pub async fn update(
         "UPDATE threads
          SET title = ?, active_model = ?, active_provider = ?,
              system_prompt_addendum = ?, show_tool_activity = ?,
-             show_system_events = ?, updated_at = ?
+             show_system_events = ?, auto_summarize = ?, updated_at = ?
          WHERE id = ? AND user_id = ?",
     )
     .bind(title)
@@ -306,6 +316,7 @@ pub async fn update(
     .bind(system_prompt_addendum)
     .bind(show_tool_activity)
     .bind(show_system_events)
+    .bind(auto_summarize)
     .bind(&now)
     .bind(&id)
     .bind(&user_id)
@@ -323,6 +334,10 @@ pub async fn update(
         status: existing.status,
         show_tool_activity,
         show_system_events,
+        summary: existing.summary,
+        summary_updated_at: existing.summary_updated_at,
+        summary_message_count: existing.summary_message_count,
+        auto_summarize,
         created_at: existing.created_at,
         updated_at: now,
     };
@@ -558,6 +573,7 @@ async fn verify_thread_ownership(
     let thread: Option<Thread> = sqlx::query_as(
         "SELECT id, user_id, persona_id, title, active_model, active_provider,
                 system_prompt_addendum, status, show_tool_activity, show_system_events,
+                summary, summary_updated_at, summary_message_count, auto_summarize,
                 created_at, updated_at
          FROM threads
          WHERE id = ? AND user_id = ?",

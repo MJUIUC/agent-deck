@@ -779,7 +779,7 @@ Acceptance criteria:
 
 ---
 
-**Story 5.7 — User profile**
+**Story 5.7 — User profile** ✅
 Branch: `feature/phase5-user-profile`
 
 Implement the user profile feature per section 7.11.
@@ -803,21 +803,45 @@ Add a Profile section to Settings → General. All fields are edit-in-place (blu
 Add the informational hint below the system prompt textarea in the persona form per section 7.11.7.
 
 Acceptance criteria:
-- [ ] Migration adds all profile columns to `users` with NULL defaults
-- [ ] `GET /api/profile` returns all fields; empty fields are `null`
-- [ ] `PUT /api/profile` updates only the provided fields; sending `null` clears the field
-- [ ] `profile_updated_at` is updated on every PUT
-- [ ] Context block is injected between persona prompt and thread addendum for non-default personas
-- [ ] Context block is NOT injected when only `display_name` is set (all other fields null/empty)
-- [ ] Context block is NOT injected for the Default persona
-- [ ] Only non-empty fields appear in the injected block
-- [ ] Timezone auto-detected from browser in setup wizard and settings
-- [ ] "About You" step is skippable from the setup wizard
-- [ ] Profile section appears in Settings → General
-- [ ] 500-character limit enforced on `about` field (server-side truncation, client-side counter)
-- [ ] Persona settings hint appears below the system prompt textarea
-- [ ] Unit tests for context block formatting (all fields, partial fields, no fields)
-- [ ] Unit tests for partial PUT update logic
+- [x] Migration adds all profile columns to `users` with NULL defaults
+- [x] `GET /api/profile` returns all fields; empty fields are `null`
+- [x] `PUT /api/profile` updates only the provided fields; sending `null` clears the field
+- [x] `profile_updated_at` is updated on every PUT
+- [x] Context block is injected between persona prompt and thread addendum for non-default personas
+- [x] Context block is NOT injected when only `display_name` is set (all other fields null/empty)
+- [x] Context block is NOT injected for the Default persona
+- [x] Only non-empty fields appear in the injected block
+- [x] Timezone auto-detected from browser in setup wizard and settings
+- [x] "About You" step is skippable from the setup wizard
+- [x] Profile section appears in Settings → General
+- [x] 500-character limit enforced on `about` field (server-side truncation, client-side counter)
+- [x] Persona settings hint appears below the system prompt textarea
+- [x] Unit tests for context block formatting (all fields, partial fields, no fields)
+- [x] Unit tests for partial PUT update logic
+
+### As-built notes (Story 5.7)
+
+- **Migration 009** adds 7 nullable `TEXT` columns to `users`: `pronouns`, `role`, `organization`, `location`, `timezone`, `about`, `profile_updated_at`. All default to `NULL` — existing users are unaffected.
+
+- **Partial-update pattern:** `PUT /api/profile` deserializes the body as `serde_json::Value` and checks each key explicitly — absent keys keep the current DB value, `null` clears the field, a string sets it (trimmed; empty string treated as null). This distinguishes "not sent" from "sent as null" without requiring `Option<Option<T>>` or a custom deserializer.
+
+- **`about` truncation:** Enforced server-side at 500 characters (char boundary, not byte boundary). Client-side counter in both the setup wizard step and the Settings profile card prevents the user reaching the limit accidentally.
+
+- **Context injection gating:** `format_user_profile_context()` in `agent.rs` builds the `## About the User` block. Returns `None` when only `display_name` is set — the name line alone is not worth injecting since the model already sees the user's name from conversation. Injection is also skipped entirely for the Default persona, consistent with memory and all other context enrichments.
+
+- **Setup wizard step numbering:** The new "About You" step is inserted as step 3, shifting Provider to 4, Persona to 5, and Done to 6. `STEPS` array updated accordingly. Profile is saved best-effort after `setupApi.complete()` in `handleComplete` — failure is non-fatal and the user can fill it in via Settings.
+
+- **Timezone detection:** Uses a lazy `useState` initializer (`() => Intl.DateTimeFormat().resolvedOptions().timeZone`) in `Step2bAboutYou` to avoid the synchronous-setState-in-effect lint warning. Settings profile card uses `useMemo` for the same detection.
+
+- **Bug fix (tool message freeze):** `ToolActivityBubble` now truncates content exceeding 4,000 characters before passing it to ReactMarkdown. Large MCP tool payloads (API responses, file listings) were causing the markdown parser to hang indefinitely.
+
+- **Bug fix (message list error boundary):** `MessageListErrorBoundary` (React class component) wraps the entire message list in `ChatView`. A render error in any single message now shows a recoverable error panel instead of freezing the whole app.
+
+- **Bug fix (MCP live status):** `mcp_status_changed` global SSE events were being emitted by the server but ignored by the client. Added handler in `useSseStore` that writes to `lastMcpStatusChange` state. `ConfigPane` subscribes and updates the status badge in-place; auto-loads tools when status transitions to `connected`.
+
+- **5.8 spec updated:** Story 5.8 redesigned during 5.7 planning to include a `thread_summaries` append-only log table, a `recall_conversation` built-in tool (cross-thread by default, per-persona toggle), and `MEMORY_INSTRUCTIONS` guidance distinguishing `recall_memory` (facts) from `recall_conversation` (narrative/history). Migration renumbered to 010.
+
+- **Test count:** 262 passing (unchanged from Story 5.6 — new tests added for profile context formatting, partial PUT logic, and endpoint integration).
 
 ---
 
@@ -936,35 +960,61 @@ Refactor the thread config pane per §7.12.8:
 - Update `Thread` TypeScript type to include `summary`, `summary_updated_at`, `summary_message_count`, `auto_summarize`
 
 Acceptance criteria:
-- [ ] Migration 010 adds all thread columns, creates `thread_summaries` table and indexes, adds `recall_conversation_cross_thread` to `agent_personas`
-- [ ] `GET /api/threads/:id` includes new thread fields
-- [ ] `PUT /api/threads/:id` accepts `auto_summarize`; ignores `summary` if sent
-- [ ] No summarization when `auto_summarize = 0`
-- [ ] No summarization when fewer than `DEFAULT_HISTORY_LIMIT` new messages since last summary
-- [ ] Re-summarization guard: no-op when `summary_message_count` already matches current count
-- [ ] Proactive trigger fires as background task after turn when threshold is reached
-- [ ] Proactive trigger does not block the user response
-- [ ] Reactive trigger detects context-length 400 and runs summarization synchronously before retry
-- [ ] After reactive summarization, the retry uses the new summary and succeeds (assuming summary reduces context sufficiently)
-- [ ] On every successful summarization run, a row is appended to `thread_summaries` with correct seq boundaries and wall-clock dates
-- [ ] Summary is injected between thread addendum and history
-- [ ] History loaded is messages AFTER the summary boundary, not unconditional last-20
-- [ ] Summary injection is absent when `summary` is null
-- [ ] Summarization failure is logged at WARN and not surfaced to the user
-- [ ] `summary_message_count` reflects the message count at the time of summarization
-- [ ] `recall_conversation` tool is available to non-default personas and absent for the Default persona
-- [ ] Cross-thread mode returns summaries from all threads sharing the current persona, ordered newest first, capped at 5
-- [ ] Single-thread mode returns summaries from the current thread only
-- [ ] Date range filtering works: `from_date` and `to_date` both optional, either alone, or together
-- [ ] Keyword filtering performs case-insensitive substring match on summary text
-- [ ] Empty result returns the "No conversation summaries found" message
-- [ ] `recall_conversation_cross_thread` toggle persists on the persona; defaults to enabled
-- [ ] MEMORY_INSTRUCTIONS includes the `recall_memory` vs `recall_conversation` guidance
-- [ ] Advanced section in ConfigPane collapsed by default; expands on click
-- [ ] Auto-summarize toggle persists; show-tool-activity and show-system-events toggles work from new location
-- [ ] Archive button works from new location
-- [ ] "Last summarized" hint visible when summary exists
-- [ ] Unit tests: summarization prompt construction, context injection (with/without summary), re-summarization guard, boundary query (messages after summary_message_count), `thread_summaries` row written on success, `recall_conversation` cross-thread vs single-thread scoping, date range filtering, keyword filtering, empty result message
+- [x] Migration 010 adds all thread columns, creates `thread_summaries` table and indexes, adds `recall_conversation_cross_thread` to `agent_personas`
+- [x] `GET /api/threads/:id` includes new thread fields
+- [x] `PUT /api/threads/:id` accepts `auto_summarize`; ignores `summary` if sent
+- [x] No summarization when `auto_summarize = 0`
+- [x] No summarization when fewer than `DEFAULT_HISTORY_LIMIT` new messages since last summary
+- [x] Re-summarization guard: no-op when `summary_message_count` already matches current count
+- [x] Proactive trigger fires after turn when threshold is reached
+- [x] Proactive trigger does not block the user response (runs after SSE response already sent)
+- [x] Reactive trigger detects context-length error and runs summarization synchronously before retry
+- [x] After reactive summarization, the retry uses the new summary and succeeds (assuming summary reduces context sufficiently)
+- [x] On every successful summarization run, a row is appended to `thread_summaries` with correct seq boundaries and wall-clock dates
+- [x] Summary is injected between thread addendum and history
+- [x] History loaded is messages AFTER the summary boundary, not unconditional last-20
+- [x] Summary injection is absent when `summary` is null
+- [x] Summarization failure is logged at WARN and not surfaced to the user
+- [x] `summary_message_count` reflects the message count at the time of summarization
+- [x] `recall_conversation` tool is available to non-default personas and absent for the Default persona
+- [x] Cross-thread mode returns summaries from all threads sharing the current persona, ordered newest first, capped at 5
+- [x] Single-thread mode returns summaries from the current thread only
+- [x] Date range filtering works: `from_date` and `to_date` both optional, either alone, or together
+- [x] Keyword filtering performs case-insensitive substring match on summary text
+- [x] Empty result returns the "No conversation summaries found" message
+- [x] `recall_conversation_cross_thread` toggle persists on the persona; defaults to enabled
+- [x] MEMORY_INSTRUCTIONS includes the `recall_memory` vs `recall_conversation` guidance
+- [x] Advanced section in ConfigPane collapsed by default; expands on click
+- [x] Auto-summarize toggle persists; show-tool-activity and show-system-events toggles work from new location
+- [x] Archive button works from new location
+- [x] "Last summarized" hint visible when summary exists
+- [x] Unit tests: summarization prompt construction, context injection (with/without summary), re-summarization guard, `recall_conversation` cross-thread vs single-thread scoping, date range filtering, keyword filtering, empty result message
+
+### As-built notes (Story 5.8)
+
+- **Migration 010** adds `summary TEXT`, `summary_updated_at TEXT`, `summary_message_count INTEGER NOT NULL DEFAULT 0`, and `auto_summarize INTEGER NOT NULL DEFAULT 1` to `threads`; creates the `thread_summaries` append-only log table with indexes on `thread_id` and `to_date`; adds `recall_conversation_cross_thread INTEGER NOT NULL DEFAULT 1` to `agent_personas`.
+
+- **`services/summarization.rs`** is the new rolling summarization service. `summarize_thread()` resolves the thread's active provider and model (falling back to the persona's defaults), loads all visible messages up to the new boundary, builds a summarization prompt (prepending any existing summary so the new one covers full history), calls the LLM with `provider.complete()` (non-streaming, no tools), and on success updates `threads.summary` + appends to `thread_summaries`. All errors are logged at WARN and swallowed — the function never propagates.
+
+- **Proactive trigger** runs inline at the end of `run_inner` after the `ThreadUpdated` SSE event has already been sent to the client. It fires when `(total_visible_count - summary_message_count) >= DEFAULT_HISTORY_LIMIT`. Running inline (rather than `tokio::spawn`) avoids needing to clone `AppState` while still being non-blocking from the user's perspective.
+
+- **Reactive trigger** uses a new `RetryStrategy::SummarizeAndRetry` variant. `retry_strategy_for()` detects context-length error strings (`context_length_exceeded`, `context window`, `maximum context length`, `prompt is too long`, `context_window_exceeded`). `stream_one_turn` returns a tagged error `"CONTEXT_TOO_LONG_RETRY: ..."`. `run_inner` wraps the `generation_loop` call in a `loop { ... }` — on first occurrence it calls `summarize_thread` synchronously, reloads the thread, rebuilds `AssemblyInput` with the new summary and reduced history, and retries. If the retry also fails, the error propagates normally.
+
+- **Context injection** adds `conversation_summary: Option<String>` to `AssemblyInput`. When `Some` and non-empty, `assemble()` injects a system message at position 2.5 (after thread addendum, before history) formatted as `## Conversation Summary\n\n...`. The history query in `run_inner` now uses `LIMIT ? OFFSET ?` with `DEFAULT_HISTORY_LIMIT` and `thread.summary_message_count` as the offset, so the context window always starts just after the summarized portion.
+
+- **`RecallConversationTool`** is the fourth built-in tool. It builds its SQL dynamically based on which filters are provided (from_date, to_date, keywords), always scoped to the current persona via `t.persona_id = ?`. The `recall_conversation_cross_thread` flag on the persona adds a `ts.thread_id = ?` condition when disabled. Results are formatted as `[thread: {title}] {from} – {to}\n{summary}` and joined with `---` separators.
+
+- **`MEMORY_INSTRUCTIONS`** extended with a `## Conversation Recall` section explaining the semantic distinction: `recall_memory` for facts and preferences, `recall_conversation` for narrative history and past discussions. The model is instructed to call both when intent is ambiguous.
+
+- **Persona form toggle** (`recall_conversation_cross_thread`) is shown only in edit mode for non-default personas, rendered as an inline card with a native checkbox. Included in the PUT payload only when editing a non-default persona.
+
+- **ConfigPane Advanced section** already existed from Story 5.6. Story 5.8 adds the auto-summarize toggle row (same `toolActivityRow` style as the existing toggles) plus a `fieldHint` showing "Last summarized · [date] · N messages covered" when `thread.summary` is non-null.
+
+- **Bug fix (post-migration):** `routes/messages.rs` has a `verify_thread_ownership()` helper that loads a full `Thread` struct. It was not updated during the main implementation pass and was missing the four new columns, causing `ColumnNotFound("summary")` errors on every message request. Fixed by adding the new columns to its SELECT list.
+
+- **Legacy DB migration:** The development database at `data/agent-deck.db` pre-dated Phase 5 (only migrations 1–6 applied). Migrations 007–010 were applied manually via `sqlite3` and registered in `_sqlx_migrations` with `zeroblob(20)` checksums so the sqlx migration runner does not attempt to re-run them on next startup.
+
+- **Test count:** 271 passing (was 262 at end of Story 5.7). New tests cover summarization prompt construction (with/without existing summary, empty summary), context injection (with summary, without addendum, empty summary, None summary), `recall_conversation` schema validation, and tool registry count (now 4).
 
 ---
 
@@ -998,23 +1048,90 @@ Acceptance criteria:
 
 ---
 
-**Story 6.2 — Mobile layout polish**  
+### As-built design note (Story 6.2 approach revision)
+
+After reviewing the mobile mockups (`mockups/mobile-chat.html`, `mobile-thread-list.html`, `mobile-thread-config.html`) and testing the PWA on a real device, the original "polish" approach for Story 6.2 was revised. The original plan assumed the existing desktop layout could be made mobile-friendly with media queries alone — patching `ConfigPane`, `SettingsModal`, and `ChatView` with breakpoint overrides.
+
+In practice, the desktop and mobile navigation models are fundamentally incompatible:
+- Desktop: persistent sidebar + main area side-by-side
+- Mobile: full-screen views + bottom tab bar + slide-up bottom sheet for config
+
+Fighting the desktop layout assumptions with media queries would produce fragile, hard-to-maintain code. Instead, Story 6.2 is rewritten as a **layout-level split**: a `useIsMobile()` hook selects between `DesktopLayout` (the current shell, unchanged) and a new `MobileLayout` at the `App.tsx` level. All business logic — stores, hooks, API calls — is shared between both layouts. Only the shell and navigation components differ.
+
+The mobile mockups are the source of truth for the mobile UI design. CSS custom properties (design tokens) are identical between desktop and mobile — no new colours are introduced.
+
+---
+
+**Story 6.2 — Mobile-first layout**  
 Branch: `feature/phase6-mobile-layout`
 
-Audit and fix any layout issues on small viewports (375px–430px). The sidebar, chat view, config pane, message input, and settings modal all need to feel correct on a phone screen. The existing mobile sidebar slide-in works — focus on the remaining gaps.
+Implement a dedicated mobile UI using a layout-level split. The desktop layout (`DesktopLayout`) is untouched. A new `MobileLayout` is rendered when `useIsMobile()` returns true (viewport width ≤ 768px or touch UA). All components are built mobile-first from the mockups.
 
-Specific items to address:
-- `ChatView`: messages should not be obscured by the keyboard on mobile — handle `visualViewport` resize or `env(keyboard-inset-height)` for the input bar
-- `ConfigPane`: on mobile (< 640px) should slide in full-width rather than as a side panel over the chat
-- `SettingsModal`: on mobile should be full-screen rather than a centered modal
-- Tap targets: all buttons must be at least 44×44px on mobile
-- No horizontal scroll anywhere on 375px viewport
+**New files:**
+
+`web/src/hooks/useIsMobile.ts`
+- Returns `true` when `window.innerWidth <= 768` OR the UA is a touch device
+- Listens to `window.resize` and updates reactively
+- Used in `App.tsx` to select between `DesktopLayout` and `MobileLayout`
+
+`web/src/styles/mobile.css`
+- Global mobile-only styles imported only by mobile components
+- Safe-area variables: `env(safe-area-inset-top/bottom/left/right)`
+- Tap highlight removal: `-webkit-tap-highlight-color: transparent`
+- Minimum tap target helper class: `.tap-target { min-height: 44px; min-width: 44px; }`
+- Momentum scrolling: `-webkit-overflow-scrolling: touch`
+
+`web/src/layouts/DesktopLayout.tsx`
+- Extract the current `App.tsx` shell (sidebar + main area) into this component
+- No behaviour change — purely a rename/extract refactor
+
+`web/src/layouts/MobileLayout.tsx`
+- Bottom tab bar (83px) with 3 tabs: **Threads**, **Chat**, **Settings**
+- Active tab indicator: accent-secondary label + 4px accent-primary dot below icon
+- Renders one full-screen view at a time based on active tab
+- Home indicator spacer at bottom (`env(safe-area-inset-bottom)`)
+- Tab state is URL-driven (`?tab=threads|chat|settings`) so the back button works
+
+`web/src/layouts/mobile/MobileThreadList.tsx`
+- Nav bar: large bold "agent-deck" title (22px, weight 700) + icon buttons (filter, new thread)
+- Search bar below nav (fake input, opens filter on tap)
+- Thread rows matching `mobile-thread-list.html`: avatar, name, timestamp, preview, unread badge, routine tag
+- Unread indicator: 3px left-edge dot in accent-primary
+- FAB (floating action button): 56px rounded-square, accent-primary, "+" — creates new thread, positioned above bottom nav
+- Tapping a thread navigates to Chat tab and opens that thread
+
+`web/src/layouts/mobile/MobileChatView.tsx`
+- Nav header: back arrow (accent-secondary) → returns to Threads tab, agent avatar + name + status dot, config icon → opens `MobileConfigSheet`
+- Full-screen scrollable message area, no visible scrollbar
+- Message bubbles matching `mobile-chat.html`: user (right, bubble-user), agent (left with avatar, bubble-agent), routine (bubble-routine + label)
+- Streaming indicator: three animated dots
+- Input area: pill-shaped wrap (`border-radius: 22px`), auto-growing textarea, slash hint button, circular send button (40px, accent-primary)
+- Input bar lifts above keyboard using `visualViewport` resize listener + `padding-bottom: env(safe-area-inset-bottom)`
+- No active thread selected: shows empty state with prompt to select or create a thread
+
+`web/src/layouts/mobile/MobileConfigSheet.tsx`
+- Slide-up bottom sheet over `MobileChatView` (matches `mobile-thread-config.html` exactly)
+- Dark backdrop (`rgba(0,0,0,0.55)`), sheet `border-radius: 20px 20px 0 0`
+- Drag handle bar (36×4px) at top; drag-to-dismiss with touch events
+- `max-height: 88%`, scrollable body with `-webkit-overflow-scrolling: touch`
+- Sections: Persona row, Model picker (tap-to-expand inline list), Routines list, "Full settings →" deep-link
+- Close button (circular ×) in sheet header
+
+`web/src/layouts/mobile/MobileSettings.tsx` _(replaces existing `MobileSettings.tsx`)_
+- Full-screen settings view rendered in the Settings tab
+- Content defined by Story 6.3 — this story creates the shell and nav chrome only
 
 Acceptance criteria:
+- `useIsMobile()` correctly detects phone viewports and touch devices
+- Desktop layout is pixel-identical to pre-6.2 at viewports > 768px
+- Mobile layout renders at 375px, 390px, and 430px with no horizontal scroll
+- Bottom tab bar is always visible and above the iOS home indicator
 - Chat input stays above the keyboard when it opens on iOS and Android
-- Config pane and settings modal are full-screen on mobile
-- No layout bugs at 375px, 390px, or 430px viewport widths
-- All interactive elements meet minimum tap target size
+- Config sheet slides up/down smoothly and dismisses on drag-down or backdrop tap
+- All interactive elements meet 44×44px minimum tap target size
+- Thread list FAB creates a new thread and switches to Chat tab
+- Back arrow in chat nav returns to Threads tab
+- No regressions on desktop (sidebar, ConfigPane, SettingsModal all unchanged)
 
 ---
 

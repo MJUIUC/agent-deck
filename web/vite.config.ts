@@ -1,5 +1,6 @@
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
+import { VitePWA } from "vite-plugin-pwa";
 import path from "path";
 import http from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -8,7 +9,27 @@ const apiTarget = process.env.API_TARGET || "http://localhost:7474";
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    VitePWA({
+      // Use our hand-written service worker so Phase 7 push handling slots
+      // straight in. injectionPoint: undefined skips workbox precache
+      // injection (not needed for a self-hosted, always-online app).
+      strategies: "injectManifest",
+      srcDir: "public",
+      filename: "sw.js",
+      injectManifest: {
+        injectionPoint: undefined,
+      },
+      // manifest.json already lives in public/ and is linked from index.html;
+      // tell the plugin not to generate or inject a second one.
+      manifest: false,
+      devOptions: {
+        enabled: true,
+        type: "classic",
+      },
+    }),
+  ],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
@@ -27,6 +48,10 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    // Allow access via Tailscale hostnames (*.ts.net) and any other
+    // external host — needed when using `tailscale serve` to proxy the
+    // dev server over HTTPS to a phone or other device on the tailnet.
+    allowedHosts: true,
     proxy: {
       "/api": {
         target: apiTarget,

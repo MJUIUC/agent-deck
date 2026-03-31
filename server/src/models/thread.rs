@@ -13,6 +13,10 @@ pub struct Thread {
     pub status: String,
     pub show_tool_activity: bool,
     pub show_system_events: bool,
+    pub summary: Option<String>,
+    pub summary_updated_at: Option<String>,
+    pub summary_message_count: i64,
+    pub auto_summarize: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -35,6 +39,7 @@ pub struct UpdateThread {
     pub system_prompt_addendum: Option<String>,
     pub show_tool_activity: Option<bool>,
     pub show_system_events: Option<bool>,
+    pub auto_summarize: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -70,6 +75,10 @@ impl Thread {
             status: "active".to_string(),
             show_tool_activity: req.show_tool_activity.unwrap_or(false),
             show_system_events: false,
+            summary: None,
+            summary_updated_at: None,
+            summary_message_count: 0,
+            auto_summarize: true,
             created_at: now.clone(),
             updated_at: now,
         }

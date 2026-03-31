@@ -115,10 +115,13 @@ pub async fn sync(
         None => None,
     };
 
-    let remote_models =
-        provider_service::test_provider(&provider.base_url, decrypted_key.as_deref())
-            .await
-            .map_err(|e| AppError::Provider(e.to_string()))?;
+    let remote_models = provider_service::test_provider(
+        &provider.base_url,
+        decrypted_key.as_deref(),
+        &provider.kind,
+    )
+    .await
+    .map_err(|e| AppError::Provider(e.to_string()))?;
 
     let mut synced_count = 0usize;
 

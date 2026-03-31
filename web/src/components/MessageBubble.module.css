@@ -46,6 +46,7 @@
 .col {
     display: flex;
     flex-direction: column;
+    min-width: 0; /* allow flex item to shrink below content size */
 }
 
 .colUser {
@@ -55,11 +56,19 @@
 /* ── Bubble ── */
 .bubble {
     max-width: 68%;
+    min-width: 0;
     padding: 9px 13px;
-    font-size: 13.5px;
+    font-size: 0.875rem;
     line-height: 1.55;
     color: var(--text-primary);
     word-break: break-word;
+    overflow-wrap: break-word;
+}
+
+@media (max-width: 768px) {
+    .bubble {
+        max-width: 88%;
+    }
 }
 
 /* ── Markdown content inside agent bubbles ── */
@@ -138,6 +147,11 @@
     margin: 0.6em 0;
     font-size: 0.82em;
     line-height: 1.5;
+    max-width: 100%;
+    box-sizing: border-box;
+    min-width: 0;
+    word-break: normal;
+    white-space: pre;
 }
 .markdown pre code {
     background: none;
@@ -249,7 +263,7 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    font-size: 10px;
+    font-size: 0.625rem;
     font-weight: 600;
     color: var(--info);
     text-transform: uppercase;
@@ -262,7 +276,7 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    font-size: 10px;
+    font-size: 0.625rem;
     font-weight: 600;
     color: var(--text-tertiary);
     text-transform: uppercase;
@@ -273,7 +287,7 @@
 
 /* ── Timestamp ── */
 .meta {
-    font-size: 11px;
+    font-size: 0.6875rem;
     color: var(--text-tertiary);
     margin-top: 3px;
     padding: 0 2px;
@@ -334,11 +348,12 @@
     border-radius: 8px;
     padding: 8px 12px;
     max-width: 85%;
-    font-size: 11px;
+    min-width: 0;
+    font-size: 0.6875rem;
 }
 
 .toolLabel {
-    font-size: 10px;
+    font-size: 0.625rem;
     font-weight: 600;
     color: var(--text-tertiary);
     text-transform: uppercase;
@@ -366,11 +381,11 @@
 
 .toolContent code {
     font-family: monospace;
-    font-size: 10px;
+    font-size: 0.625rem;
 }
 
 .toolMeta {
-    font-size: 10px;
+    font-size: 0.625rem;
     color: var(--text-tertiary);
     margin-top: 4px;
 }

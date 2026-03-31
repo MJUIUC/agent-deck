@@ -14,6 +14,7 @@ pub struct AgentPersona {
     /// True for the system-managed Default persona.
     /// Default personas cannot be edited or deleted via the API.
     pub is_default: bool,
+    pub recall_conversation_cross_thread: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -34,6 +35,7 @@ pub struct UpdateAgentPersona {
     pub system_prompt: Option<String>,
     pub default_model: Option<String>,
     pub default_provider: Option<String>,
+    pub recall_conversation_cross_thread: Option<bool>,
 }
 
 impl AgentPersona {
@@ -52,6 +54,7 @@ impl AgentPersona {
             default_model: req.default_model,
             default_provider: req.default_provider,
             is_default: false,
+            recall_conversation_cross_thread: true,
             created_at: now.clone(),
             updated_at: now,
         }
@@ -73,6 +76,7 @@ impl AgentPersona {
             default_model: None,
             default_provider: None,
             is_default: true,
+            recall_conversation_cross_thread: true,
             created_at: now.clone(),
             updated_at: now,
         }

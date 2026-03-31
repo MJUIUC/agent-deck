@@ -1,0 +1,530 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   MobileConfigSheet.module.css
+   Bottom-sheet overlay for thread configuration on mobile.
+───────────────────────────────────────────────────────────────────────────── */
+
+/* ── Backdrop ────────────────────────────────────────────────────────────── */
+
+.backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    z-index: 200;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+}
+
+.backdropVisible {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+/* ── Sheet ───────────────────────────────────────────────────────────────── */
+
+.sheet {
+    position: fixed;
+    left: 0;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 201;
+    background: var(--bg-secondary);
+    border-radius: 0;
+    border-top: none;
+    box-shadow: 0 -8px 40px rgba(0, 0, 0, 0.5);
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    transform: translateY(0);
+    transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1);
+    /* Prevent pull-to-refresh from interfering with drag dismiss */
+    overscroll-behavior: contain;
+}
+
+.sheetClosed {
+    transform: translateY(100%);
+}
+
+/* ── Drag handle ─────────────────────────────────────────────────────────── */
+
+.handle {
+    display: flex;
+    justify-content: center;
+    padding: 12px 0 4px;
+    flex-shrink: 0;
+    cursor: grab;
+    /* Expand touch target without affecting layout */
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.handle:active {
+    cursor: grabbing;
+}
+
+.handleBar {
+    width: 36px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border-strong);
+}
+
+/* ── Sheet header ────────────────────────────────────────────────────────── */
+
+.header {
+    padding: 4px 18px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border-subtle);
+    flex-shrink: 0;
+}
+
+.title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    letter-spacing: -0.01em;
+}
+
+.closeBtn {
+    /* 44×44 touch target */
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: var(--bg-elevated);
+    border: none;
+    color: var(--text-secondary);
+    font-size: 0.9375rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    /* Offset negative margin so the visual circle stays at 32px */
+    margin: -6px -6px -6px 0;
+    transition:
+        background 0.15s,
+        color 0.15s;
+}
+
+.closeBtn:hover {
+    background: var(--border-default);
+    color: var(--text-primary);
+}
+
+.closeBtn:active {
+    background: var(--bg-elevated);
+}
+
+/* ── Scrollable body ─────────────────────────────────────────────────────── */
+
+.body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 18px;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+}
+
+.body::-webkit-scrollbar {
+    display: none;
+}
+
+/* ── Sheet sections ──────────────────────────────────────────────────────── */
+
+.section {
+    margin-bottom: 24px;
+}
+
+.section:last-child {
+    margin-bottom: 8px;
+}
+
+.sectionLabel {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-tertiary);
+    margin-bottom: 10px;
+}
+
+/* ── Divider ─────────────────────────────────────────────────────────────── */
+
+.divider {
+    height: 1px;
+    background: var(--border-subtle);
+    margin: 4px 0 24px;
+}
+
+/* ── Persona card ────────────────────────────────────────────────────────── */
+
+.personaRow {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    padding: 13px 14px;
+}
+
+.personaAvatar {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: var(--bg-elevated);
+    border: 2px solid var(--accent-muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.375rem;
+    flex-shrink: 0;
+    line-height: 1;
+}
+
+.personaInfo {
+    flex: 1;
+    min-width: 0;
+}
+
+.personaName {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.personaDesc {
+    font-size: 0.75rem;
+    color: var(--text-tertiary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 2px;
+    line-height: 1.4;
+}
+
+/* ── Model picker drawers ────────────────────────────────────────────────── */
+
+.modelPickerGroup {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+/* Wrapper for one picker (trigger + drawer) */
+.pickerWrap {
+    border: 1px solid var(--border-default);
+    border-radius: 12px;
+    overflow: hidden;
+    background: var(--bg-tertiary);
+}
+
+/* Trigger row — always visible */
+.pickerTrigger {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 14px;
+    min-height: 48px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    text-align: left;
+    -webkit-tap-highlight-color: transparent;
+    transition: background 0.12s;
+}
+
+.pickerTrigger:active {
+    background: var(--bg-elevated);
+}
+
+.pickerTrigger:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.pickerTriggerOpen {
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.pickerTriggerValue {
+    flex: 1;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.pickerChevron {
+    font-size: 1.1rem;
+    color: var(--text-tertiary);
+    flex-shrink: 0;
+    line-height: 1;
+    display: inline-block;
+    transform: rotate(90deg);
+    transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.pickerChevronOpen {
+    transform: rotate(270deg);
+}
+
+/* Animated drawer */
+.pickerDrawer {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.pickerDrawerOpen {
+    max-height: 220px;
+}
+
+/* Scrollable list inside the drawer */
+.pickerList {
+    max-height: 220px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    padding: 4px 0;
+}
+
+.pickerList::-webkit-scrollbar {
+    display: none;
+}
+
+/* Individual option row */
+.pickerItem {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 11px 16px;
+    min-height: 44px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    text-align: left;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    -webkit-tap-highlight-color: transparent;
+    transition: background 0.1s;
+}
+
+.pickerItem:active {
+    background: var(--bg-elevated);
+}
+
+.pickerItemActive {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+.pickerItemLabel {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pickerItemCheck {
+    font-size: 0.8125rem;
+    color: var(--accent-primary);
+    margin-left: 8px;
+    flex-shrink: 0;
+}
+
+/* ── Routines list ───────────────────────────────────────────────────────── */
+
+.routinesList {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.routineRow {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-subtle);
+    border-radius: 11px;
+    padding: 12px 14px;
+    transition: border-color 0.15s;
+}
+
+.routineRow:hover {
+    border-color: var(--border-default);
+}
+
+.routineIcon {
+    width: 34px;
+    height: 34px;
+    border-radius: 9px;
+    background: var(--bg-elevated);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.0625rem;
+    flex-shrink: 0;
+    line-height: 1;
+    align-self: flex-start;
+    margin-top: 1px;
+}
+
+.routineIconActive {
+    background: rgba(74, 82, 53, 0.5);
+}
+
+.routineInfo {
+    flex: 1;
+    min-width: 0;
+}
+
+.routineName {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 3px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.routineSchedule {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+    flex-wrap: wrap;
+}
+
+.routineCron {
+    font-size: 0.6875rem;
+    font-family: "SF Mono", "Fira Code", "Menlo", monospace;
+    color: var(--accent-secondary);
+    background: var(--bg-elevated);
+    padding: 1px 6px;
+    border-radius: 4px;
+    letter-spacing: 0.02em;
+    flex-shrink: 0;
+}
+
+.routineHuman {
+    font-size: 0.6875rem;
+    color: var(--text-tertiary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.routineStatus {
+    font-size: 0.6875rem;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-weight: 500;
+}
+
+.routineStatusOn {
+    color: var(--success);
+}
+
+.routineStatusOff {
+    color: var(--text-tertiary);
+}
+
+.statusDot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    flex-shrink: 0;
+}
+
+/* ── Loading / empty state text ─────────────────────────────────────────── */
+
+.stateText {
+    font-size: 0.8125rem;
+    color: var(--text-tertiary);
+    text-align: center;
+    padding: 16px 0;
+    font-style: italic;
+}
+
+/* ── Toggle switch ───────────────────────────────────────────────────────── */
+
+/* Outer button — provides the ≥44×44px touch target */
+.toggleBtn {
+    /* Touch target */
+    min-width: 44px;
+    min-height: 44px;
+    /* Reset button styles */
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    border-radius: 14px;
+    transition: opacity 0.15s;
+}
+
+.toggleBtn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.toggleBtn:focus-visible {
+    outline: 2px solid var(--accent-secondary);
+    outline-offset: 2px;
+}
+
+/* Visual track — contained inside the button */
+.toggleTrack {
+    position: relative;
+    width: 40px;
+    height: 24px;
+    border-radius: 12px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-default);
+    pointer-events: none;
+    transition:
+        background 0.2s,
+        border-color 0.2s;
+}
+
+.toggleOn {
+    background: var(--accent-primary);
+    border-color: var(--accent-primary);
+}
+
+/* Thumb knob */
+.toggleThumb {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--text-tertiary);
+    transition:
+        transform 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+        background 0.2s;
+}
+
+.toggleThumbOn {
+    transform: translateX(16px);
+    background: var(--text-primary);
+}

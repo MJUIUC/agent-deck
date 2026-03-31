@@ -32,6 +32,7 @@ pub(crate) async fn verify_thread_ownership(
     let thread: Option<crate::models::thread::Thread> = sqlx::query_as(
         "SELECT id, user_id, persona_id, title, active_model, active_provider,
                 system_prompt_addendum, status, show_tool_activity, show_system_events,
+                summary, summary_updated_at, summary_message_count, auto_summarize,
                 created_at, updated_at
          FROM threads
          WHERE id = ? AND user_id = ?",
@@ -73,7 +74,7 @@ pub async fn list(
         "visibility = 'visible'"
     };
 
-    let messages: Vec<Message> = if let Some(before_id) = &query.before {
+    let mut messages: Vec<Message> = if let Some(before_id) = &query.before {
         // Cursor pagination: get messages older than the cursor message
         let cursor_time: Option<(String,)> =
             sqlx::query_as("SELECT created_at FROM messages WHERE id = ? AND thread_id = ?")
@@ -95,7 +96,7 @@ pub async fn list(
                 ))
                 .bind(&thread_id)
                 .bind(&cursor_created_at)
-                .bind(limit)
+                .bind(limit + 1)
                 .fetch_all(&state.pool)
                 .await?
                 // Reverse so results come back oldest-first
@@ -127,14 +128,21 @@ pub async fn list(
             visibility_filter
         ))
         .bind(&thread_id)
-        .bind(limit)
+        .bind(limit + 1)
         .fetch_all(&state.pool)
         .await?
     };
 
+    let has_more = messages.len() > limit as usize;
+    if has_more {
+        messages.remove(0); // drop the extra-oldest sentinel
+    }
     let responses: Vec<MessageResponse> = messages.into_iter().map(Into::into).collect();
 
-    Ok((StatusCode::OK, Json(json!({ "data": responses }))))
+    Ok((
+        StatusCode::OK,
+        Json(json!({ "data": responses, "has_more": has_more })),
+    ))
 }
 
 /// POST /api/threads/:id/messages

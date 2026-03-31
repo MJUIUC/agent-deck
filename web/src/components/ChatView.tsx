@@ -114,6 +114,10 @@ interface ChatViewProps {
 const IDLE_THREAD_STATE: ThreadState = {
   messages: [],
   phase: { status: "idle" },
+  queuedCount: 0,
+  oldestLoadedId: null,
+  hasMore: false,
+  isLoadingMore: false,
 };
 
 export function ChatView({
@@ -135,6 +139,13 @@ export function ChatView({
   );
   const loadMessages = useMessageStore((s) => s.loadMessages);
   const sendMessage = useMessageStore((s) => s.sendMessage);
+  const hasMore = useMessageStore(
+    (s) => s.threads[thread.id]?.hasMore ?? false,
+  );
+  const isLoadingMore = useMessageStore(
+    (s) => s.threads[thread.id]?.isLoadingMore ?? false,
+  );
+  const loadMoreMessages = useMessageStore((s) => s.loadMoreMessages);
 
   const { messages, phase } = threadState;
   const isStreaming = phase.status === "streaming";
@@ -187,12 +198,34 @@ export function ChatView({
   // is added to the DOM, at which point scrollIntoView is guaranteed to work.
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Scroll to the sentinel on every render. ChatView never unmounts when
-  // switching threads — it just receives a new thread prop — so there is no
-  // reliable dep list that captures every case. Running on every render is
-  // cheap and guarantees the view always opens at the bottom.
+  // Stores a scroll-position snapshot taken just before a load-more prepend.
+  // When set, the layout effect uses it to restore the viewport position
+  // instead of jumping back to the bottom.
+  const scrollAdjustRef = useRef<{
+    prevScrollHeight: number;
+    prevScrollTop: number;
+  } | null>(null);
+
+  // Top sentinel — watched by IntersectionObserver to trigger load-more.
+  const topSentinelRef = useRef<HTMLDivElement>(null);
+
+  // Run on every render (no dep array) — see original comment above. When a
+  // load-more prepend just happened, scrollAdjustRef holds a snapshot so we
+  // can restore the viewport position instead of jumping back to the bottom.
   useLayoutEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "instant" });
+    const adj = scrollAdjustRef.current;
+    if (adj !== null) {
+      // Prepend just happened — restore scroll so the viewport doesn't jump.
+      const el = containerRef.current;
+      if (el) {
+        el.scrollTop =
+          adj.prevScrollTop + (el.scrollHeight - adj.prevScrollHeight);
+      }
+      scrollAdjustRef.current = null;
+    } else {
+      // Normal render — scroll to bottom instantly.
+      bottomRef.current?.scrollIntoView({ behavior: "instant" });
+    }
   });
 
   const grouped = groupByDate(visibleMessages);
@@ -224,6 +257,39 @@ export function ChatView({
     [isDraft, onFirstSend, thread.id, sendMessage],
   );
 
+  const handleLoadMore = useCallback(async () => {
+    if (!hasMore || isLoadingMore || isDraft) return;
+    const el = containerRef.current;
+    if (!el) return;
+    // Snapshot scroll position BEFORE the state update causes a prepend.
+    scrollAdjustRef.current = {
+      prevScrollHeight: el.scrollHeight,
+      prevScrollTop: el.scrollTop,
+    };
+    await loadMoreMessages(thread.id);
+  }, [
+    hasMore,
+    isLoadingMore,
+    isDraft,
+    loadMoreMessages,
+    thread.id,
+    containerRef,
+  ]);
+
+  // Observe the top sentinel — triggers load-more when scrolled into view.
+  useEffect(() => {
+    const sentinel = topSentinelRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) void handleLoadMore();
+      },
+      { threshold: 0 },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [handleLoadMore]);
+
   return (
     <div className={styles.chatView}>
       {/* ── Header ── */}
@@ -251,6 +317,17 @@ export function ChatView({
             </div>
           ) : (
             <>
+              {/* Top sentinel — triggers load-more when scrolled into view */}
+              <div
+                ref={topSentinelRef}
+                style={{ height: 1 }}
+                aria-hidden="true"
+              />
+              {isLoadingMore && (
+                <div className={styles.loadingMore}>
+                  Loading older messages…
+                </div>
+              )}
               {grouped.map(({ dateLabel, dateKey, items }) => (
                 <div key={dateKey}>
                   {/* Date divider */}

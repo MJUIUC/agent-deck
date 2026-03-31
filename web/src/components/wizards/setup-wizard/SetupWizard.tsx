@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { WizardShell } from "../shared/WizardShell";
 import type { WizardStepMeta } from "../shared/types";
 import { Step1Welcome } from "./Step1Welcome";
@@ -32,6 +32,38 @@ import type { Model } from "@/types";
 //   5 — Create First Persona
 //   6 — Done
 
+// ── localStorage persistence ──────────────────────────────────────────────────
+
+const WIZARD_STORAGE_KEY = "agent-deck:setup-wizard";
+
+interface WizardPersistedState {
+  step: number;
+  displayName: string;
+  profileDraft: AboutYouDraft | null;
+  providerDraft: ProviderDraft | null;
+  providerSkipped: boolean;
+  personaSkipped: boolean;
+  persona: PersonaConfig | null;
+}
+
+function loadWizardState(): Partial<WizardPersistedState> {
+  try {
+    const raw = localStorage.getItem(WIZARD_STORAGE_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw) as WizardPersistedState;
+  } catch {
+    return {};
+  }
+}
+
+function clearWizardState() {
+  try {
+    localStorage.removeItem(WIZARD_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+}
+
 const STEPS: WizardStepMeta[] = [
   { label: "Welcome" },
   { label: "Your name" },
@@ -47,22 +79,61 @@ interface SetupWizardProps {
 }
 
 export function SetupWizard({ onComplete }: SetupWizardProps) {
+  // ── Restore persisted state on mount (survives iOS PWA reload) ──────────────
+  const _persisted = loadWizardState();
+
   // ── Step state ──────────────────────────────────────────────────────────────
-  const [step, setStep] = useState(1);
+  const [step, setStep] = useState(_persisted.step ?? 1);
 
   // ── Wizard data — collected across steps, persisted all at once in Step 6 ──
-  const [displayName, setDisplayName] = useState("");
+  const [displayName, setDisplayName] = useState(_persisted.displayName ?? "");
   // profileDraft holds the "About You" fields collected in Step 3
-  const [profileDraft, setProfileDraft] = useState<AboutYouDraft | null>(null);
+  const [profileDraft, setProfileDraft] = useState<AboutYouDraft | null>(
+    _persisted.profileDraft ?? null,
+  );
   // providerDraft holds the raw form data; nothing is written to DB until Step 6
   const [providerDraft, setProviderDraft] = useState<ProviderDraft | null>(
-    null,
+    _persisted.providerDraft ?? null,
   );
   // Track whether the user explicitly skipped each optional step
-  const [providerSkipped, setProviderSkipped] = useState(false);
-  const [personaSkipped, setPersonaSkipped] = useState(false);
+  const [providerSkipped, setProviderSkipped] = useState(
+    _persisted.providerSkipped ?? false,
+  );
+  const [personaSkipped, setPersonaSkipped] = useState(
+    _persisted.personaSkipped ?? false,
+  );
   const [modelsLoading, setModelsLoading] = useState(false);
-  const [persona, setPersona] = useState<PersonaConfig | null>(null);
+  const [persona, setPersona] = useState<PersonaConfig | null>(
+    _persisted.persona ?? null,
+  );
+  // ── Sync state to localStorage on every meaningful change ──────────────────
+  // This ensures that if iOS reloads the PWA (e.g. when returning from the
+  // GitHub device-auth page in Safari), the wizard resumes at the right step.
+  useEffect(() => {
+    const state: WizardPersistedState = {
+      step,
+      displayName,
+      profileDraft,
+      providerDraft,
+      providerSkipped,
+      personaSkipped,
+      persona,
+    };
+    try {
+      localStorage.setItem(WIZARD_STORAGE_KEY, JSON.stringify(state));
+    } catch {
+      // ignore — storage quota exceeded or private browsing
+    }
+  }, [
+    step,
+    displayName,
+    profileDraft,
+    providerDraft,
+    providerSkipped,
+    personaSkipped,
+    persona,
+  ]);
+
   // models are populated after provider creation in Step 6, but we pre-fetch
   // a preview from the draft in Step 5 only when a copilot token already exists
   const [models, setModels] = useState<Model[]>([]);
@@ -254,12 +325,14 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         }
       }
 
+      clearWizardState();
       onComplete();
     } catch (err) {
       // setup/complete itself failed
       const msg = err instanceof Error ? err.message : "";
       // 409 = already complete from a previous attempt, treat as success
       if (msg.includes("409") || msg.toLowerCase().includes("already")) {
+        clearWizardState();
         onComplete();
         return;
       }

@@ -10,6 +10,7 @@ export interface AgentPersona {
   default_model: string | null;
   default_provider: string | null;
   is_default: boolean;
+  recall_conversation_cross_thread: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -25,6 +26,11 @@ export interface Thread {
   status: string;
   show_tool_activity: boolean;
   show_system_events: boolean;
+  // Summarization fields (server-managed, read-only from client)
+  summary: string | null;
+  summary_updated_at: string | null;
+  summary_message_count: number;
+  auto_summarize: boolean;
   created_at: string;
   updated_at: string;
   // Joined client-side for display convenience
@@ -226,6 +232,13 @@ export interface ThreadState {
   phase: ThreadPhase;
   /** Number of messages queued behind the currently active run. */
   queuedCount?: number;
+  // ── Pagination ──────────────────────────────────────────────────────────────
+  /** ID of the oldest loaded message — used as `before` cursor for load-more */
+  oldestLoadedId: string | null;
+  /** Whether older messages exist on the server beyond what's loaded */
+  hasMore: boolean;
+  /** True while a load-more fetch is in progress (prevents double-fetch) */
+  isLoadingMore: boolean;
 }
 
 export type ThreadMap = Record<string, ThreadState>;

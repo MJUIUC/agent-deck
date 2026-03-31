@@ -206,11 +206,44 @@ impl CopilotApiService {
 
     // ─── Internal ─────────────────────────────────────────────────────────────
 
+    /// Returns `true` when the GitHub token file exists and is non-empty.
+    async fn github_token_exists() -> bool {
+        if let Some(home) = std::env::var_os("HOME") {
+            let path = std::path::Path::new(&home)
+                .join(".local")
+                .join("share")
+                .join("copilot-api")
+                .join("github_token");
+            if let Ok(contents) = tokio::fs::read_to_string(&path).await {
+                return !contents.trim().is_empty();
+            }
+        }
+        false
+    }
+
     /// Main supervision loop.  Runs forever until the Tokio runtime shuts down.
     async fn supervise_loop(&self) {
         let mut backoff = MIN_BACKOFF;
+        let mut logged_waiting = false;
 
         loop {
+            // Don't attempt to spawn until a GitHub token is present on disk.
+            // This prevents the sidecar from launching on a fresh machine and
+            // falling back to the terminal device-auth flow.  Once the user
+            // completes GitHub auth through the setup wizard the token file is
+            // written and restart() is called, which causes the loop to wake
+            // up, find the token, and spawn normally.
+            if !Self::github_token_exists().await {
+                if !logged_waiting {
+                    info!("copilot-api waiting for GitHub token — complete Copilot auth in the setup wizard");
+                    logged_waiting = true;
+                }
+                self.set_status(CopilotStatus::Stopped, None).await;
+                sleep(Duration::from_secs(3)).await;
+                continue;
+            }
+            logged_waiting = false; // reset so we log again if token is removed
+
             match self.spawn_child().await {
                 Ok(child) => {
                     *self.inner.child.lock().await = Some(child);

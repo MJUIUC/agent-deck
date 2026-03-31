@@ -9,5 +9,6 @@ pub mod memory;
 pub mod personas;
 pub mod provider;
 pub mod scheduler;
+pub mod summarization;
 pub mod title;
 pub mod tools;

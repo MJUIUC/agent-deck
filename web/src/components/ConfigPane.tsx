@@ -506,6 +506,12 @@ export function ConfigPane({
   );
   const [isSavingSystemEvents, setIsSavingSystemEvents] = useState(false);
 
+  // ── Auto-summarize ──
+  const [autoSummarize, setAutoSummarize] = useState(
+    thread.auto_summarize ?? true,
+  );
+  const [isSavingAutoSummarize, setIsSavingAutoSummarize] = useState(false);
+
   // ── MCP servers ──
   const lastMcpStatusChange = useSseStore((s) => s.lastMcpStatusChange);
 
@@ -551,6 +557,7 @@ export function ConfigPane({
     setAddendum(thread.system_prompt_addendum ?? "");
     setShowToolActivity(thread.show_tool_activity ?? false);
     setShowSystemEvents(thread.show_system_events ?? false);
+    setAutoSummarize(thread.auto_summarize ?? true);
     setShowAttachPicker(false);
     setShowArchiveConfirm(false);
     // Reset routines form state on thread switch
@@ -569,6 +576,7 @@ export function ConfigPane({
     thread.system_prompt_addendum,
     thread.show_tool_activity,
     thread.show_system_events,
+    thread.auto_summarize,
   ]);
 
   // Load attached MCP servers whenever the pane opens or thread changes
@@ -748,6 +756,23 @@ export function ConfigPane({
       setShowSystemEvents(!value);
     } finally {
       setIsSavingSystemEvents(false);
+    }
+  };
+
+  const handleAutoSummarizeChange = async (val: boolean) => {
+    setAutoSummarize(val);
+    setIsSavingAutoSummarize(true);
+    try {
+      const res = await threadsApi.update(thread.id, {
+        auto_summarize: val,
+      });
+      if (res.data) {
+        onThreadUpdated(res.data);
+      }
+    } catch {
+      setAutoSummarize(!val); // revert on error
+    } finally {
+      setIsSavingAutoSummarize(false);
     }
   };
 
@@ -1360,6 +1385,36 @@ export function ConfigPane({
                     disabled={isSavingSystemEvents}
                   />
                 </div>
+
+                {/* Auto-summarize toggle */}
+                <div className={styles.toolActivityRow}>
+                  <div className={styles.toolActivityInfo}>
+                    <div className={styles.toolActivityLabel}>
+                      Auto-summarize conversation
+                    </div>
+                    <div className={styles.toolActivityHint}>
+                      Automatically summarizes older messages to maintain
+                      context across long conversations
+                    </div>
+                  </div>
+                  <Toggle
+                    checked={autoSummarize}
+                    onChange={handleAutoSummarizeChange}
+                    disabled={isSavingAutoSummarize}
+                  />
+                </div>
+
+                {/* Last summarized hint */}
+                {thread.summary && thread.summary_updated_at && (
+                  <div
+                    className={styles.fieldHint}
+                    style={{ marginTop: 6, marginBottom: 4 }}
+                  >
+                    Last summarized ·{" "}
+                    {new Date(thread.summary_updated_at).toLocaleDateString()} ·{" "}
+                    {thread.summary_message_count} messages covered
+                  </div>
+                )}
 
                 <div className={styles.advancedDivider} />
 
