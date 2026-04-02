@@ -341,6 +341,7 @@ mod tests {
             built_in_tools: std::sync::Arc::new(vec![]),
             scheduler_tx: tokio::sync::mpsc::channel(1).0,
             vapid_public_key: String::new(),
+            vapid_private_pem: String::new(),
         }
     }
 

@@ -8,6 +8,7 @@ pub mod mcp;
 pub mod memory;
 pub mod personas;
 pub mod provider;
+pub mod push;
 pub mod scheduler;
 pub mod summarization;
 pub mod title;

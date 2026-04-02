@@ -731,6 +731,20 @@ async fn run_inner(
             );
         }
 
+        // ── Web Push dispatch ──────────────────────────────────────────────────────
+        // Send a push notification if no SSE client is watching this thread.
+        // The notification body is the first 100 chars of the assistant response.
+        let push_title = format!("{} {}", persona.emoji, persona.name);
+        let push_body: String = gen_result.content.chars().take(100).collect();
+        crate::services::push::send_routine_push_notifications(
+            state,
+            thread_id,
+            user_id,
+            &push_title,
+            &push_body,
+        )
+        .await;
+
         // Fetch the routine name for the global event
         let routine_name: String =
             sqlx::query_as::<_, (String,)>("SELECT name FROM routines WHERE id = ?")

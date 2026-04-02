@@ -227,12 +227,81 @@ No new migrations are required. No `cargo sqlx prepare` run is needed.
 
 ## Human Review Instructions
 
-*Written after implementation is complete — see Step 5. Leave blank until then.*
+**Context:** Story 7.2 implements the server-side dispatch only. The client-side
+subscription flow (PWA service worker + "Enable Notifications" button) is Story 7.3.
+Full end-to-end push delivery can only be verified once Story 7.3 is merged. However,
+the server-side logic can be verified now via DB inspection and log observation.
+
+---
+
+**Prerequisites:**
+- Server built and running on port 7474 (`cargo run` from `server/`).
+- At least one routine configured on a thread (Settings → Routines, or any existing one).
+- SQLite shell available: `sqlite3 ~/.agent-deck/.database/agent-deck.db`
+
+---
+
+**Test A — Verify push is skipped when SSE client is connected (normal chat session)**
+
+1. Open the PWA in a browser tab — this establishes an SSE connection.
+2. Wait for a routine to fire (or set a routine's cron to `* * * * *` for every minute).
+3. Check the server log. You should see:
+   - **Expected:** No `push:` log lines at `info` level for this thread.
+   - **Expected:** You may see `push: SSE client connected — skipping notification` at debug level if `RUST_LOG=debug` is set.
+4. **Success sign:** Routine fires, response appears in chat, no push attempted.
+
+---
+
+**Test B — Verify push is attempted when no SSE client is connected**
+
+1. Close all browser tabs (no SSE connection active).
+2. Wait for a routine to fire (or manually trigger via `POST /api/threads/:id/notify`
+   with `event_type: "routine_invocation"` payload).
+3. Check the server log:
+   - **Expected:** `push: no subscriptions registered — skipping` (since no browser
+     has subscribed yet — Story 7.3 not done).
+   - **Success sign:** The log confirms the code path was reached and subscriptions
+     were checked. No crash, no error.
+
+---
+
+**Test C — Manually insert a fake subscription and verify 410 cleanup**
+
+1. Insert a dummy subscription row:
+   ```sql
+   INSERT INTO push_subscriptions (id, user_id, endpoint, p256dh, auth, user_agent, created_at, updated_at)
+   SELECT 'test-sub-001', id, 'https://httpstat.us/410', 'dGVzdA==', 'dGVzdA==', 'test', datetime('now'), datetime('now')
+   FROM users LIMIT 1;
+   ```
+2. Close all browser tabs (no SSE connection).
+3. Trigger a routine run and wait for it to complete.
+4. **Expected server log:** `push: endpoint returned 410 Gone — removing stale subscription`
+5. **Expected DB:** Row is gone:
+   ```sql
+   SELECT * FROM push_subscriptions WHERE id = 'test-sub-001';
+   -- should return 0 rows
+   ```
+6. **Success sign:** Row deleted, no panic, routine completion unaffected.
+
+---
+
+**Test D — Verify unit tests pass**
+
+```bash
+cd server && cargo test services::push 2>&1 | tail -10
+```
+**Expected:** `2 passed; 0 failed`
+
+---
+
+**Full end-to-end push verification** is deferred to Story 7.3 review, where the
+browser subscription flow will be wired up and a real push service endpoint will
+be in use.
 
 ---
 
 ## Approval
 
-- [ ] **Implementation plan approved** — human has reviewed this plan and confirmed coding can begin
-- [ ] **Coding complete** — all tests pass, agent has verified against every acceptance criterion
+- [x] **Implementation plan approved** — human has reviewed this plan and confirmed coding can begin
+- [x] **Coding complete** — all tests pass, agent has verified against every acceptance criterion
 - [ ] **Human review approved** — human has tested the changes live and signed off

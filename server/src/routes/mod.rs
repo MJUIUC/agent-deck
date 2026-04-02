@@ -137,6 +137,9 @@ pub struct AppState {
     /// VAPID public key (base64url, no padding). Cached from app_config at startup.
     /// Served by GET /api/push/vapid-public-key without a DB round-trip.
     pub vapid_public_key: String,
+    /// PKCS8 PEM-encoded VAPID private key. Loaded from app_config at startup.
+    /// Used by the push dispatch service. Never logged or returned by any endpoint.
+    pub vapid_private_pem: String,
 }
 
 impl AppState {
@@ -179,7 +182,7 @@ pub async fn build_router(
     let master_key = credentials_service::get_or_create_master_key(&pool).await?;
 
     // ── VAPID key pair ────────────────────────────────────────────────────────
-    let (_vapid_private_pem, vapid_public_key) =
+    let (vapid_private_pem, vapid_public_key) =
         crate::services::vapid::get_or_create_vapid_keys(&pool).await?;
     tracing::info!("vapid: public key loaded ({}…)", &vapid_public_key[..8]);
     let mcp = McpConnectionManager::new(
@@ -206,6 +209,7 @@ pub async fn build_router(
         built_in_tools: Arc::new(tools_service::built_in_tools()),
         scheduler_tx,
         vapid_public_key,
+        vapid_private_pem,
     });
 
     // Start copilot-api supervision in the background.
@@ -722,6 +726,7 @@ mod tests {
             built_in_tools: std::sync::Arc::new(vec![]),
             scheduler_tx: tokio::sync::mpsc::channel(1).0,
             vapid_public_key: String::new(),
+            vapid_private_pem: String::new(),
         };
 
         let rs1 = app_state.get_run_state("thread-abc");
@@ -771,6 +776,7 @@ mod tests {
             built_in_tools: std::sync::Arc::new(vec![]),
             scheduler_tx: tokio::sync::mpsc::channel(1).0,
             vapid_public_key: String::new(),
+            vapid_private_pem: String::new(),
         };
 
         let rs_a = app_state.get_run_state("thread-aaa");
@@ -831,6 +837,7 @@ mod tests {
             built_in_tools: std::sync::Arc::new(vec![]),
             scheduler_tx: tokio::sync::mpsc::channel(1).0,
             vapid_public_key: String::new(),
+            vapid_private_pem: String::new(),
         });
 
         // Simulate two requests receiving their own clone of the Arc —
