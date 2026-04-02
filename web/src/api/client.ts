@@ -672,3 +672,31 @@ export const profileApi = {
     });
   },
 };
+
+export const pushApi = {
+  /** Fetch the server's VAPID public key. Public endpoint — no auth required. */
+  getVapidPublicKey(): Promise<{ data: { public_key: string } }> {
+    return apiFetch("/api/push/vapid-public-key");
+  },
+
+  /** Register a new browser push subscription on the server (upsert by endpoint). */
+  subscribe(payload: {
+    endpoint: string;
+    p256dh: string;
+    auth: string;
+    user_agent?: string;
+  }): Promise<{ data: { subscribed: boolean } }> {
+    return apiFetch("/api/push/subscribe", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  /** Remove a push subscription from the server by endpoint URL. */
+  unsubscribe(endpoint: string): Promise<{ data: { deleted: boolean } }> {
+    return apiFetch("/api/push/subscribe", {
+      method: "DELETE",
+      body: JSON.stringify({ endpoint }),
+    });
+  },
+};
