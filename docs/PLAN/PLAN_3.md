@@ -1214,7 +1214,7 @@ Acceptance criteria:
 
 ---
 
-**Story 7.1 — VAPID key generation and server endpoints**  
+**Story 7.1 — VAPID key generation and server endpoints** ✅ Complete  
 Branch: `feature/phase7-vapid-server`
 
 On server startup, check `app_config` for `vapid_public_key` and `vapid_private_key`. If absent, generate a new VAPID P-256 key pair using the `web-push` crate and store both in `app_config`. The private key must never be logged or returned by any API endpoint.
@@ -1250,9 +1250,17 @@ Acceptance criteria:
 - `push_subscriptions` table is created by migration (add migration `009_push_subscriptions.sql`)
 - Unit tests for key generation idempotency (calling generate twice returns the same key)
 
+### As-built notes (Story 7.1)
+
+- **Key generation via `p256` crate, not `web-push` directly:** `web-push` does not expose a key-generation API — it expects a pre-existing PEM. Used `p256 = "0.13"` (which is what `web-push` uses internally) to generate the key pair. Private key stored as PKCS8 PEM so `VapidSignatureBuilder::from_pem()` can load it in Story 7.2. Both crates added to workspace deps (`web-push = "0.11.0"` with `default-features = false` — no HTTP client yet).
+- **Migration number:** Spec referenced `009_push_subscriptions.sql` but the correct sequential number is `011_push_subscriptions.sql` (migrations 009 and 010 were already used by Phase 5). File created as `011`.
+- **Response envelope:** `GET /api/push/vapid-public-key` returns `{ "data": { "public_key": "..." } }` (standard project envelope), not the bare `{ "public_key": "..." }` shown in the spec.
+- **`vapid_public_key` cached in `AppState`:** Added `vapid_public_key: String` field so the public-key endpoint reads from memory rather than making a DB query on every request. Private PEM is not stored in `AppState` — it will be loaded from `app_config` in Story 7.2 when the dispatch service initialises.
+- **274 tests, 0 failed.** All three VAPID unit tests pass (`stable_across_calls`, `valid_base64url`, `private_key_is_pem`).
+
 ---
 
-**Story 7.2 — Web Push dispatch from server**  
+**Story 7.2 — Web Push dispatch from server** ✅ Complete
 Branch: `feature/phase7-web-push-dispatch`
 
 In the routine execution service, after persisting the routine response, check whether any SSE client is currently connected for the thread. If not, send a Web Push notification to all `push_subscriptions` rows for the user using the `web-push` crate.
@@ -1275,9 +1283,18 @@ Acceptance criteria:
 - Routine execution wires up the dispatch (fulfils the TODO from Story 5.4 step 10)
 - Unit test for the "should notify" decision logic
 
+### As-built notes (Story 7.2)
+
+- **HTTP client bridging:** `web-push` uses `http = "0.2"` internally while `reqwest = "0.12"` uses `http = "1.x"`. `request_builder::build_request` could not be used directly. Instead, `WebPushMessage`'s public fields (`endpoint`, `ttl`, `payload.content`, `payload.crypto_headers`) are read directly and a `reqwest` request is assembled manually. No new deps required.
+- **`vapid_private_pem` added to `AppState`:** Story 7.1 loaded the private PEM at startup but discarded it (`let (_vapid_private_pem, ...)`). This story stores it in `AppState` so the push service has it without a per-notification DB query.
+- **New `services/push.rs`:** Contains `send_routine_push_notifications` (public entry point), `send_one` (per-subscription dispatch with 410 deletion), and `should_notify` (thin testable predicate). All push errors are logged and swallowed — a push failure never aborts a routine run.
+- **Notification title uses persona emoji + name:** e.g. `"🦉 Aldous"` — derived from the already-loaded `persona` in `run_inner`, not hardcoded.
+- **4th `AppState` test site found in `sse.rs`:** The plan identified 3 construction sites in `mod.rs` but a 4th exists in `routes/sse.rs` test helpers. All four were updated.
+- **276 tests, 0 failed.** Two new unit tests: `should_notify_when_no_sse_subscriber`, `should_not_notify_when_sse_subscriber_present`.
+
 ---
 
-**Story 7.3 — PWA service worker and client subscription**  
+**Story 7.3 — PWA service worker and client subscription**
 Branch: `feature/phase7-pwa-push-client`
 
 Implement the service worker push handler and the client-side subscription flow.

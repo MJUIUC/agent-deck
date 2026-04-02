@@ -7,6 +7,7 @@ pub mod memory;
 pub mod message;
 pub mod model;
 pub mod provider;
+pub mod push_subscription;
 pub mod routine;
 pub mod routine_execution;
 pub mod thread;
