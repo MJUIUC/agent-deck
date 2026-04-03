@@ -731,21 +731,7 @@ async fn run_inner(
             );
         }
 
-        // ── Web Push dispatch ──────────────────────────────────────────────────────
-        // Send a push notification if no SSE client is watching this thread.
-        // The notification body is the first 100 chars of the assistant response.
-        let push_title = format!("{} {}", persona.emoji, persona.name);
-        let push_body: String = gen_result.content.chars().take(100).collect();
-        crate::services::push::send_routine_push_notifications(
-            state,
-            thread_id,
-            user_id,
-            &push_title,
-            &push_body,
-        )
-        .await;
-
-        // Fetch the routine name for the global event
+        // Fetch the routine name — used for both the push notification and the global event.
         let routine_name: String =
             sqlx::query_as::<_, (String,)>("SELECT name FROM routines WHERE id = ?")
                 .bind(rid)
@@ -755,6 +741,19 @@ async fn run_inner(
                 .flatten()
                 .map(|(n,)| n)
                 .unwrap_or_default();
+
+        // ── Web Push dispatch ──────────────────────────────────────────────────────
+        // Send a push notification if no SSE client is watching this thread.
+        let push_title = format!("{} {}", persona.emoji, persona.name);
+        let push_body = format!("Finished executing: {}", routine_name);
+        crate::services::push::send_routine_push_notifications(
+            state,
+            thread_id,
+            user_id,
+            &push_title,
+            &push_body,
+        )
+        .await;
 
         // Emit global RoutineFired event
         if let Err(e) = state.send_global_event(GlobalEvent::RoutineFired {
