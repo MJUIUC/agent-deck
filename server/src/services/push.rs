@@ -140,6 +140,13 @@ async fn send_one(
     let mut req = client.post(&url).header("TTL", message.ttl.to_string());
 
     if let Some(payload) = message.payload {
+        // web-push 0.11 only puts `Authorization` in crypto_headers for Aes128Gcm;
+        // `Content-Encoding` and `Content-Type` are not included and must be set
+        // explicitly, otherwise FCM forwards the blob without encoding metadata and
+        // Chrome cannot decrypt the payload (event.data arrives as null in the SW).
+        req = req
+            .header("Content-Encoding", payload.content_encoding.to_str())
+            .header("Content-Type", "application/octet-stream");
         for (name, value) in &payload.crypto_headers {
             req = req.header(*name, value);
         }

@@ -1,5 +1,4 @@
 // agent-deck service worker
-// Phase 6 stub — push handling will be wired in Phase 7.
 
 const CACHE_NAME = "agent-deck-v1";
 
@@ -13,24 +12,37 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(self.clients.claim());
 });
 
-// Push stub — full implementation in Phase 7.
 self.addEventListener("push", (event) => {
+  console.log("[sw] push event received", event);
+
   let data = { title: "agent-deck", body: "" };
   if (event.data) {
     try {
       data = event.data.json();
-    } catch {
+      console.log("[sw] push payload parsed:", data);
+    } catch (err) {
+      console.warn("[sw] push payload JSON parse failed, using raw text:", err);
       data.body = event.data.text();
     }
+  } else {
+    console.warn("[sw] push event had no data");
   }
 
+  const notifTitle = data.title ?? "agent-deck";
+  const notifOptions = {
+    body: data.body ?? "",
+    icon: "/icon-192.png",
+    badge: "/icon-192.png",
+    data: data.data ?? {},
+  };
+
+  console.log("[sw] calling showNotification:", notifTitle, notifOptions);
+
   event.waitUntil(
-    self.registration.showNotification(data.title ?? "agent-deck", {
-      body: data.body ?? "",
-      icon: "/icon-192.png",
-      badge: "/icon-192.png",
-      data: data.data ?? {},
-    }),
+    self.registration
+      .showNotification(notifTitle, notifOptions)
+      .then(() => console.log("[sw] showNotification resolved OK"))
+      .catch((err) => console.error("[sw] showNotification rejected:", err)),
   );
 });
 
