@@ -158,7 +158,7 @@ async fn send_one(
 
     match status {
         200..=299 => {
-            debug!(endpoint = %sub.endpoint, status = %status, "push: endpoint accepted");
+            info!(endpoint = %sub.endpoint, status = %status, "push: FCM accepted (2xx)");
             Ok(())
         }
         410 => {
@@ -176,10 +176,17 @@ async fn send_one(
             }
             Ok(())
         }
-        other => Err(anyhow!(
-            "push: endpoint returned unexpected status {}",
-            other
-        )),
+        other => {
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "<unreadable body>".to_string());
+            Err(anyhow!(
+                "push: endpoint returned status {} — body: {}",
+                other,
+                body
+            ))
+        }
     }
 }
 
