@@ -1,4 +1,5 @@
 import { useState, useRef } from "react";
+import { MagicWandFilled } from "@carbon/icons-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Message } from "@/types";
@@ -155,7 +156,11 @@ export function MessageBubble({
 
       <div className={[styles.col, isUser ? styles.colUser : ""].join(" ")}>
         <div className={`${styles.bubble} ${bubbleClass}`}>
-          {isRoutine && <div className={styles.routineLabel}>⚡ Routine</div>}
+          {isRoutine && (
+            <div className={styles.routineLabel}>
+              <MagicWandFilled size={10} /> Routine
+            </div>
+          )}
           {message.stopped && (
             <div className={styles.stoppedLabel}>⏹ Stopped</div>
           )}
