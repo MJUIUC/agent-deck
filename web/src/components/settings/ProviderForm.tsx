@@ -172,10 +172,10 @@ export function ProviderForm({
               disabled={!!editing}
             >
               <option value="">Select provider type…</option>
-              <option value="openai">🤖 OpenAI</option>
-              <option value="anthropic">✦ Anthropic</option>
-              <option value="custom">🔑 Custom (OpenAI-compatible)</option>
-              <option value="copilot">🐙 GitHub Copilot</option>
+              <option value="openai">OpenAI</option>
+              <option value="anthropic">Anthropic</option>
+              <option value="custom">Custom (OpenAI-compatible)</option>
+              <option value="copilot">GitHub Copilot</option>
             </FieldSelect>
             {editing && (
               <FieldHint>Kind cannot be changed after creation.</FieldHint>

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { Plus, RefreshCw, Pencil, Trash2 } from "lucide-react";
 import type { Provider, Model } from "@/types";
 import { providersApi, modelsApi } from "@/api/client";
-import { Btn, KIND_ICONS, StatusBadge } from "./shared";
+import { Btn, KindIcon, StatusBadge } from "./shared";
 import { ProviderForm } from "./ProviderForm";
 
 // ─── ProviderCard ─────────────────────────────────────────────────────────────
@@ -28,7 +28,6 @@ function ProviderCard({
   const [hovered, setHovered] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const enabledCount = models.filter((m) => m.enabled).length;
-  const icon = KIND_ICONS[provider.kind] ?? "🔌";
 
   return (
     <div
@@ -61,11 +60,10 @@ function ProviderCard({
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            fontSize: 20,
             flexShrink: 0,
           }}
         >
-          {icon}
+          <KindIcon kind={provider.kind} size={20} />
         </div>
 
         {/* provider-meta */}

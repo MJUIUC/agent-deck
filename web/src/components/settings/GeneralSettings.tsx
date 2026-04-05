@@ -15,6 +15,7 @@ import {
   FieldLabel,
   FieldTextarea,
 } from "./shared";
+import { View, ViewOff } from "@carbon/icons-react";
 
 // ─── Section card wrapper ─────────────────────────────────────────────────────
 
@@ -590,7 +591,7 @@ export function GeneralSettings() {
                 title={revealed ? "Hide token" : "Reveal token"}
                 style={{ flexShrink: 0 }}
               >
-                {revealed ? "🙈" : "👁"}
+                {revealed ? <ViewOff size={14} /> : <View size={14} />}
               </Btn>
             )}
             {token && (

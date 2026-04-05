@@ -1,4 +1,13 @@
 import React, { useState } from "react";
+import {
+  CloudApp,
+  Password,
+  UserAvatar,
+  ToolKit,
+  Settings,
+  Archive,
+  Ai,
+} from "@carbon/icons-react";
 import type { SettingsTab } from "./shared";
 
 // ─── NavItem ──────────────────────────────────────────────────────────────────
@@ -9,7 +18,7 @@ export function NavItem({
   active,
   onClick,
 }: {
-  icon: string;
+  icon: React.ReactNode;
   label: string;
   active: boolean;
   onClick: () => void;
@@ -44,7 +53,7 @@ export function NavItem({
         fontFamily: "inherit",
       }}
     >
-      <span style={{ fontSize: 15 }}>{icon}</span>
+      <span style={{ display: "flex", alignItems: "center" }}>{icon}</span>
       {label}
     </button>
   );
@@ -119,7 +128,7 @@ export function SettingsSidebar({
           marginBottom: 12,
         }}
       >
-        <span style={{ fontSize: 18 }}>🤖</span>
+        <Ai size={20} />
         <span
           style={{
             fontSize: 14,
@@ -148,38 +157,38 @@ export function SettingsSidebar({
       </div>
 
       <NavItem
-        icon="🔌"
+        icon={<CloudApp size={16} />}
         label="Providers"
         active={tab === "providers"}
         onClick={() => onTabChange("providers")}
       />
       <NavItem
-        icon="🔑"
+        icon={<Password size={16} />}
         label="Credentials"
         active={tab === "credentials"}
         onClick={() => onTabChange("credentials")}
       />
       <NavItem
-        icon="🎭"
+        icon={<UserAvatar size={16} />}
         label="Personas"
         active={tab === "personas"}
         onClick={() => onTabChange("personas")}
       />
       <NavItem
-        icon="🔧"
+        icon={<ToolKit size={16} />}
         label="MCP Servers"
         active={tab === "mcp-servers"}
         onClick={() => onTabChange("mcp-servers")}
       />
 
       <NavItem
-        icon="⚙️"
+        icon={<Settings size={16} />}
         label="General"
         active={tab === "general"}
         onClick={() => onTabChange("general")}
       />
       <NavItem
-        icon="📦"
+        icon={<Archive size={16} />}
         label="Archived Threads"
         active={tab === "archived-threads"}
         onClick={() => onTabChange("archived-threads")}

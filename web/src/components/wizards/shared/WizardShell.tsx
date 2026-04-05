@@ -1,4 +1,5 @@
 import React from "react";
+import { Ai } from "@carbon/icons-react";
 import type { WizardStepMeta } from "./types";
 import { WizardStepIndicator } from "./WizardStepIndicator";
 import { WizardCard } from "./WizardCard";
@@ -50,7 +51,7 @@ export function WizardShell({
           flexShrink: 0,
         }}
       >
-        <span style={{ fontSize: 26 }}>🤖</span>
+        <Ai size={26} />
         <span
           style={{
             fontSize: 20,

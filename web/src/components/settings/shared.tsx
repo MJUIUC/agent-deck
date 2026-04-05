@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { Bot, CloudApp, Key, LogoGithub, Plug } from "@carbon/icons-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -48,12 +49,20 @@ export const KIND_DEFAULT_URLS: Record<string, string> = {
   copilot: "http://localhost:4141/v1",
 };
 
-export const KIND_ICONS: Record<string, string> = {
-  openai: "🤖",
-  anthropic: "✦",
-  custom: "🔑",
-  copilot: "🐙",
+const KIND_ICON_MAP: Record<
+  string,
+  React.ComponentType<{ size?: number; className?: string }>
+> = {
+  openai: Bot,
+  anthropic: CloudApp,
+  custom: Key,
+  copilot: LogoGithub,
 };
+
+export function KindIcon({ kind, size = 16 }: { kind: string; size?: number }) {
+  const Icon = KIND_ICON_MAP[kind] ?? Plug;
+  return <Icon size={size} />;
+}
 
 export const KIND_URL_HINTS: Record<string, string> = {
   openai: "OpenAI-compatible endpoint — e.g. https://api.openai.com/v1.",

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Plus, Pencil, Trash2 } from "lucide-react";
+import { Bot } from "@carbon/icons-react";
 import type { AgentPersona, Provider, Model, MemoryEntry } from "@/types";
 import {
   personasApi,
@@ -616,7 +617,9 @@ export function PersonaSettings({ onDataChanged }: PersonaSettingsProps) {
             color: "var(--text-tertiary)",
           }}
         >
-          <div style={{ fontSize: 40, marginBottom: 14, opacity: 0.2 }}>🤖</div>
+          <div style={{ marginBottom: 14, opacity: 0.2 }}>
+            <Bot size={40} />
+          </div>
           <div
             style={{
               fontSize: 15,

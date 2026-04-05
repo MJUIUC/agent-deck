@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { Bot, Chat } from "@carbon/icons-react";
 import type { AgentPersona } from "@/types";
 import styles from "./PersonaPickerModal.module.css";
 
@@ -77,7 +78,9 @@ export function PersonaPickerModal({
 
         {personas.length === 0 ? (
           <div className={styles.empty}>
-            <div className={styles.emptyIcon}>🤖</div>
+            <div className={styles.emptyIcon}>
+              <Bot size={36} />
+            </div>
             <div className={styles.emptyTitle}>No personas configured</div>
             <div className={styles.emptyDesc}>
               Set up a persona in Settings before starting a chat.
@@ -97,7 +100,7 @@ export function PersonaPickerModal({
                   ].join(" ")}
                 >
                   <div className={styles.cardEmoji}>
-                    {isDefault ? "💬" : persona.emoji}
+                    {isDefault ? <Chat size={20} /> : persona.emoji}
                   </div>
                   <div className={styles.cardName}>
                     {isDefault ? "None" : persona.name}

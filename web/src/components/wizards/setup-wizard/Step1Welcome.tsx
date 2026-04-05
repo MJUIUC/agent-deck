@@ -1,4 +1,5 @@
 import React from "react";
+import { Ai } from "@carbon/icons-react";
 import { WizardNavRow } from "../shared/WizardNavRow";
 
 // ── Step1Welcome ──────────────────────────────────────────────────────────────
@@ -42,7 +43,9 @@ export function Step1Welcome({ onNext }: Step1WelcomeProps) {
           marginBottom: 28,
         }}
       >
-        <div style={{ fontSize: 48, marginBottom: 14, lineHeight: 1 }}>🤖</div>
+        <div style={{ marginBottom: 14, lineHeight: 1 }}>
+          <Ai size={48} />
+        </div>
         <h1
           style={{
             fontSize: 22,

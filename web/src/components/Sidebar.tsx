@@ -3,6 +3,7 @@ import type { Thread, AgentPersona } from "@/types";
 import { ThreadItem } from "./ThreadItem";
 import { PersonaPickerModal } from "./PersonaPickerModal";
 import { Plus, Settings } from "lucide-react";
+import { Ai, Chat, Search } from "@carbon/icons-react";
 import styles from "./Sidebar.module.css";
 
 interface SidebarProps {
@@ -126,7 +127,9 @@ export function Sidebar({
           {/* Brand row */}
           <div className={styles.brand}>
             <div className={styles.brandInner}>
-              <span className={styles.brandEmoji}>🤖</span>
+              <span className={styles.brandEmoji}>
+                <Ai size={20} />
+              </span>
               <span className={styles.brandName}>agent-deck</span>
             </div>
             {/* Mobile close button */}
@@ -187,7 +190,9 @@ export function Sidebar({
             <div className={styles.loadingText}>Loading…</div>
           ) : threads.length === 0 ? (
             <div className={styles.emptyState}>
-              <div className={styles.emptyIcon}>💬</div>
+              <div className={styles.emptyIcon}>
+                <Chat size={28} />
+              </div>
               <div className={styles.emptyTitle}>No threads yet</div>
               <div className={styles.emptyDesc}>
                 Start a new chat to begin a conversation with your agent.
@@ -195,7 +200,9 @@ export function Sidebar({
             </div>
           ) : filteredThreads.length === 0 ? (
             <div className={styles.emptyState}>
-              <div className={styles.emptyIcon}>🔍</div>
+              <div className={styles.emptyIcon}>
+                <Search size={28} />
+              </div>
               <div className={styles.emptyTitle}>No results</div>
               <div className={styles.emptyDesc}>
                 Try a different search term.

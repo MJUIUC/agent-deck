@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Archive } from "@carbon/icons-react";
 import { threadsApi } from "@/api/client";
 import type { Thread } from "@/types";
 
@@ -118,7 +119,9 @@ export function ArchivedThreadsSettings() {
       );
       setThreads(sorted);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load archived threads.");
+      setError(
+        e instanceof Error ? e.message : "Failed to load archived threads.",
+      );
     } finally {
       setIsLoading(false);
     }
@@ -143,8 +146,8 @@ export function ArchivedThreadsSettings() {
           Archived Threads
         </div>
         <div style={{ fontSize: 12, color: "var(--text-tertiary)" }}>
-          Threads you've archived are listed here for reference.
-          Restore and export functionality is planned for a future update.
+          Threads you've archived are listed here for reference. Restore and
+          export functionality is planned for a future update.
         </div>
       </div>
 
@@ -209,7 +212,9 @@ export function ArchivedThreadsSettings() {
               textAlign: "center",
             }}
           >
-            <div style={{ fontSize: 28, marginBottom: 10 }}>📦</div>
+            <div style={{ marginBottom: 10 }}>
+              <Archive size={28} />
+            </div>
             <div
               style={{
                 fontSize: 14,
@@ -283,7 +288,8 @@ export function ArchivedThreadsSettings() {
             lineHeight: 1.5,
           }}
         >
-          🔒 <strong style={{ color: "var(--text-secondary)" }}>Read-only.</strong>{" "}
+          🔒{" "}
+          <strong style={{ color: "var(--text-secondary)" }}>Read-only.</strong>{" "}
           Restore and markdown export are planned for a future update. For now,
           archived threads are preserved in the database and accessible here for
           reference.
