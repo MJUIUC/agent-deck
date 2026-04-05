@@ -32,7 +32,7 @@
     --border-strong: #666660;
     --bubble-user: #4a5235;
     --bubble-agent: #2e2e2b;
-    --bubble-routine: #2a3545;
+    --bubble-routine: #252038;
 }
 
 /* ── Olive ─────────────────────────────────────────────────────────────── */
@@ -59,7 +59,7 @@
         --border-strong: #666660;
         --bubble-user: #4a5235;
         --bubble-agent: #2e2e2b;
-        --bubble-routine: #2a3545;
+        --bubble-routine: #252038;
     }
 }
 
@@ -85,7 +85,7 @@
         --border-strong: #908d86;
         --bubble-user: #d8e0c0;
         --bubble-agent: #edeae4;
-        --bubble-routine: #d0dce8;
+        --bubble-routine: #eae8f5;
     }
 }
 
@@ -110,7 +110,7 @@
     --border-strong: #666660;
     --bubble-user: #4a5235;
     --bubble-agent: #2e2e2b;
-    --bubble-routine: #2a3545;
+    --bubble-routine: #252038;
 }
 
 [data-palette="olive"][data-mode="light"] {
@@ -134,7 +134,7 @@
     --border-strong: #908d86;
     --bubble-user: #d8e0c0;
     --bubble-agent: #edeae4;
-    --bubble-routine: #d0dce8;
+    --bubble-routine: #eae8f5;
 }
 
 /* ── Slate ──────────────────────────────────────────────────────────────── */
@@ -161,7 +161,7 @@
         --border-strong: #484f58;
         --bubble-user: #1f3a5f;
         --bubble-agent: #21262d;
-        --bubble-routine: #1a2d3d;
+        --bubble-routine: #2a2010;
     }
 }
 
@@ -187,7 +187,7 @@
         --border-strong: #8c959f;
         --bubble-user: #ddf4ff;
         --bubble-agent: #eaeef2;
-        --bubble-routine: #dae8f5;
+        --bubble-routine: #fdf5e0;
     }
 }
 
@@ -212,7 +212,7 @@
     --border-strong: #484f58;
     --bubble-user: #1f3a5f;
     --bubble-agent: #21262d;
-    --bubble-routine: #1a2d3d;
+    --bubble-routine: #2a2010;
 }
 
 [data-palette="slate"][data-mode="light"] {
@@ -236,7 +236,7 @@
     --border-strong: #8c959f;
     --bubble-user: #ddf4ff;
     --bubble-agent: #eaeef2;
-    --bubble-routine: #dae8f5;
+    --bubble-routine: #fdf5e0;
 }
 
 /* ── Midnight ───────────────────────────────────────────────────────────── */
@@ -263,7 +263,7 @@
         --border-strong: #484660;
         --bubble-user: #2a2550;
         --bubble-agent: #1c1c2e;
-        --bubble-routine: #202040;
+        --bubble-routine: #0f2520;
     }
 }
 
@@ -289,7 +289,7 @@
         --border-strong: #9898c0;
         --bubble-user: #e8e4ff;
         --bubble-agent: #eeeef8;
-        --bubble-routine: #d8e0f0;
+        --bubble-routine: #e4f5f0;
     }
 }
 
@@ -314,7 +314,7 @@
     --border-strong: #484660;
     --bubble-user: #2a2550;
     --bubble-agent: #1c1c2e;
-    --bubble-routine: #202040;
+    --bubble-routine: #0f2520;
 }
 
 [data-palette="midnight"][data-mode="light"] {
@@ -338,7 +338,7 @@
     --border-strong: #9898c0;
     --bubble-user: #e8e4ff;
     --bubble-agent: #eeeef8;
-    --bubble-routine: #d8e0f0;
+    --bubble-routine: #e4f5f0;
 }
 
 /* ── Rose ───────────────────────────────────────────────────────────────── */
@@ -365,7 +365,7 @@
         --border-strong: #705060;
         --bubble-user: #4a2535;
         --bubble-agent: #2d2028;
-        --bubble-routine: #283040;
+        --bubble-routine: #0d2828;
     }
 }
 
@@ -391,7 +391,7 @@
         --border-strong: #b89098;
         --bubble-user: #fce8ed;
         --bubble-agent: #f9eef2;
-        --bubble-routine: #e8d8f0;
+        --bubble-routine: #e0f5f5;
     }
 }
 
@@ -416,7 +416,7 @@
     --border-strong: #705060;
     --bubble-user: #4a2535;
     --bubble-agent: #2d2028;
-    --bubble-routine: #283040;
+    --bubble-routine: #0d2828;
 }
 
 [data-palette="rose"][data-mode="light"] {
@@ -440,7 +440,7 @@
     --border-strong: #b89098;
     --bubble-user: #fce8ed;
     --bubble-agent: #f9eef2;
-    --bubble-routine: #e8d8f0;
+    --bubble-routine: #e0f5f5;
 }
 
 /* ── Forest ─────────────────────────────────────────────────────────────── */
@@ -467,7 +467,7 @@
         --border-strong: #405840;
         --bubble-user: #1a3828;
         --bubble-agent: #1c2820;
-        --bubble-routine: #1a3040;
+        --bubble-routine: #25183a;
     }
 }
 
@@ -493,7 +493,7 @@
         --border-strong: #809888;
         --bubble-user: #d0f0da;
         --bubble-agent: #eaf5ee;
-        --bubble-routine: #d0e8f0;
+        --bubble-routine: #ede8f5;
     }
 }
 
@@ -518,7 +518,7 @@
     --border-strong: #405840;
     --bubble-user: #1a3828;
     --bubble-agent: #1c2820;
-    --bubble-routine: #1a3040;
+    --bubble-routine: #25183a;
 }
 
 [data-palette="forest"][data-mode="light"] {
@@ -542,7 +542,7 @@
     --border-strong: #809888;
     --bubble-user: #d0f0da;
     --bubble-agent: #eaf5ee;
-    --bubble-routine: #d0e8f0;
+    --bubble-routine: #ede8f5;
 }
 
 /* ── Ember ──────────────────────────────────────────────────────────────── */
@@ -569,7 +569,7 @@
         --border-strong: #686040;
         --bubble-user: #4a2e10;
         --bubble-agent: #2e2418;
-        --bubble-routine: #1e2840;
+        --bubble-routine: #0e1e32;
     }
 }
 
@@ -595,7 +595,7 @@
         --border-strong: #c0a878;
         --bubble-user: #fde8c8;
         --bubble-agent: #fdf4e8;
-        --bubble-routine: #e0e8f8;
+        --bubble-routine: #e0edf8;
     }
 }
 
@@ -620,7 +620,7 @@
     --border-strong: #686040;
     --bubble-user: #4a2e10;
     --bubble-agent: #2e2418;
-    --bubble-routine: #1e2840;
+    --bubble-routine: #0e1e32;
 }
 
 [data-palette="ember"][data-mode="light"] {
@@ -644,7 +644,7 @@
     --border-strong: #c0a878;
     --bubble-user: #fde8c8;
     --bubble-agent: #fdf4e8;
-    --bubble-routine: #e0e8f8;
+    --bubble-routine: #e0edf8;
 }
 
 /* ── Ocean ──────────────────────────────────────────────────────────────── */
@@ -671,7 +671,7 @@
         --border-strong: #304858;
         --bubble-user: #0a2a38;
         --bubble-agent: #142030;
-        --bubble-routine: #1a2840;
+        --bubble-routine: #28180a;
     }
 }
 
@@ -697,7 +697,7 @@
         --border-strong: #70aac0;
         --bubble-user: #c8eef8;
         --bubble-agent: #e8f5fa;
-        --bubble-routine: #d4e8f8;
+        --bubble-routine: #fdf5e8;
     }
 }
 
@@ -722,7 +722,7 @@
     --border-strong: #304858;
     --bubble-user: #0a2a38;
     --bubble-agent: #142030;
-    --bubble-routine: #1a2840;
+    --bubble-routine: #28180a;
 }
 
 [data-palette="ocean"][data-mode="light"] {
@@ -746,7 +746,7 @@
     --border-strong: #70aac0;
     --bubble-user: #c8eef8;
     --bubble-agent: #e8f5fa;
-    --bubble-routine: #d4e8f8;
+    --bubble-routine: #fdf5e8;
 }
 
 /* ── Copper ─────────────────────────────────────────────────────────────── */
@@ -773,7 +773,7 @@
         --border-strong: #625040;
         --bubble-user: #3c2010;
         --bubble-agent: #2c2218;
-        --bubble-routine: #1e2838;
+        --bubble-routine: #0e1e2c;
     }
 }
 
@@ -799,7 +799,7 @@
         --border-strong: #b89870;
         --bubble-user: #fce8d8;
         --bubble-agent: #f8f0e8;
-        --bubble-routine: #e0e8f0;
+        --bubble-routine: #e0eaf5;
     }
 }
 
@@ -824,7 +824,7 @@
     --border-strong: #625040;
     --bubble-user: #3c2010;
     --bubble-agent: #2c2218;
-    --bubble-routine: #1e2838;
+    --bubble-routine: #0e1e2c;
 }
 
 [data-palette="copper"][data-mode="light"] {
@@ -848,7 +848,7 @@
     --border-strong: #b89870;
     --bubble-user: #fce8d8;
     --bubble-agent: #f8f0e8;
-    --bubble-routine: #e0e8f0;
+    --bubble-routine: #e0eaf5;
 }
 
 /* ── Sakura ─────────────────────────────────────────────────────────────── */
@@ -875,7 +875,7 @@
         --border-strong: #704060;
         --bubble-user: #3c1830;
         --bubble-agent: #2c1e24;
-        --bubble-routine: #202838;
+        --bubble-routine: #0a2520;
     }
 }
 
@@ -901,7 +901,7 @@
         --border-strong: #d08098;
         --bubble-user: #ffe0ec;
         --bubble-agent: #feeaf0;
-        --bubble-routine: #e8d0f0;
+        --bubble-routine: #e4f5f0;
     }
 }
 
@@ -926,7 +926,7 @@
     --border-strong: #704060;
     --bubble-user: #3c1830;
     --bubble-agent: #2c1e24;
-    --bubble-routine: #202838;
+    --bubble-routine: #0a2520;
 }
 
 [data-palette="sakura"][data-mode="light"] {
@@ -950,7 +950,7 @@
     --border-strong: #d08098;
     --bubble-user: #ffe0ec;
     --bubble-agent: #feeaf0;
-    --bubble-routine: #e8d0f0;
+    --bubble-routine: #e4f5f0;
 }
 
 /* ── Noir ───────────────────────────────────────────────────────────────── */
@@ -977,7 +977,7 @@
         --border-strong: #484848;
         --bubble-user: #2a2a2a;
         --bubble-agent: #1a1a1a;
-        --bubble-routine: #1a2030;
+        --bubble-routine: #1e1a14;
     }
 }
 
@@ -1003,7 +1003,7 @@
         --border-strong: #b0b0b0;
         --bubble-user: #e8e8e8;
         --bubble-agent: #f0f0f0;
-        --bubble-routine: #e0e8f0;
+        --bubble-routine: #f5f2ea;
     }
 }
 
@@ -1028,7 +1028,7 @@
     --border-strong: #484848;
     --bubble-user: #2a2a2a;
     --bubble-agent: #1a1a1a;
-    --bubble-routine: #1a2030;
+    --bubble-routine: #1e1a14;
 }
 
 [data-palette="noir"][data-mode="light"] {
@@ -1052,7 +1052,7 @@
     --border-strong: #b0b0b0;
     --bubble-user: #e8e8e8;
     --bubble-agent: #f0f0f0;
-    --bubble-routine: #e0e8f0;
+    --bubble-routine: #f5f2ea;
 }
 
 /* ── Base ────────────────────────────────────────────────────────────────── */
