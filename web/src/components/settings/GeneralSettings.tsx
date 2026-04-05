@@ -455,6 +455,7 @@ export function GeneralSettings() {
   const mode = useThemeStore((s) => s.mode);
   const setPalette = useThemeStore((s) => s.setPalette);
   const setMode = useThemeStore((s) => s.setMode);
+  const [themeOpen, setThemeOpen] = useState(true);
 
   // Auto-detect timezone for pre-fill
   const detectedTimezone = useMemo(() => {
@@ -568,150 +569,167 @@ export function GeneralSettings() {
 
       {/* ── Theme ──────────────────────────────────────────────────────── */}
       <section style={{ marginBottom: 36 }}>
-        <h2
+        <button
+          type="button"
+          onClick={() => setThemeOpen((o) => !o)}
           style={{
-            fontSize: 13,
-            fontWeight: 600,
-            color: "var(--text-primary)",
-            marginBottom: 16,
-            paddingBottom: 8,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            width: "100%",
+            background: "none",
+            border: "none",
             borderBottom: "1px solid var(--border-subtle)",
+            paddingBottom: 8,
+            marginBottom: themeOpen ? 16 : 0,
+            cursor: "pointer",
+            fontFamily: "inherit",
           }}
         >
-          Theme
-        </h2>
+          <span
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: "var(--text-primary)",
+            }}
+          >
+            Theme
+          </span>
+          <span
+            style={{
+              fontSize: 11,
+              color: "var(--text-tertiary)",
+              transform: themeOpen ? "rotate(180deg)" : "rotate(0deg)",
+              transition: "transform 0.2s",
+              display: "inline-block",
+            }}
+          >
+            ▾
+          </span>
+        </button>
 
-        {/* Palette swatches */}
-        <div style={{ marginBottom: 20 }}>
-          <div
-            style={{
-              fontSize: 12,
-              color: "var(--text-secondary)",
-              marginBottom: 10,
-              fontWeight: 500,
-            }}
-          >
-            Palette
-          </div>
-          <div
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: 12,
-            }}
-          >
-            {PALETTES.map((p) => {
-              const selected = palette === p.id;
-              return (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => setPalette(p.id)}
-                  title={p.label}
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    gap: 5,
-                    background: "none",
-                    border: "none",
-                    cursor: "pointer",
-                    padding: 2,
-                  }}
-                >
-                  <div
-                    style={{
-                      width: 44,
-                      height: 44,
-                      borderRadius: 10,
-                      background: `linear-gradient(135deg, ${p.dark} 50%, ${p.light} 50%)`,
-                      border: `2px solid ${selected ? p.accent : "transparent"}`,
-                      boxShadow: selected ? `0 0 0 1px ${p.accent}` : "none",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      transition: "border-color 0.15s, box-shadow 0.15s",
-                      position: "relative",
-                      overflow: "hidden",
-                    }}
-                  >
-                    <div
-                      style={{
-                        width: 14,
-                        height: 14,
-                        borderRadius: "50%",
-                        background: p.accent,
-                        boxShadow: "0 1px 3px rgba(0,0,0,0.4)",
-                        flexShrink: 0,
-                      }}
-                    />
-                  </div>
-                  <span
-                    style={{
-                      fontSize: 10,
-                      color: selected
-                        ? "var(--text-primary)"
-                        : "var(--text-tertiary)",
-                      transition: "color 0.15s",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {p.label}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Mode toggle */}
-        <div>
-          <div
-            style={{
-              fontSize: 12,
-              color: "var(--text-secondary)",
-              marginBottom: 10,
-              fontWeight: 500,
-            }}
-          >
-            Appearance
-          </div>
-          <div
-            style={{
-              display: "inline-flex",
-              borderRadius: 8,
-              overflow: "hidden",
-              border: "1px solid var(--border-default)",
-            }}
-          >
-            {(["system", "light", "dark"] as Mode[]).map((m, i) => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => setMode(m)}
+        {themeOpen && (
+          <>
+            {/* Palette swatches */}
+            <div style={{ marginBottom: 20 }}>
+              <div
                 style={{
-                  padding: "7px 18px",
                   fontSize: 12,
+                  color: "var(--text-secondary)",
+                  marginBottom: 10,
                   fontWeight: 500,
-                  border: "none",
-                  borderLeft:
-                    i > 0 ? "1px solid var(--border-default)" : "none",
-                  background:
-                    mode === m ? "var(--accent-primary)" : "var(--bg-tertiary)",
-                  color:
-                    mode === m
-                      ? "var(--text-inverse)"
-                      : "var(--text-secondary)",
-                  cursor: "pointer",
-                  transition: "background 0.15s, color 0.15s",
-                  fontFamily: "inherit",
                 }}
               >
-                {m.charAt(0).toUpperCase() + m.slice(1)}
-              </button>
-            ))}
-          </div>
-        </div>
+                Palette
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: 10,
+                }}
+              >
+                {PALETTES.map((p) => {
+                  const selected = palette === p.id;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => setPalette(p.id)}
+                      title={p.label}
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        gap: 5,
+                        background: "none",
+                        border: "none",
+                        cursor: "pointer",
+                        padding: 2,
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: 36,
+                          height: 36,
+                          borderRadius: 8,
+                          background: p.accent,
+                          boxShadow: selected
+                            ? `0 0 0 2px var(--bg-primary), 0 0 0 4px ${p.accent}`
+                            : "none",
+                          transition: "box-shadow 0.15s",
+                        }}
+                      />
+                      <span
+                        style={{
+                          fontSize: 10,
+                          color: selected
+                            ? "var(--text-primary)"
+                            : "var(--text-tertiary)",
+                          transition: "color 0.15s",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {p.label}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Mode toggle */}
+            <div>
+              <div
+                style={{
+                  fontSize: 12,
+                  color: "var(--text-secondary)",
+                  marginBottom: 10,
+                  fontWeight: 500,
+                }}
+              >
+                Appearance
+              </div>
+              <div
+                style={{
+                  display: "inline-flex",
+                  borderRadius: 8,
+                  overflow: "hidden",
+                  border: "1px solid var(--border-default)",
+                }}
+              >
+                {(["system", "light", "dark"] as Mode[]).map((m, i) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setMode(m)}
+                    style={{
+                      padding: "7px 18px",
+                      fontSize: 12,
+                      fontWeight: 500,
+                      border: "none",
+                      borderLeft:
+                        i > 0 ? "1px solid var(--border-default)" : "none",
+                      background:
+                        mode === m
+                          ? "var(--accent-primary)"
+                          : "var(--bg-tertiary)",
+                      color:
+                        mode === m
+                          ? "var(--text-inverse)"
+                          : "var(--text-secondary)",
+                      cursor: "pointer",
+                      transition: "background 0.15s, color 0.15s",
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    {m.charAt(0).toUpperCase() + m.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
       </section>
 
       {/* ── Profile card ── */}
