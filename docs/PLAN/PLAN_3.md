@@ -1455,3 +1455,15 @@ The v1 memory system uses SQLite FTS5 keyword search. If memory is migrated to a
 
 ### Thread Hard Search
 Full-text search across all threads and messages. Useful as the thread list grows. SQLite FTS5 on the `messages` table would power this.
+
+### Agent Skills — Routine Creation and MCP Configuration
+
+Rather than implementing platform actions as hardcoded Rust tools, certain capabilities should be delivered as **skill files** — Markdown documents that describe the platform's own API contract in a form the agent can reason about. When a persona has a relevant skill attached, the agent can guide the user through or autonomously execute multi-step platform tasks using natural language and the existing REST API.
+
+Initial skills planned:
+
+**`create-routine.md`** — Teaches the agent the `POST /api/threads/:id/routines` contract (`name`, `prompt`, `cron_expr`). The agent can create a routine on the user's behalf from a plain-English request ("Create a morning briefing that runs at 8am every weekday") without any dedicated mobile UI. Solves the current gap where routines can only be created from the desktop Settings pane.
+
+**`configure-mcp.md`** — Teaches the agent the MCP server CRUD API (`POST/PUT/DELETE /api/mcp-servers`). The agent can help the user add, configure, or troubleshoot an MCP server through conversation.
+
+Stub files live at `docs/skills/create-routine.md` and `docs/skills/configure-mcp.md` and describe the API contracts. Infrastructure still needed: a mechanism for attaching skill files to personas (a `personas/<tag>/skills/` directory or a `skills` field on the persona row) and loading the relevant skill content into the agent context at run time.
