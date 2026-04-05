@@ -39,7 +39,7 @@
 
 .avatarRoutine {
     background: var(--bubble-routine);
-    border: 1px solid #3a4a60;
+    border: 1px solid var(--border-default);
 }
 
 /* ── Bubble column ── */
@@ -254,7 +254,8 @@
 
 .bubbleRoutine {
     background: var(--bubble-routine);
-    border: 1px solid #3a4a60;
+    border: 1px solid var(--border-subtle);
+    border-left: 3px solid var(--accent-muted);
     border-radius: 12px 12px 12px 4px;
 }
 
