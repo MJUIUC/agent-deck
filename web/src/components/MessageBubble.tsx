@@ -128,11 +128,7 @@ export function MessageBubble({
   const isRoutine = message.source === "routine";
 
   const timeStr = formatMessageTime(message.created_at);
-  const metaText = isUser
-    ? `You · ${timeStr}`
-    : isRoutine
-      ? `Routine · ${timeStr}`
-      : `${personaName} · ${timeStr}`;
+  const metaText = isUser ? `You · ${timeStr}` : `${personaName} · ${timeStr}`;
 
   const bubbleClass = isUser
     ? styles.bubbleUser
