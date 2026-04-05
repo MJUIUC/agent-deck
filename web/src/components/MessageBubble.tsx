@@ -1,4 +1,5 @@
 import { useState, useRef } from "react";
+import remarkBreaks from "remark-breaks";
 import { MagicWandFilled } from "@carbon/icons-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -103,7 +104,7 @@ export function ToolActivityBubble({ message }: { message: Message }) {
         </div>
         <div className={styles.toolContent}>
           <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
+            remarkPlugins={[remarkGfm, remarkBreaks]}
             components={{ pre: CodeBlock }}
           >
             {displayContent}
@@ -165,7 +166,7 @@ export function MessageBubble({
           ) : (
             <div className={styles.markdown}>
               <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
+                remarkPlugins={[remarkGfm, remarkBreaks]}
                 components={{ pre: CodeBlock }}
               >
                 {message.content}
@@ -201,7 +202,7 @@ export function StreamingBubble({
           {content && (
             <div className={styles.markdown}>
               <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
+                remarkPlugins={[remarkGfm, remarkBreaks]}
                 components={{ pre: CodeBlock }}
               >
                 {content}
