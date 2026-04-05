@@ -255,8 +255,9 @@
 .bubbleRoutine {
     background: var(--bubble-routine);
     border: 1px solid var(--border-subtle);
-    border-left: 3px solid var(--accent-muted);
+    border-left: 3px solid rgba(255, 255, 255, 0.6);
     border-radius: 12px 12px 12px 4px;
+    box-shadow: -3px 0 10px rgba(255, 255, 255, 0.15);
 }
 
 /* ── Routine label inside bubble ── */
