@@ -16,6 +16,7 @@ import {
   FieldTextarea,
 } from "./shared";
 import { View, ViewOff } from "@carbon/icons-react";
+import { useThemeStore, type Palette, type Mode } from "@/stores/useThemeStore";
 
 // ─── Section card wrapper ─────────────────────────────────────────────────────
 
@@ -346,6 +347,85 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 
 // ─── GeneralSettings ──────────────────────────────────────────────────────────
 
+const PALETTES: {
+  id: Palette;
+  label: string;
+  dark: string;
+  light: string;
+  accent: string;
+}[] = [
+  {
+    id: "olive",
+    label: "Olive",
+    dark: "#1c1c1a",
+    light: "#f5f3ef",
+    accent: "#7c8c5a",
+  },
+  {
+    id: "slate",
+    label: "Slate",
+    dark: "#0f1117",
+    light: "#f6f8fa",
+    accent: "#58a6ff",
+  },
+  {
+    id: "midnight",
+    label: "Midnight",
+    dark: "#0d0d1a",
+    light: "#f7f7fb",
+    accent: "#8b7fd4",
+  },
+  {
+    id: "rose",
+    label: "Rose",
+    dark: "#1a1218",
+    light: "#fdf6f8",
+    accent: "#c47a8a",
+  },
+  {
+    id: "forest",
+    label: "Forest",
+    dark: "#0d1410",
+    light: "#f4faf6",
+    accent: "#4caf72",
+  },
+  {
+    id: "ember",
+    label: "Ember",
+    dark: "#1a1208",
+    light: "#fefaf4",
+    accent: "#d4853a",
+  },
+  {
+    id: "ocean",
+    label: "Ocean",
+    dark: "#080f18",
+    light: "#f4fafd",
+    accent: "#2ab8d0",
+  },
+  {
+    id: "copper",
+    label: "Copper",
+    dark: "#181210",
+    light: "#fdf8f4",
+    accent: "#c07840",
+  },
+  {
+    id: "sakura",
+    label: "Sakura",
+    dark: "#180f14",
+    light: "#fff5f8",
+    accent: "#e8709a",
+  },
+  {
+    id: "noir",
+    label: "Noir",
+    dark: "#0a0a0a",
+    light: "#ffffff",
+    accent: "#e0e0e0",
+  },
+];
+
 export function GeneralSettings() {
   // Token state
   const [token, setToken] = useState<string | null>(null);
@@ -370,6 +450,11 @@ export function GeneralSettings() {
   const [autoScroll, setAutoScroll] = useState(true);
   const [showRoutineLabels, setShowRoutineLabels] = useState(true);
   const [pushNotifications, setPushNotifications] = useState(false);
+
+  const palette = useThemeStore((s) => s.palette);
+  const mode = useThemeStore((s) => s.mode);
+  const setPalette = useThemeStore((s) => s.setPalette);
+  const setMode = useThemeStore((s) => s.setMode);
 
   // Auto-detect timezone for pre-fill
   const detectedTimezone = useMemo(() => {
@@ -480,6 +565,154 @@ export function GeneralSettings() {
           Auth token management, preferences, and server information.
         </div>
       </div>
+
+      {/* ── Theme ──────────────────────────────────────────────────────── */}
+      <section style={{ marginBottom: 36 }}>
+        <h2
+          style={{
+            fontSize: 13,
+            fontWeight: 600,
+            color: "var(--text-primary)",
+            marginBottom: 16,
+            paddingBottom: 8,
+            borderBottom: "1px solid var(--border-subtle)",
+          }}
+        >
+          Theme
+        </h2>
+
+        {/* Palette swatches */}
+        <div style={{ marginBottom: 20 }}>
+          <div
+            style={{
+              fontSize: 12,
+              color: "var(--text-secondary)",
+              marginBottom: 10,
+              fontWeight: 500,
+            }}
+          >
+            Palette
+          </div>
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 12,
+            }}
+          >
+            {PALETTES.map((p) => {
+              const selected = palette === p.id;
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setPalette(p.id)}
+                  title={p.label}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: 5,
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    padding: 2,
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: 10,
+                      background: `linear-gradient(135deg, ${p.dark} 50%, ${p.light} 50%)`,
+                      border: `2px solid ${selected ? p.accent : "transparent"}`,
+                      boxShadow: selected ? `0 0 0 1px ${p.accent}` : "none",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      transition: "border-color 0.15s, box-shadow 0.15s",
+                      position: "relative",
+                      overflow: "hidden",
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: 14,
+                        height: 14,
+                        borderRadius: "50%",
+                        background: p.accent,
+                        boxShadow: "0 1px 3px rgba(0,0,0,0.4)",
+                        flexShrink: 0,
+                      }}
+                    />
+                  </div>
+                  <span
+                    style={{
+                      fontSize: 10,
+                      color: selected
+                        ? "var(--text-primary)"
+                        : "var(--text-tertiary)",
+                      transition: "color 0.15s",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {p.label}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Mode toggle */}
+        <div>
+          <div
+            style={{
+              fontSize: 12,
+              color: "var(--text-secondary)",
+              marginBottom: 10,
+              fontWeight: 500,
+            }}
+          >
+            Appearance
+          </div>
+          <div
+            style={{
+              display: "inline-flex",
+              borderRadius: 8,
+              overflow: "hidden",
+              border: "1px solid var(--border-default)",
+            }}
+          >
+            {(["system", "light", "dark"] as Mode[]).map((m, i) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setMode(m)}
+                style={{
+                  padding: "7px 18px",
+                  fontSize: 12,
+                  fontWeight: 500,
+                  border: "none",
+                  borderLeft:
+                    i > 0 ? "1px solid var(--border-default)" : "none",
+                  background:
+                    mode === m ? "var(--accent-primary)" : "var(--bg-tertiary)",
+                  color:
+                    mode === m
+                      ? "var(--text-inverse)"
+                      : "var(--text-secondary)",
+                  cursor: "pointer",
+                  transition: "background 0.15s, color 0.15s",
+                  fontFamily: "inherit",
+                }}
+              >
+                {m.charAt(0).toUpperCase() + m.slice(1)}
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
 
       {/* ── Profile card ── */}
       <SectionCard
