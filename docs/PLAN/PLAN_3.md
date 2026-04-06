@@ -1294,7 +1294,7 @@ Acceptance criteria:
 
 ---
 
-**Story 7.3 — PWA service worker and client subscription**
+**Story 7.3 — PWA service worker and client subscription** ✅ Complete
 Branch: `feature/phase7-pwa-push-client`
 
 Implement the service worker push handler and the client-side subscription flow.
@@ -1340,6 +1340,26 @@ Acceptance criteria:
 - Tapping the notification opens the PWA and navigates to the correct thread
 - "Notifications enabled" / "Notifications not enabled" status in settings reflects actual subscription state
 - Unsubscribe flow works and removes the subscription from the server
+
+---
+
+**Story 7.3a — Unified tool-call processing view** (QoL side-track)
+Branch: `feature/phase7-tool-call-grouping`
+
+All tool activity for an agent response is consolidated into a single expandable `<ProcessingBlock>` instead of individual per-tool spinner indicators and per-message `<ToolActivityBubble>` rows. The final assistant text response appears in a clean, separate bubble below the block once all tool rounds are done. Tools within a round execute in parallel.
+
+Research and design decisions are documented in `docs/PLAN/tool-call-grouping.md`.
+
+Acceptance criteria:
+- All tool calls within an agent response are grouped into a single `<ProcessingBlock>`; no individual "Running tool…" spinners appear
+- The `<ProcessingBlock>` is collapsed by default while running, showing a spinner and "Processing…"
+- Expanding the block during streaming shows each tool as `tool_name · preview` with a per-tool status icon (⟳ in-progress, ✓ completed)
+- Tools within a round execute in parallel; multiple ⟳ rows appear simultaneously in the expanded view
+- Reasoning text generated between rounds appears as a "Reasoning" section inside the expanded block
+- After all tool rounds complete, the final assistant response appears in its own message bubble below the `<ProcessingBlock>`
+- Stopping mid-turn renders the `<ProcessingBlock>` in a cancelled state (dashed border, grey icon)
+- In history, tool messages load as a single grouped `<ProcessingBlock>` per execution, collapsed by default
+- `<ToolActivityBubble>` is removed; the `show_tool_activity` thread toggle is removed
 
 ---
 
