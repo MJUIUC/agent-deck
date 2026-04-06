@@ -9,11 +9,17 @@
 
 ## Summary
 
-All tool activity during an agent response is consolidated into a single expandable
-`<ProcessingBlock>` component instead of individual "Running tool…" spinners and per-message
-`<ToolActivityBubble>` rows. Tools within a round execute in parallel. The final assistant text
-response appears in a clean, separate message bubble below the `<ProcessingBlock>`. This removes
-clutter from both the live streaming view and the persisted history view.
+All tool activity during an agent response is consolidated into a single expandable processing
+bubble instead of individual "Running tool…" spinners and per-message `<ToolActivityBubble>` rows.
+Tools within a round execute in parallel. The final assistant text response appears in a clean,
+separate message bubble below the processing bubble. This removes clutter from both the live
+streaming view and the persisted history view.
+
+The implementation is split into two components: `ProcessingBlock` (the inner collapsible
+accordion — header row, tool rows, reasoning sections) and `ProcessingBubble` (a thin shell that
+mirrors the agent message bubble layout — persona avatar on the left, bubble container on the
+right — with `ProcessingBlock` as its body). `ProcessingBubble` reuses the same CSS classes from
+`MessageBubble.module.css` so it is visually indistinguishable from a regular agent bubble.
 
 ---
 
@@ -37,7 +43,9 @@ clutter from both the live streaming view and the persisted history view.
   `tool_activity` (role=tool) marks all in-progress entries completed and appends a new `text`
   entry for the next sub-turn. No `tool_round_complete` handling.
 - `web/src/components/MessageBubble.tsx` — exports `ToolActivityBubble` (collapsible per-message
-  row, hidden behind `show_tool_activity`) and `ToolExecutingIndicator` (inline spinner).
+  row, hidden behind `show_tool_activity`), `ToolExecutingIndicator` (inline spinner), and the
+  `AgentAvatar` component (currently defined inline; needs to be exported for reuse by
+  `ProcessingBubble`).
 - `web/src/components/ChatView.tsx` — renders each `StreamingEntry` independently; completed
   `tool_call` entries are invisible; no grouping.
 
@@ -166,32 +174,55 @@ Update `useMessageStore` handlers:
 
 Remove the now-unreachable `beginToolCall` and `completeToolCall` helpers.
 
-### Task 5 — Build `<ProcessingBlock>` component
+### Task 5 — Build `<ProcessingBlock>` and `<ProcessingBubble>`
 
 - **Files:** `web/src/components/ProcessingBlock.tsx`,
   `web/src/components/ProcessingBlock.module.css`
 
-A single component that works in two modes controlled by a `static` prop:
-- **Streaming mode** (`static={false}`, default): receives `rounds: ProcessingRound[]` live
-  from the store.
-- **Static mode** (`static={true}`): receives pre-grouped `rounds` built from history messages.
+**`ProcessingBlock`** — inner content only, no positioning or avatar logic.
+
+Props: `rounds: ProcessingRound[]`
 
 Internal expansion state is a `useState<boolean>` — not hoisted to any store.
 
-**Collapsed header** (always visible):
-- Left: status icon — `InProgress` spinner (animated) if any round is `in_progress`, `CheckmarkFilled` if all completed, `CloseFilled` with dashed border class if cancelled.
-- Centre: label — "Processing…" while running; "Processing · N tools" or "Processing · N tools, M rounds" when done.
-- Right: `ChevronRight` / `ChevronDown` toggle icon.
+*Collapsed header* (always visible):
+- Left: status icon — `InProgress` spinner (animated) if any round is `in_progress`,
+  `CheckmarkFilled` if all completed, `CloseFilled` if cancelled.
+- Centre: label — "Processing…" while running; "Processing · N tools" or
+  "Processing · N tools, M rounds" when done.
+- Right: `ChevronRight` / `ChevronDown` toggle.
 
-**Expanded body** (when open):
-- One section per round. Round header (`Round N`) is only rendered when there is more than one round.
-- Each tool row: status icon + `tool_name` + `·` + first value from `input_preview` (or nothing if `input_preview` is empty).
-- If `round.reasoning` is non-empty, render a "Reasoning" section between this round's tools and the next round header, using subdued text styling and a left border accent.
-- Cancelled block uses dashed border and muted palette throughout.
+*Expanded body* (when open):
+- One section per round. Round header (`Round N`) only shown when there is more than one round.
+- Each tool row: status icon + `tool_name` + `·` + first value from `input_preview` (omitted if
+  `input_preview` is empty).
+- If `round.reasoning` is non-empty, render a "Reasoning" section between this round's tools and
+  the next round header: subdued text, left border accent.
+- Cancelled state: dashed border, muted palette throughout.
 
-### Task 6 — Wire `<ProcessingBlock>` into the streaming render path
+---
+
+**`ProcessingBubble`** — the bubble shell; mirrors the agent message bubble layout exactly.
+
+Props: `rounds: ProcessingRound[]`, `personaEmoji: string`, `personaName?: string`
+
+Structure (copies the agent bubble row from `MessageBubble.tsx`):
+- Outer row uses `styles.rowAgent` from `MessageBubble.module.css` (imported directly).
+- Left slot: `<AgentAvatar>` — export this component from `MessageBubble.tsx` so it can be
+  imported here.
+- Right slot: a div using `styles.bubbleAgent` containing `<ProcessingBlock rounds={rounds} />`.
+- Below the bubble: metadata line using `styles.meta` — shows `personaName ?? "Agent"` with no
+  timestamp (rounds are in-progress or just finished; a timestamp isn't meaningful here).
+
+`ProcessingBubble` lives in `ProcessingBlock.tsx` alongside `ProcessingBlock` since they are
+always deployed together.
+
+### Task 6 — Wire `<ProcessingBubble>` into the streaming render path
 
 - **Files:** `web/src/components/ChatView.tsx`
+
+Export `AgentAvatar` from `MessageBubble.tsx` (remove the `function` keyword's implicit
+file-scope — just add `export` in front of it). `ProcessingBubble` imports it from there.
 
 In the streaming entries render block, replace the existing logic with:
 
@@ -199,42 +230,69 @@ In the streaming entries render block, replace the existing logic with:
 {isStreaming && streamingEntries.map((entry, i) => {
   const isLast = i === streamingEntries.length - 1;
   if (entry.type === "text") {
-    return <StreamingBubble key={`text-${i}`} ... content={entry.content} streaming={isLast} />;
+    return (
+      <StreamingBubble key={`text-${i}`} ... content={entry.content} streaming={isLast} />
+    );
   }
   if (entry.type === "processing") {
-    return <ProcessingBlock key="processing" rounds={entry.rounds} />;
+    return (
+      <ProcessingBubble
+        key="processing"
+        rounds={entry.rounds}
+        personaEmoji={persona?.emoji ?? "🤖"}
+        personaName={persona?.name}
+      />
+    );
   }
   return null;
 })}
 ```
 
 The `processing` entry always appears before any trailing `text` entry in `entries`, so the
-visual order is naturally: preamble bubble → ProcessingBlock → final streaming bubble.
+visual order is: preamble bubble → `ProcessingBubble` → final `StreamingBubble`.
 
 ### Task 7 — Grouped history view and cleanup
 
 - **Files:** `web/src/components/ChatView.tsx`, `web/src/components/MessageBubble.tsx`,
-  `web/src/stores/useMessageStore.ts` (or a new `useGroupedMessages.ts` hook)
+  `web/src/types/index.ts`, `web/src/stores/useMessageStore.ts`
 
-Add a `useGroupedMessages` selector/hook that transforms `Message[]` into `GroupedItem[]`:
+Add a `useGroupedMessages` selector (co-located in `useMessageStore.ts` or as a standalone
+`useMemo` in `ChatView.tsx`) that transforms `Message[]` into `GroupedItem[]`:
 
 ```typescript
 type GroupedItem =
   | { type: "message"; message: Message }
-  | { type: "tool_group"; executionId: string; rounds: ToolRoundGroup[] }
-
-interface ToolRoundGroup {
-  round: number | null; // null for legacy messages without tool_round
-  calls: Array<{ call: Message; result: Message | null }>;
-}
+  | { type: "tool_group"; executionId: string; rounds: ProcessingRound[] }
 ```
 
 Grouping logic: walk messages in order; when a `source: "tool"` message is encountered, collect
-all consecutive tool messages sharing the same `execution_id` and group them by `tool_round`.
-Emit one `tool_group` item. All other messages pass through as `message` items.
+all consecutive tool messages sharing the same `execution_id`, pair assistant-role and tool-role
+rows by `tool_call_id`, and build a `ProcessingRound[]` grouped by `tool_round` (treating `null`
+as round `1`). Emit one `tool_group` item. All other messages pass through as `message` items.
 
-Replace the `<ToolActivityBubble>` render path in `ChatView.tsx` with `<ProcessingBlock
-static={true} rounds={...} />` for `tool_group` items.
+The `ToolCallEntry` fields for the static history case:
+- `tool_call_id`: from the message's `tool_call_id` column (or generated from message `id` as
+  fallback for old rows without the column).
+- `tool_name` / `input_preview`: not stored on the `Message` — omit `input_preview`, derive
+  `tool_name` by parsing the first line of the call message content
+  (format is `**Tool call:** \`name\``). If parsing fails, fall back to `"tool"`.
+- `status`: always `"completed"` for history rows.
+- `call_message_id` / `result_message_id`: the paired message IDs.
+
+In `ChatView.tsx`, replace the existing tool-message render path with:
+
+```tsx
+if (item.type === "tool_group") {
+  return (
+    <ProcessingBubble
+      key={item.executionId}
+      rounds={item.rounds}
+      personaEmoji={persona?.emoji ?? "🤖"}
+      personaName={persona?.name}
+    />
+  );
+}
+```
 
 Remove:
 - `ToolActivityBubble` export and its render path from `MessageBubble.tsx`.
@@ -268,15 +326,16 @@ drop it); it simply becomes unused and can be cleaned up in a future housekeepin
 
 **Round 2 — frontend core (Tasks 4 + 5 in parallel):**
 - Sub-agent C: Task 4 — `types/index.ts` and `useMessageStore.ts` only.
-- Sub-agent D: Task 5 — `ProcessingBlock.tsx` and `ProcessingBlock.module.css` only.
-- These share no files and the component's props interface is defined in this plan, so both can
-  start immediately after Round 1 (or even concurrently with Round 1, since the new event shapes
-  are fully specified here).
+- Sub-agent D: Task 5 — `ProcessingBlock.tsx` and `ProcessingBlock.module.css` only. Also
+  exports `AgentAvatar` from `MessageBubble.tsx` (a one-line change, safe to do here since
+  Sub-agent E will read `MessageBubble.tsx` after this agent finishes).
+- These share no files and all props interfaces are defined in this plan.
 
-**Round 3 — wire-up and cleanup (Tasks 6 + 7 sequentially):**
-- Task 6 depends on Tasks 4 + 5 (needs the updated store shape and the component).
-- Task 7 depends on Task 5 (needs `<ProcessingBlock>` static mode) and can be done in the same
-  agent pass as Task 6.
+**Round 3 — wire-up and cleanup (Tasks 6 + 7 in one agent pass):**
+- Sub-agent E: Tasks 6 + 7 — `ChatView.tsx`, `MessageBubble.tsx` cleanup, `types/index.ts`
+  cleanup, store cleanup.
+- Depends on Tasks 4 + 5 being complete (needs updated store shape, `ProcessingBubble`, and the
+  exported `AgentAvatar`).
 
 ---
 
@@ -310,6 +369,6 @@ drop it); it simply becomes unused and can be cleaned up in a future housekeepin
 
 ## Approval
 
-- [ ] **Implementation plan approved** — human has reviewed this plan and confirmed coding can begin
+- [x] **Implementation plan approved** — human has reviewed this plan and confirmed coding can begin
 - [ ] **Coding complete** — all tests pass, agent has verified against every acceptance criterion
 - [ ] **Human review approved** — human has tested the changes live and signed off
