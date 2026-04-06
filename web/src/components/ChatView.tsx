@@ -209,27 +209,34 @@ export function ChatView({
     | { type: "tool_group"; executionId: string; rounds: ProcessingRound[] };
 
   const processedItems = useMemo((): ProcessedItem[] => {
-    // First pass: group consecutive tool messages by execution_id
+    // First pass: group all tool messages by execution_id.
+    // We pre-collect every tool message into a map keyed by execution_id so
+    // that chat_segment messages inserted between tool rounds (inter-round
+    // reasoning text) do not split a single run's tools into multiple blocks.
     type RawItem =
       | { type: "message"; message: Message }
       | { type: "tool_group"; executionId: string; rounds: ProcessingRound[] };
 
+    const toolMsgsByExecId = new Map<string, Message[]>();
+    for (const m of visibleMessages) {
+      if (m.source === "tool") {
+        const eid = m.execution_id ?? m.id;
+        const arr = toolMsgsByExecId.get(eid);
+        if (arr) arr.push(m);
+        else toolMsgsByExecId.set(eid, [m]);
+      }
+    }
+
+    const emittedExecIds = new Set<string>();
     const rawItems: RawItem[] = [];
-    let i = 0;
-    while (i < visibleMessages.length) {
-      const msg = visibleMessages[i];
+
+    for (const msg of visibleMessages) {
       if (msg.source === "tool") {
         const executionId = msg.execution_id ?? msg.id;
-        const group: Message[] = [];
-        while (
-          i < visibleMessages.length &&
-          visibleMessages[i].source === "tool" &&
-          (visibleMessages[i].execution_id ?? visibleMessages[i].id) ===
-            executionId
-        ) {
-          group.push(visibleMessages[i]);
-          i++;
-        }
+        if (emittedExecIds.has(executionId)) continue;
+        emittedExecIds.add(executionId);
+
+        const group = toolMsgsByExecId.get(executionId) ?? [];
         const calls = group.filter((m) => m.role === "assistant");
         const results = group.filter((m) => (m.role as string) === "tool");
         const roundEntries = calls.map((call, idx): ToolCallEntry => {
@@ -260,7 +267,6 @@ export function ChatView({
         rawItems.push({ type: "tool_group", executionId, rounds });
       } else {
         rawItems.push({ type: "message", message: msg });
-        i++;
       }
     }
 

@@ -311,11 +311,7 @@ async fn run_inner(
         None
     };
 
-    let execution_id: Option<String> = if is_routine {
-        Some(uuid::Uuid::new_v4().to_string())
-    } else {
-        None
-    };
+    let execution_id: Option<String> = Some(uuid::Uuid::new_v4().to_string());
 
     // Create the routine_executions row (best-effort — log on failure, don't abort)
     if let (Some(ref rid), Some(ref exec_id)) = (&routine_id_opt, &execution_id) {
