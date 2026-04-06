@@ -192,7 +192,6 @@ export const threadsApi = {
       active_model?: string;
       active_provider?: string;
       system_prompt_addendum?: string;
-      show_tool_activity?: boolean;
       show_system_events?: boolean;
       auto_summarize?: boolean;
     },

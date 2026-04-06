@@ -1,6 +1,6 @@
 import { useState, useRef } from "react";
 import remarkBreaks from "remark-breaks";
-import { MagicWandFilled, InProgress } from "@carbon/icons-react";
+import { MagicWandFilled } from "@carbon/icons-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Message } from "@/types";
@@ -18,7 +18,7 @@ function UserAvatar() {
   return <div className={`${styles.avatar} ${styles.avatarUser}`}>M</div>;
 }
 
-function AgentAvatar({
+export function AgentAvatar({
   emoji,
   className,
 }: {
@@ -83,67 +83,11 @@ function CodeBlock({
   );
 }
 
-const TOOL_CONTENT_LIMIT = 4000;
-
-export function ToolActivityBubble({ message }: { message: Message }) {
-  const [expanded, setExpanded] = useState(false);
-  const isCall = message.role === "assistant";
-  const timeStr = formatMessageTime(message.created_at);
-
-  const raw = message.content ?? "";
-  const truncated = raw.length > TOOL_CONTENT_LIMIT;
-  const displayContent = truncated
-    ? raw.slice(0, TOOL_CONTENT_LIMIT) +
-      "\n\n…(truncated — content too large to display)"
-    : raw;
-
-  return (
-    <div className={styles.toolRow}>
-      <div className={styles.toolBubble}>
-        <button
-          className={styles.toolHeader}
-          onClick={() => setExpanded((v) => !v)}
-          aria-expanded={expanded}
-        >
-          <span className={styles.toolLabel}>
-            {isCall ? "⚙ Tool call" : "⚙ Tool result"}
-          </span>
-          <span className={styles.toolToggle}>{expanded ? "▼" : "▶"}</span>
-        </button>
-        {expanded && (
-          <div className={styles.toolContent}>
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm, remarkBreaks]}
-              components={{ pre: CodeBlock }}
-            >
-              {displayContent}
-            </ReactMarkdown>
-          </div>
-        )}
-        <div className={styles.toolMeta}>{timeStr}</div>
-      </div>
-    </div>
-  );
-}
-
-export function ToolExecutingIndicator() {
-  return (
-    <div className={styles.toolExecuting}>
-      <InProgress size={14} className={styles.toolExecutingIcon} />
-      <span className={styles.toolExecutingLabel}>Running tool…</span>
-    </div>
-  );
-}
-
 export function MessageBubble({
   message,
   personaEmoji = "🤖",
   personaName = "Agent",
 }: MessageBubbleProps) {
-  if (message.source === "tool") {
-    return <ToolActivityBubble message={message} />;
-  }
-
   const isUser = message.role === "user";
   const isRoutine = message.source === "routine";
 

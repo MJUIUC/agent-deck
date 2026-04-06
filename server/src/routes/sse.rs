@@ -65,7 +65,12 @@ pub enum ThreadEvent {
     },
     /// Tool call is about to execute — emitted before tool.run() so the client
     /// can commit the current streaming segment and show an "executing" indicator.
-    ToolStart { tool_name: String },
+    ToolStart {
+        tool_name: String,
+        tool_call_id: String,
+        round: u32,
+        input_preview: serde_json::Value,
+    },
     /// A tool message (call or result) was persisted — pushed to connected clients
     /// so tool activity appears in the streaming view in real-time.
     ToolActivity {
@@ -73,7 +78,12 @@ pub enum ThreadEvent {
         role: String,
         content: String,
         created_at: String,
+        tool_call_id: String,
+        round: u32,
     },
+    /// All tool calls in a round have completed — emitted after the last
+    /// ToolActivity in the round so the client can close the round's UI group.
+    ToolRoundComplete { round: u32, tool_count: u32 },
     /// A pre-tool text sub-turn has been committed to the database — emitted before
     /// tool execution begins so the client can anchor the streaming text to a real
     /// message ID.
@@ -97,6 +107,7 @@ impl ThreadEvent {
             ThreadEvent::Retry { .. } => "retry",
             ThreadEvent::ToolStart { .. } => "tool_start",
             ThreadEvent::ToolActivity { .. } => "tool_activity",
+            ThreadEvent::ToolRoundComplete { .. } => "tool_round_complete",
             ThreadEvent::ChatSegment { .. } => "chat_segment",
         }
     }
@@ -553,6 +564,39 @@ mod tests {
             created_at: "2025-01-01".to_string(),
         };
         assert_eq!(e.event_name(), "chat_segment");
+    }
+
+    #[test]
+    fn thread_event_tool_start_event_name() {
+        let e = ThreadEvent::ToolStart {
+            tool_name: "read_file".to_string(),
+            tool_call_id: "call_abc123".to_string(),
+            round: 1,
+            input_preview: serde_json::json!({"path": "/tmp/foo.txt"}),
+        };
+        assert_eq!(e.event_name(), "tool_start");
+    }
+
+    #[test]
+    fn thread_event_tool_activity_event_name() {
+        let e = ThreadEvent::ToolActivity {
+            id: "m1".to_string(),
+            role: "tool".to_string(),
+            content: "**Tool result** (`read_file`):\nhello".to_string(),
+            created_at: "2025-01-01".to_string(),
+            tool_call_id: "call_abc123".to_string(),
+            round: 1,
+        };
+        assert_eq!(e.event_name(), "tool_activity");
+    }
+
+    #[test]
+    fn thread_event_tool_round_complete_event_name() {
+        let e = ThreadEvent::ToolRoundComplete {
+            round: 1,
+            tool_count: 3,
+        };
+        assert_eq!(e.event_name(), "tool_round_complete");
     }
 
     #[test]

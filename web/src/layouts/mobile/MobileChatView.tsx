@@ -14,11 +14,8 @@ import type { Thread } from "@/types";
 import { useMessageStore } from "@/stores/useMessageStore";
 import { useSseStore } from "@/stores/useSseStore";
 import { resolveDisplayNames } from "@/components/ChatHeader";
-import {
-  MessageBubble,
-  StreamingBubble,
-  ToolExecutingIndicator,
-} from "@/components/MessageBubble";
+import { MessageBubble, StreamingBubble } from "@/components/MessageBubble";
+import { ProcessingBubble } from "@/components/ProcessingBlock";
 import { MobileConfigSheet } from "./MobileConfigSheet";
 import styles from "./MobileChatView.module.css";
 
@@ -451,14 +448,17 @@ export function MobileChatView({
                   );
                 }
 
-                if (
-                  entry.type === "tool_call" &&
-                  entry.status === "in_progress"
-                ) {
-                  return <ToolExecutingIndicator key={`tool-${i}`} />;
+                if (entry.type === "processing") {
+                  return (
+                    <ProcessingBubble
+                      key={`processing-${i}`}
+                      rounds={entry.rounds}
+                      personaEmoji={personaEmoji}
+                      personaName={personaName}
+                    />
+                  );
                 }
 
-                // completed tool_call: no visible element
                 return null;
               })}
           </>

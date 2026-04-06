@@ -944,8 +944,6 @@ async fn generation_loop(
             all_content.push_str(&turn.text);
         }
 
-        tool_rounds += 1;
-
         let pending: Vec<PendingToolCall> = turn
             .tool_calls
             .iter()
@@ -957,7 +955,7 @@ async fn generation_loop(
             .collect();
         messages.push(build_assistant_tool_call_message(&turn.text, &pending));
 
-        let tool_results = execute_tool_calls(
+        let (tool_results, hidden_ids) = execute_tool_calls(
             state,
             thread_id,
             user_id,
@@ -965,10 +963,21 @@ async fn generation_loop(
             &turn.tool_calls,
             attached_mcp,
             cancellation_rx,
-            &mut run_context,
             execution_id,
+            (tool_rounds + 1) as u32,
         )
         .await;
+        run_context.hidden_message_ids.extend(hidden_ids);
+
+        state.send_thread_event(
+            thread_id,
+            ThreadEvent::ToolRoundComplete {
+                round: (tool_rounds + 1) as u32,
+                tool_count: turn.tool_calls.len() as u32,
+            },
+        );
+
+        tool_rounds += 1;
 
         if is_cancelled(cancellation_rx) {
             cancelled = true;
@@ -1456,17 +1465,49 @@ async fn handle_stream_event(
 
 // ─── execute_tool_calls ───────────────────────────────────────────────────────
 
-/// Dispatch all tool calls for one round and return their result strings in
-/// the same order as `calls`.  Each result is suitable for feeding directly
-/// back to the model as a `tool` role message.
+/// Compute a brief preview of a tool call's inputs for the `ToolStart` SSE event.
+fn compute_input_preview(tool_name: &str, args_json: &str) -> serde_json::Value {
+    let args: serde_json::Value =
+        serde_json::from_str(args_json).unwrap_or(serde_json::Value::Object(Default::default()));
+    match tool_name {
+        "edit_file" | "read_file" | "delete_file" | "create_file" => {
+            if let Some(path) = args.get("path").and_then(|v| v.as_str()) {
+                serde_json::json!({"path": path})
+            } else {
+                serde_json::json!({})
+            }
+        }
+        "bash" | "shell" | "run_command" | "execute_command" => {
+            if let Some(cmd) = args.get("command").and_then(|v| v.as_str()) {
+                let truncated = if cmd.len() > 80 { &cmd[..80] } else { cmd };
+                serde_json::json!({"command": truncated})
+            } else {
+                serde_json::json!({})
+            }
+        }
+        "save_memory" | "recall_memory" | "delete_memory" | "recall_conversation" => {
+            if let Some(query) = args.get("query").and_then(|v| v.as_str()) {
+                serde_json::json!({"query": query})
+            } else if let Some(key) = args.get("key").and_then(|v| v.as_str()) {
+                serde_json::json!({"key": key})
+            } else {
+                serde_json::json!({})
+            }
+        }
+        _ if tool_name.contains("__") => {
+            let (tag, name) = tool_name.split_once("__").unwrap_or(("", tool_name));
+            serde_json::json!({"tool": name, "server": tag})
+        }
+        _ => serde_json::json!({}),
+    }
+}
+
+/// Dispatch all tool calls for one round and return `(results, hidden_message_ids)`.
 ///
-/// Built-in tools (from `AppState::built_in_tools`) are checked first.
-/// If no built-in matches, the call falls through to MCP routing.
-/// Errors from individual tools are converted to error strings so one failing
-/// tool does not abort the entire round.
-///
-/// The `_cancellation_rx` parameter is reserved for Story C.2, which will add
-/// per-tool cancellation checks inside this function.
+/// All `ToolStart` events are emitted upfront so the frontend sees the complete
+/// round's tool list at once.  The individual calls then run in parallel via
+/// `join_all`.  Each result string is in the same order as `calls` and is
+/// suitable for feeding back to the model as a `tool` role message.
 async fn execute_tool_calls(
     state: &AppState,
     thread_id: &str,
@@ -1475,148 +1516,200 @@ async fn execute_tool_calls(
     calls: &[ResolvedToolCall],
     attached_mcp: &[AttachedMcpServer],
     cancellation_rx: &tokio::sync::watch::Receiver<bool>,
-    run_context: &mut RunContext,
     execution_id: Option<&str>,
-) -> Vec<String> {
+    round: u32,
+) -> (Vec<String>, Vec<String>) {
     use crate::services::tools::ToolContext;
 
-    let mut results = Vec::with_capacity(calls.len());
-
+    // Emit all ToolStart events upfront so the frontend sees the full round immediately.
     for tc in calls {
-        if is_cancelled(cancellation_rx) {
-            info!(
-                thread_id = %thread_id,
-                remaining = calls.len() - results.len(),
-                "execute_tool_calls: cancellation detected before dispatch, skipping remaining tools"
-            );
-            break;
-        }
-
-        info!(
-            thread_id = %thread_id,
-            tool = %tc.name,
-            tool_call_id = %tc.id,
-            args_len = tc.args.len(),
-            "execute_tool_calls: dispatching tool call"
-        );
-
+        let input_preview = compute_input_preview(&tc.name, &tc.args);
         state.send_thread_event(
             thread_id,
             ThreadEvent::ToolStart {
                 tool_name: tc.name.clone(),
+                tool_call_id: tc.id.clone(),
+                round,
+                input_preview,
             },
         );
-
-        // ── Check built-in tool registry first ────────────────────────────────
-        let built_in = state
-            .built_in_tools
-            .iter()
-            .find(|t| t.name() == tc.name.as_str());
-
-        let result_content = if let Some(tool) = built_in {
-            let args: serde_json::Value = match serde_json::from_str(&tc.args) {
-                Ok(v) => v,
-                Err(e) => {
-                    let msg = tool_json_parse_error(&tc.name, &e, &tc.args);
-                    results.push(msg);
-                    continue;
-                }
-            };
-            let context = ToolContext {
-                pool: &state.pool,
-                user_id,
-                persona_id,
-                thread_id,
-            };
-            let output = match tool.run(args, &context).await {
-                Ok(r) => {
-                    info!(thread_id = %thread_id, tool = %tc.name,
-                        result_len = r.len(), "execute_tool_calls: built-in tool returned result");
-                    r
-                }
-                Err(e) => {
-                    warn!(tool = %tc.name, error = %e, "Built-in tool execution failed; returning error to model");
-                    format!("Tool execution failed: {}", e)
-                }
-            };
-
-            // Persist hidden call + result so show_tool_activity can surface them.
-            if let Some(msg) = persist_tool_message(
-                &state.pool,
-                thread_id,
-                "assistant",
-                &format!("**Tool call:** `{}`\n```json\n{}\n```", tc.name, tc.args),
-                execution_id,
-            )
-            .await
-            {
-                run_context.hidden_message_ids.push(msg.id.clone());
-                state.send_thread_event(
-                    thread_id,
-                    ThreadEvent::ToolActivity {
-                        id: msg.id.clone(),
-                        role: msg.role.clone(),
-                        content: msg.content.clone(),
-                        created_at: msg.created_at.clone(),
-                    },
-                );
-            }
-            if let Some(msg) = persist_tool_message(
-                &state.pool,
-                thread_id,
-                "tool",
-                &format!("**Tool result** (`{}`):\n{}", tc.name, output),
-                execution_id,
-            )
-            .await
-            {
-                run_context.hidden_message_ids.push(msg.id.clone());
-                state.send_thread_event(
-                    thread_id,
-                    ThreadEvent::ToolActivity {
-                        id: msg.id.clone(),
-                        role: msg.role.clone(),
-                        content: msg.content.clone(),
-                        created_at: msg.created_at.clone(),
-                    },
-                );
-            }
-
-            output
-        } else {
-            // ── Fall through to MCP routing ────────────────────────────────────
-            let pending = PendingToolCall {
-                id: tc.id.clone(),
-                name: tc.name.clone(),
-                args: tc.args.clone(),
-            };
-            match execute_mcp_tool(
-                state,
-                thread_id,
-                &pending,
-                attached_mcp,
-                cancellation_rx,
-                run_context,
-                execution_id,
-            )
-            .await
-            {
-                Ok(r) => {
-                    info!(thread_id = %thread_id, tool = %tc.name,
-                        result_len = r.len(), "execute_tool_calls: MCP tool returned result");
-                    r
-                }
-                Err(e) => {
-                    warn!(tool = %tc.name, error = %e, "Tool execution failed; returning error to model");
-                    format!("Tool execution failed: {}", e)
-                }
-            }
-        };
-
-        results.push(result_content);
     }
 
-    results
+    // Build one future per tool call; each returns (result_content, hidden_ids).
+    let futures_vec = calls
+        .iter()
+        .map(|tc| {
+            let tool_name = tc.name.clone();
+            let tool_args = tc.args.clone();
+            let tool_id = tc.id.clone();
+            // Resolve the built-in here (before the async block) so we can move
+            // an owned Arc into the future rather than holding a borrow across awaits.
+            let maybe_built_in = state
+                .built_in_tools
+                .iter()
+                .find(|t| t.name() == tc.name.as_str())
+                .cloned();
+
+            async move {
+                if is_cancelled(cancellation_rx) {
+                    info!(
+                        thread_id = %thread_id,
+                        tool = %tool_name,
+                        "execute_tool_calls: cancellation detected, skipping tool"
+                    );
+                    return ("Tool call cancelled by user.".to_string(), vec![]);
+                }
+
+                info!(
+                    thread_id = %thread_id,
+                    tool = %tool_name,
+                    tool_call_id = %tool_id,
+                    args_len = tool_args.len(),
+                    "execute_tool_calls: dispatching tool call"
+                );
+
+                if let Some(tool) = maybe_built_in {
+                    // ── Built-in tool ──────────────────────────────────────────
+                    let args: serde_json::Value = match serde_json::from_str(&tool_args) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            return (tool_json_parse_error(&tool_name, &e, &tool_args), vec![]);
+                        }
+                    };
+                    let context = ToolContext {
+                        pool: &state.pool,
+                        user_id,
+                        persona_id,
+                        thread_id,
+                    };
+                    let output = match tool.run(args, &context).await {
+                        Ok(r) => {
+                            info!(
+                                thread_id = %thread_id,
+                                tool = %tool_name,
+                                result_len = r.len(),
+                                "execute_tool_calls: built-in tool returned result"
+                            );
+                            r
+                        }
+                        Err(e) => {
+                            warn!(
+                                tool = %tool_name,
+                                error = %e,
+                                "Built-in tool execution failed; returning error to model"
+                            );
+                            format!("Tool execution failed: {}", e)
+                        }
+                    };
+
+                    // Persist hidden call + result so show_tool_activity can surface them.
+                    let mut hidden_ids = Vec::new();
+
+                    if let Some(msg) = persist_tool_message(
+                        &state.pool,
+                        thread_id,
+                        "assistant",
+                        &format!(
+                            "**Tool call:** `{}`\n```json\n{}\n```",
+                            tool_name, tool_args
+                        ),
+                        execution_id,
+                        Some(tool_id.as_str()),
+                        Some(round),
+                    )
+                    .await
+                    {
+                        hidden_ids.push(msg.id.clone());
+                        state.send_thread_event(
+                            thread_id,
+                            ThreadEvent::ToolActivity {
+                                id: msg.id.clone(),
+                                role: msg.role.clone(),
+                                content: msg.content.clone(),
+                                created_at: msg.created_at.clone(),
+                                tool_call_id: tool_id.clone(),
+                                round,
+                            },
+                        );
+                    }
+
+                    if let Some(msg) = persist_tool_message(
+                        &state.pool,
+                        thread_id,
+                        "tool",
+                        &format!("**Tool result** (`{}`):\n{}", tool_name, output),
+                        execution_id,
+                        Some(tool_id.as_str()),
+                        Some(round),
+                    )
+                    .await
+                    {
+                        hidden_ids.push(msg.id.clone());
+                        state.send_thread_event(
+                            thread_id,
+                            ThreadEvent::ToolActivity {
+                                id: msg.id.clone(),
+                                role: msg.role.clone(),
+                                content: msg.content.clone(),
+                                created_at: msg.created_at.clone(),
+                                tool_call_id: tool_id.clone(),
+                                round,
+                            },
+                        );
+                    }
+
+                    (output, hidden_ids)
+                } else {
+                    // ── MCP tool ───────────────────────────────────────────────
+                    let pending = PendingToolCall {
+                        id: tool_id.clone(),
+                        name: tool_name.clone(),
+                        args: tool_args.clone(),
+                    };
+                    let (mcp_result, hidden_ids) = execute_mcp_tool(
+                        state,
+                        thread_id,
+                        &pending,
+                        attached_mcp,
+                        cancellation_rx,
+                        execution_id,
+                        round,
+                    )
+                    .await;
+                    let result_str = match mcp_result {
+                        Ok(r) => {
+                            info!(
+                                thread_id = %thread_id,
+                                tool = %tool_name,
+                                result_len = r.len(),
+                                "execute_tool_calls: MCP tool returned result"
+                            );
+                            r
+                        }
+                        Err(e) => {
+                            warn!(
+                                tool = %tool_name,
+                                error = %e,
+                                "Tool execution failed; returning error to model"
+                            );
+                            format!("Tool execution failed: {}", e)
+                        }
+                    };
+                    (result_str, hidden_ids)
+                }
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let all_results = futures::future::join_all(futures_vec).await;
+
+    let mut results = Vec::with_capacity(calls.len());
+    let mut all_hidden_ids = Vec::new();
+    for (result, hidden_ids) in all_results {
+        results.push(result);
+        all_hidden_ids.extend(hidden_ids);
+    }
+    (results, all_hidden_ids)
 }
 
 // ─── Tool execution ────────────────────────────────────────────────────────────
@@ -1642,17 +1735,20 @@ async fn execute_mcp_tool(
     tc: &PendingToolCall,
     attached_mcp: &[AttachedMcpServer],
     cancellation_rx: &tokio::sync::watch::Receiver<bool>,
-    run_context: &mut RunContext,
     execution_id: Option<&str>,
-) -> Result<String> {
+    round: u32,
+) -> (Result<String>, Vec<String>) {
     if !tc.name.contains("__") {
         warn!(tool = %tc.name, "Unknown tool call requested by model");
-        return Ok(format!("Unknown tool '{}'. No action was taken.", tc.name));
+        return (
+            Ok(format!("Unknown tool '{}'. No action was taken.", tc.name)),
+            vec![],
+        );
     }
 
     let (tag, tool_name) = match tc.name.split_once("__") {
         Some(pair) => pair,
-        None => return Ok(format!("Unknown tool '{}'.", tc.name)),
+        None => return (Ok(format!("Unknown tool '{}'.", tc.name)), vec![]),
     };
 
     info!(
@@ -1670,7 +1766,7 @@ async fn execute_mcp_tool(
                 Err(e) => {
                     warn!(tool = %tc.name, error = %e, raw_args = %tc.args,
                         "MCP tool received invalid JSON arguments");
-                    return Ok(tool_json_parse_error(&tc.name, &e, &tc.args));
+                    return (Ok(tool_json_parse_error(&tc.name, &e, &tc.args)), vec![]);
                 }
             };
 
@@ -1683,16 +1779,20 @@ async fn execute_mcp_tool(
                 "execute_mcp_tool: calling mcp.call_tool"
             );
 
+            let mut hidden_ids = Vec::new();
+
             if let Some(msg) = persist_tool_message(
                 &state.pool,
                 thread_id,
                 "assistant",
                 &format!("**Tool call:** `{}`\n```json\n{}\n```", tc.name, tc.args),
                 execution_id,
+                Some(tc.id.as_str()),
+                Some(round),
             )
             .await
             {
-                run_context.hidden_message_ids.push(msg.id.clone());
+                hidden_ids.push(msg.id.clone());
                 state.send_thread_event(
                     thread_id,
                     ThreadEvent::ToolActivity {
@@ -1700,6 +1800,8 @@ async fn execute_mcp_tool(
                         role: msg.role.clone(),
                         content: msg.content.clone(),
                         created_at: msg.created_at.clone(),
+                        tool_call_id: tc.id.clone(),
+                        round,
                     },
                 );
             }
@@ -1729,10 +1831,12 @@ async fn execute_mcp_tool(
                                 "tool",
                                 &format!("**Tool result** (`{}`):\n{}", tc.name, text),
                                 execution_id,
+                                Some(tc.id.as_str()),
+                                Some(round),
                             )
                             .await
                             {
-                                run_context.hidden_message_ids.push(msg.id.clone());
+                                hidden_ids.push(msg.id.clone());
                                 state.send_thread_event(
                                     thread_id,
                                     ThreadEvent::ToolActivity {
@@ -1740,14 +1844,16 @@ async fn execute_mcp_tool(
                                         role: msg.role.clone(),
                                         content: msg.content.clone(),
                                         created_at: msg.created_at.clone(),
+                                        tool_call_id: tc.id.clone(),
+                                        round,
                                     },
                                 );
                             }
-                            Ok(text)
+                            (Ok(text), hidden_ids)
                         }
                         Err(e) => {
                             warn!(tool = %tc.name, error = %e, "MCP tool call failed");
-                            Ok(format!("MCP tool '{}' error: {}", tc.name, e))
+                            (Ok(format!("MCP tool '{}' error: {}", tc.name, e)), hidden_ids)
                         }
                     }
                 }
@@ -1758,9 +1864,9 @@ async fn execute_mcp_tool(
                             tool = %tc.name,
                             "execute_mcp_tool: MCP call cancelled"
                         );
-                        return Ok("Tool call cancelled by user.".to_string());
+                        return (Ok("Tool call cancelled by user.".to_string()), hidden_ids);
                     }
-                    return Ok(format!("MCP tool '{}' call interrupted.", tc.name));
+                    return (Ok(format!("MCP tool '{}' call interrupted.", tc.name)), hidden_ids);
                 }
             }
         }
@@ -1771,10 +1877,13 @@ async fn execute_mcp_tool(
                 attached = ?attached_mcp.iter().map(|s| s.tag.as_str()).collect::<Vec<_>>(),
                 "execute_mcp_tool: no server matched tag"
             );
-            Ok(format!(
-                "No attached MCP server with tag '{}'. Cannot call tool '{}'.",
-                tag, tc.name
-            ))
+            (
+                Ok(format!(
+                    "No attached MCP server with tag '{}'. Cannot call tool '{}'.",
+                    tag, tc.name
+                )),
+                vec![],
+            )
         }
     }
 }
@@ -1793,6 +1902,8 @@ async fn persist_tool_message(
     role: &str,
     content: &str,
     execution_id: Option<&str>,
+    tool_call_id: Option<&str>,
+    tool_round: Option<u32>,
 ) -> Option<Message> {
     let msg = Message {
         id: uuid::Uuid::new_v4().to_string(),
@@ -1812,8 +1923,8 @@ async fn persist_tool_message(
 
     match sqlx::query(
         "INSERT INTO messages (id, thread_id, role, content, source, routine_id, visibility,
-                               execution_id, event_type, stopped, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                               execution_id, event_type, stopped, created_at, tool_call_id, tool_round)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&msg.id)
     .bind(&msg.thread_id)
@@ -1826,6 +1937,8 @@ async fn persist_tool_message(
     .bind(&msg.event_type)
     .bind(msg.stopped)
     .bind(&msg.created_at)
+    .bind(tool_call_id)
+    .bind(tool_round.map(|r| r as i64))
     .execute(pool)
     .await
     {

@@ -4,20 +4,25 @@ import {
   useState,
   useCallback,
   useRef,
+  useMemo,
+  Fragment,
   Component,
 } from "react";
 import type { ReactNode, ErrorInfo } from "react";
-import type { Thread, ThreadState } from "@/types";
+import type {
+  Thread,
+  ThreadState,
+  Message,
+  ProcessingRound,
+  ToolCallEntry,
+} from "@/types";
 import { useMessageStore } from "@/stores/useMessageStore";
 import { useSseStore } from "@/stores/useSseStore";
 import { useThreadStore } from "@/stores/useThreadStore";
 import { useAutoScroll } from "@/hooks/useAutoScroll";
-import { groupByDate } from "@/hooks/useTimeFormat";
-import {
-  MessageBubble,
-  StreamingBubble,
-  ToolExecutingIndicator,
-} from "./MessageBubble";
+import { formatDateDivider } from "@/hooks/useTimeFormat";
+import { MessageBubble, StreamingBubble } from "./MessageBubble";
+import { ProcessingBubble } from "./ProcessingBlock";
 import { MessageInput } from "./MessageInput";
 import { ChatHeader } from "./ChatHeader";
 import { ConfigPane } from "./ConfigPane";
@@ -165,10 +170,7 @@ export function ChatView({
   const messageError = phase.status === "error" ? phase.message : null;
 
   const visibleMessages = messages.filter((m) => {
-    if (m.visibility === "hidden") {
-      if (m.source === "tool") return thread.show_tool_activity ?? false;
-      return false;
-    }
+    if (m.visibility === "hidden") return false;
     return true;
   });
 
@@ -197,6 +199,91 @@ export function ChatView({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [thread.id]);
+
+  type ProcessedItem =
+    | { type: "date_divider"; label: string; key: string }
+    | { type: "message"; message: Message }
+    | { type: "tool_group"; executionId: string; rounds: ProcessingRound[] };
+
+  const processedItems = useMemo((): ProcessedItem[] => {
+    // First pass: group consecutive tool messages by execution_id
+    type RawItem =
+      | { type: "message"; message: Message }
+      | { type: "tool_group"; executionId: string; rounds: ProcessingRound[] };
+
+    const rawItems: RawItem[] = [];
+    let i = 0;
+    while (i < visibleMessages.length) {
+      const msg = visibleMessages[i];
+      if (msg.source === "tool") {
+        const executionId = msg.execution_id ?? msg.id;
+        const group: Message[] = [];
+        while (
+          i < visibleMessages.length &&
+          visibleMessages[i].source === "tool" &&
+          (visibleMessages[i].execution_id ?? visibleMessages[i].id) ===
+            executionId
+        ) {
+          group.push(visibleMessages[i]);
+          i++;
+        }
+        const calls = group.filter((m) => m.role === "assistant");
+        const results = group.filter((m) => m.role === "tool");
+        const roundEntries = calls.map((call, idx): ToolCallEntry => {
+          const nameMatch = call.content.match(/\*\*Tool call:\*\* `([^`]+)`/);
+          const toolName = nameMatch?.[1] ?? "tool";
+          const result = results[idx] ?? null;
+          return {
+            tool_call_id: call.id,
+            tool_name: toolName,
+            input_preview: {},
+            status: "completed",
+            call_message_id: call.id,
+            result_message_id: result?.id ?? null,
+          };
+        });
+        const rounds: ProcessingRound[] =
+          roundEntries.length > 0
+            ? [
+                {
+                  round: 1,
+                  tools: roundEntries,
+                  status: "completed",
+                  reasoning: "",
+                },
+              ]
+            : [];
+        rawItems.push({ type: "tool_group", executionId, rounds });
+      } else {
+        rawItems.push({ type: "message", message: msg });
+        i++;
+      }
+    }
+
+    // Second pass: insert date dividers before the first message of each new day
+    const result: ProcessedItem[] = [];
+    let lastDateKey = "";
+    for (const item of rawItems) {
+      if (item.type === "message") {
+        const d = new Date(item.message.created_at);
+        const dateKey = isNaN(d.getTime())
+          ? ""
+          : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        if (dateKey !== lastDateKey) {
+          lastDateKey = dateKey;
+          result.push({
+            type: "date_divider",
+            label: formatDateDivider(item.message.created_at),
+            key: dateKey,
+          });
+        }
+        result.push(item);
+      } else {
+        result.push(item);
+      }
+    }
+    return result;
+  }, [visibleMessages]);
 
   const { containerRef } = useAutoScroll([
     messages.length,
@@ -238,8 +325,6 @@ export function ChatView({
       bottomRef.current?.scrollIntoView({ behavior: "instant" });
     }
   });
-
-  const grouped = groupByDate(visibleMessages);
 
   const persona = thread.persona;
   const personaEmoji = persona?.emoji ?? "🤖";
@@ -339,21 +424,34 @@ export function ChatView({
                   Loading older messages…
                 </div>
               )}
-              {grouped.map(({ dateLabel, dateKey, items }) => (
-                <div key={dateKey}>
-                  {/* Date divider */}
-                  <div className="date-divider">{dateLabel}</div>
-
-                  {items.map((message) => (
-                    <MessageBubble
-                      key={message.id}
-                      message={message}
+              {processedItems.map((item) => {
+                if (item.type === "date_divider") {
+                  return (
+                    <div key={`date-${item.key}`} className="date-divider">
+                      {item.label}
+                    </div>
+                  );
+                }
+                if (item.type === "tool_group") {
+                  return (
+                    <ProcessingBubble
+                      key={item.executionId}
+                      rounds={item.rounds}
                       personaEmoji={personaEmoji}
                       personaName={personaName}
                     />
-                  ))}
-                </div>
-              ))}
+                  );
+                }
+                return (
+                  <Fragment key={item.message.id}>
+                    <MessageBubble
+                      message={item.message}
+                      personaEmoji={personaEmoji}
+                      personaName={personaName}
+                    />
+                  </Fragment>
+                );
+              })}
 
               {/* Sending state — waiting for first token */}
               {isSending && (
@@ -381,14 +479,17 @@ export function ChatView({
                     );
                   }
 
-                  if (
-                    entry.type === "tool_call" &&
-                    entry.status === "in_progress"
-                  ) {
-                    return <ToolExecutingIndicator key={`tool-${i}`} />;
+                  if (entry.type === "processing") {
+                    return (
+                      <ProcessingBubble
+                        key={`processing-${i}`}
+                        rounds={entry.rounds}
+                        personaEmoji={personaEmoji}
+                        personaName={personaName}
+                      />
+                    );
                   }
 
-                  // completed tool_call: no visible element (text entry appended by completeToolCall)
                   return null;
                 })}
 

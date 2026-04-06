@@ -79,7 +79,6 @@ function makeThread(id = "t1"): Thread {
     active_provider: null,
     system_prompt_addendum: null,
     status: "active",
-    show_tool_activity: false,
     show_system_events: false,
     created_at: "2024-01-01T00:00:00.000Z",
     updated_at: "2024-01-01T00:00:00.000Z",
@@ -158,7 +157,10 @@ describe("ChatView", () => {
       threads: {
         t1: {
           messages: [makeMessage("m1", "Hello")],
-          phase: { status: "streaming", content: "Streaming response..." },
+          phase: {
+            status: "streaming",
+            entries: [{ type: "text", content: "Streaming response..." }],
+          },
         },
       },
     });
@@ -178,7 +180,10 @@ describe("ChatView", () => {
       threads: {
         t1: {
           messages: [],
-          phase: { status: "streaming", content: "Live token..." },
+          phase: {
+            status: "streaming",
+            entries: [{ type: "text", content: "Live token..." }],
+          },
         },
       },
     });
@@ -194,7 +199,10 @@ describe("ChatView", () => {
       threads: {
         t1: {
           messages: [],
-          phase: { status: "streaming", content: "..." },
+          phase: {
+            status: "streaming",
+            entries: [{ type: "text", content: "..." }],
+          },
         },
       },
     });

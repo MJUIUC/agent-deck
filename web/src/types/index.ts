@@ -24,7 +24,6 @@ export interface Thread {
   active_provider: string | null;
   system_prompt_addendum: string | null;
   status: string;
-  show_tool_activity: boolean;
   show_system_events: boolean;
   // Summarization fields (server-managed, read-only from client)
   summary: string | null;
@@ -161,6 +160,9 @@ export interface SseRetryEvent {
 export interface SseToolStartEvent {
   event: "tool_start";
   tool_name: string;
+  tool_call_id: string;
+  round: number;
+  input_preview: Record<string, string>;
 }
 
 export interface SseToolActivityEvent {
@@ -169,6 +171,14 @@ export interface SseToolActivityEvent {
   role: string;
   content: string;
   created_at: string;
+  tool_call_id: string;
+  round: number;
+}
+
+export interface SseToolRoundCompleteEvent {
+  event: "tool_round_complete";
+  round: number;
+  tool_count: number;
 }
 
 export interface SseChatSegmentEvent {
@@ -189,6 +199,7 @@ export type SseThreadEvent =
   | SseRetryEvent
   | SseToolStartEvent
   | SseToolActivityEvent
+  | SseToolRoundCompleteEvent
   | SseChatSegmentEvent;
 
 // Global SSE event from copilot.rs GlobalEvent
@@ -245,13 +256,25 @@ export interface StreamingMessage {
 
 // ── Thread state machine ──────────────────────────────────────────────────────
 
+export interface ToolCallEntry {
+  tool_call_id: string;
+  tool_name: string;
+  input_preview: Record<string, string>;
+  status: "in_progress" | "completed" | "cancelled";
+  call_message_id: string | null;
+  result_message_id: string | null;
+}
+
+export interface ProcessingRound {
+  round: number;
+  tools: ToolCallEntry[];
+  status: "in_progress" | "completed" | "cancelled";
+  reasoning: string;
+}
+
 export type StreamingEntry =
   | { type: "text"; content: string }
-  | {
-      type: "tool_call";
-      tool_name: string;
-      status: "in_progress" | "completed";
-    };
+  | { type: "processing"; rounds: ProcessingRound[] };
 
 export type ThreadPhase =
   | { status: "idle" }

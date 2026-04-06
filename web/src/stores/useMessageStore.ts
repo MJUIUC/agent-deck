@@ -4,11 +4,13 @@ import zukeeper from "zukeeper";
 import { messagesApi } from "@/api/client";
 import type {
   Message,
+  ProcessingRound,
   SlashCommandResponse,
   StreamingEntry,
   ThreadMap,
   ThreadPhase,
   ThreadState,
+  ToolCallEntry,
 } from "@/types";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -60,8 +62,22 @@ interface MessageStore {
   clearMessages: (threadId: string) => void;
   clearError: (threadId: string) => void;
   cancelRun: (threadId: string) => Promise<void>;
-  beginToolCall: (threadId: string, toolName: string) => void;
-  completeToolCall: (threadId: string) => void;
+  beginProcessingRound: (
+    threadId: string,
+    entry: ToolCallEntry,
+    round: number,
+  ) => void;
+  setToolCallMessageId: (
+    threadId: string,
+    toolCallId: string,
+    messageId: string,
+  ) => void;
+  completeToolCallEntry: (
+    threadId: string,
+    toolCallId: string,
+    messageId: string,
+  ) => void;
+  completeProcessingRound: (threadId: string, round: number) => void;
 }
 
 // ── Store ─────────────────────────────────────────────────────────────────────
@@ -257,8 +273,32 @@ const storeCreator: StateCreator<MessageStore> = (set, get) => ({
         const entries = phase.status === "streaming" ? phase.entries : [];
         const lastEntry = entries[entries.length - 1];
 
+        if (lastEntry?.type === "processing") {
+          const lastRound = lastEntry.rounds[lastEntry.rounds.length - 1];
+          if (!lastRound || lastRound.status === "in_progress") {
+            // Tools are still running — ignore token
+            return state;
+          }
+          // Last round completed — append token to its reasoning
+          const newRounds: ProcessingRound[] = [
+            ...lastEntry.rounds.slice(0, -1),
+            { ...lastRound, reasoning: lastRound.reasoning + token },
+          ];
+          return {
+            threads: setThread(state.threads, threadId, {
+              phase: {
+                status: "streaming",
+                entries: [
+                  ...entries.slice(0, -1),
+                  { type: "processing", rounds: newRounds },
+                ],
+              },
+            }),
+          };
+        }
+
         const newEntries: StreamingEntry[] =
-          !lastEntry || lastEntry.type === "tool_call"
+          !lastEntry || lastEntry.type !== "text"
             ? [...entries, { type: "text", content: token }]
             : [
                 ...entries.slice(0, -1),
@@ -291,22 +331,67 @@ const storeCreator: StateCreator<MessageStore> = (set, get) => ({
     });
   },
 
-  // ── beginToolCall ────────────────────────────────────────────────────────────
-  // Called when a tool_start SSE event arrives. Appends a new in_progress
-  // tool_call entry so the UI can show the spinning indicator.
+  // ── beginProcessingRound ─────────────────────────────────────────────────────
+  // Called when tool_start arrives. Creates the processing entry if it doesn't
+  // exist, then adds a new ToolCallEntry to the matching round.
 
-  beginToolCall: (threadId, toolName) => {
+  beginProcessingRound: (threadId, entry, round) => {
     set((state) => {
       const thread = getThread(state.threads, threadId);
       const phase = thread.phase;
       if (phase.status !== "streaming") return state;
+
+      const entries = phase.entries;
+      const lastEntry = entries[entries.length - 1];
+
+      if (lastEntry?.type === "processing") {
+        const existingRound = lastEntry.rounds.find((r) => r.round === round);
+        let newRounds: ProcessingRound[];
+        if (existingRound) {
+          newRounds = lastEntry.rounds.map((r) =>
+            r.round === round ? { ...r, tools: [...r.tools, entry] } : r,
+          );
+        } else {
+          newRounds = [
+            ...lastEntry.rounds,
+            {
+              round,
+              tools: [entry],
+              status: "in_progress" as const,
+              reasoning: "",
+            },
+          ];
+        }
+        return {
+          threads: setThread(state.threads, threadId, {
+            phase: {
+              status: "streaming",
+              entries: [
+                ...entries.slice(0, -1),
+                { type: "processing", rounds: newRounds },
+              ],
+            },
+          }),
+        };
+      }
+
       return {
         threads: setThread(state.threads, threadId, {
           phase: {
             status: "streaming",
             entries: [
-              ...phase.entries,
-              { type: "tool_call", tool_name: toolName, status: "in_progress" },
+              ...entries,
+              {
+                type: "processing",
+                rounds: [
+                  {
+                    round,
+                    tools: [entry],
+                    status: "in_progress" as const,
+                    reasoning: "",
+                  },
+                ],
+              },
             ],
           },
         }),
@@ -314,25 +399,95 @@ const storeCreator: StateCreator<MessageStore> = (set, get) => ({
     });
   },
 
-  // ── completeToolCall ─────────────────────────────────────────────────────────
-  // Called when a tool result (tool_activity with role=tool) arrives. Marks any
-  // in_progress tool_call entries as completed and appends a new empty text entry
-  // so the streaming bubble reappears for the next sub-turn.
+  // ── setToolCallMessageId ──────────────────────────────────────────────────────
+  // Called when tool_activity role=assistant arrives. Sets call_message_id on
+  // the matching entry.
 
-  completeToolCall: (threadId) => {
+  setToolCallMessageId: (threadId, toolCallId, messageId) => {
     set((state) => {
       const thread = getThread(state.threads, threadId);
       const phase = thread.phase;
       if (phase.status !== "streaming") return state;
 
-      const entries: StreamingEntry[] = [
-        ...phase.entries.map((entry) =>
-          entry.type === "tool_call" && entry.status === "in_progress"
-            ? { ...entry, status: "completed" as const }
-            : entry,
-        ),
-        { type: "text", content: "" },
-      ];
+      const entries = phase.entries.map((entry) => {
+        if (entry.type !== "processing") return entry;
+        return {
+          ...entry,
+          rounds: entry.rounds.map((r) => ({
+            ...r,
+            tools: r.tools.map((tool) =>
+              tool.tool_call_id === toolCallId
+                ? { ...tool, call_message_id: messageId }
+                : tool,
+            ),
+          })),
+        };
+      });
+
+      return {
+        threads: setThread(state.threads, threadId, {
+          phase: { status: "streaming", entries },
+        }),
+      };
+    });
+  },
+
+  // ── completeToolCallEntry ─────────────────────────────────────────────────────
+  // Called when tool_activity role=tool arrives. Sets result_message_id and
+  // marks the entry as completed.
+
+  completeToolCallEntry: (threadId, toolCallId, messageId) => {
+    set((state) => {
+      const thread = getThread(state.threads, threadId);
+      const phase = thread.phase;
+      if (phase.status !== "streaming") return state;
+
+      const entries = phase.entries.map((entry) => {
+        if (entry.type !== "processing") return entry;
+        return {
+          ...entry,
+          rounds: entry.rounds.map((r) => ({
+            ...r,
+            tools: r.tools.map((tool) =>
+              tool.tool_call_id === toolCallId
+                ? {
+                    ...tool,
+                    result_message_id: messageId,
+                    status: "completed" as const,
+                  }
+                : tool,
+            ),
+          })),
+        };
+      });
+
+      return {
+        threads: setThread(state.threads, threadId, {
+          phase: { status: "streaming", entries },
+        }),
+      };
+    });
+  },
+
+  // ── completeProcessingRound ───────────────────────────────────────────────────
+  // Called when tool_round_complete arrives. Marks the matching round as
+  // completed.
+
+  completeProcessingRound: (threadId, round) => {
+    set((state) => {
+      const thread = getThread(state.threads, threadId);
+      const phase = thread.phase;
+      if (phase.status !== "streaming") return state;
+
+      const entries = phase.entries.map((entry) => {
+        if (entry.type !== "processing") return entry;
+        return {
+          ...entry,
+          rounds: entry.rounds.map((r) =>
+            r.round === round ? { ...r, status: "completed" as const } : r,
+          ),
+        };
+      });
 
       return {
         threads: setThread(state.threads, threadId, {
@@ -345,7 +500,7 @@ const storeCreator: StateCreator<MessageStore> = (set, get) => ({
   // ── commitSegment ───────────────────────────────────────────────────────────
   // Called when a chat_segment SSE event arrives. The server has persisted the
   // pre-tool text as its own message; we anchor it in the store and clear the
-  // text entries from the streaming phase so the ToolExecutingIndicator has a
+  // text entries from the streaming phase so the processing entry has a
   // clean, unambiguous slot to render in before the next sub-turn begins.
 
   commitSegment: (threadId, message) => {
