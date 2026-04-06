@@ -365,10 +365,155 @@ drop it); it simply becomes unused and can be cleaned up in a future housekeepin
 
 ## Human Review Instructions
 
+**Prerequisites:** Server running on port 7474 (`cargo run` in `server/`). Frontend dev server running (`npm run dev` in `web/`). At least one provider configured with a model that supports tool use. At least one MCP server or built-in tool (e.g. `bash`, `read_file`) available.
+
+**Steps:**
+
+1. Open any thread and send a message that will trigger tool use (e.g. "Read the contents of /tmp and tell me what's there" with the `bash` or `read_file` tool available).
+
+2. **While streaming:**
+   - **Expected:** A single `<ProcessingBubble>` appears below any preamble text, collapsed by default, showing a spinning icon and "Processing…". No individual "Running tool…" rows.
+   - **Failure sign:** Multiple separate tool rows, or the old `<ToolActivityBubble>` format.
+
+3. Click the collapse toggle to expand the `<ProcessingBlock>` while tools are running.
+   - **Expected:** Each tool row shows a spinning icon + `tool_name · input_preview_value`. Multiple tools in the same round appear simultaneously (parallel execution).
+   - **Failure sign:** Tools appear one at a time with a delay between them.
+
+4. Wait for tools to complete.
+   - **Expected:** Each tool row's spinner becomes a green checkmark. The "▶ output" toggle appears on each completed row.
+   - Click "▶ output" on a row — **Expected:** A collapsible monospace block shows the raw tool output. Long outputs truncate at ~300 chars with a "show more" affordance.
+
+5. If the agent makes multiple tool rounds (e.g. reads a file then edits it), expand the block.
+   - **Expected:** "Round 1", "Round 2" headers appear. Any reasoning text between rounds appears as a subdued "Reasoning" section with a left-border accent.
+
+6. Wait for the full response to complete.
+   - **Expected:** The final assistant text appears in a **separate** message bubble below the `<ProcessingBlock>`. The block header updates to "Processing · N tools" with a green checkmark icon.
+   - **After streaming ends:** The `<ProcessingBlock>` remains visible in the conversation (does not disappear). Reload the page — **Expected:** The block still appears in history, collapsed.
+
+7. Start another agent run that uses tools. While tools are executing, click **Stop**.
+   - **Expected:** The `<ProcessingBlock>` immediately renders with a dashed border, grey/muted icon, and "Stopped" label. It persists after streaming ends (does not disappear).
+
+8. Reload the page and scroll through history.
+   - **Expected:** All tool call groups appear as collapsed `<ProcessingBlock>` bubbles (not raw message rows). Expanding them shows the tool name(s) with checkmark status and "▶ output" toggles.
+
+9. Open Settings → Thread Config on any thread.
+   - **Expected:** The `Show tool activity` toggle is **gone**. No references to it in the UI.
+
+**Server log spot-check (optional):**
+```
+grep "tool_round_complete\|tool_start" ~/.agent-deck/server.log | tail -20
+```
+Should show `tool_start` events with `round` and `tool_call_id` fields, followed by `tool_round_complete` events.
+
+**Successful outcome:** A clean, single processing bubble per agent turn — no clutter, tool output accessible on demand, history matches the streaming view.
+**Failure signs:** Multiple individual tool rows, missing ProcessingBlock after streaming ends, tool output not expandable, show_tool_activity toggle still present.
+
+## Addendum — Post-implementation fixes and enhancements
+
+### Task 8 — Surface tool messages in history regardless of visibility
+
+**Files:** `web/src/components/ChatView.tsx`
+
+Tool call and result messages are stored with `visibility: "hidden"` on the server to prevent
+them from surfacing as raw chat bubbles. However, the `processedItems` grouping logic in
+`ChatView.tsx` relies on `source: "tool"` messages being present in `visibleMessages`. Because
+the current filter excludes all hidden messages, tool groups never appear in history — the
+`<ProcessingBlock>` vanishes the moment streaming ends.
+
+Fix: include `source: "tool"` messages in `visibleMessages` regardless of their `visibility`
+field. All other hidden messages (system events, etc.) remain filtered out.
+
+```tsx
+const visibleMessages = messages.filter((m) => {
+  if (m.visibility === "hidden" && m.source !== "tool") return false;
+  return true;
+});
+```
+
+---
+
+### Task 9 — Capture and display tool result content (Zed-style)
+
+**Files:** `web/src/types/index.ts`, `web/src/stores/useMessageStore.ts`,
+`web/src/components/ProcessingBlock.tsx`, `web/src/components/ProcessingBlock.module.css`
+
+The `SseToolActivityEvent` already carries the full `content` of each tool result (it fires with
+`role: "tool"` when a tool finishes). Currently only the message ID is captured via
+`completeToolCallEntry`; the content is discarded. This means users cannot see what a tool
+actually returned.
+
+**Type change** — add `result_content` to `ToolCallEntry`:
+
+```typescript
+interface ToolCallEntry {
+  tool_call_id: string;
+  tool_name: string;
+  input_preview: Record<string, string>;
+  status: "in_progress" | "completed" | "cancelled";
+  call_message_id: string | null;
+  result_message_id: string | null;
+  result_content: string | null;   // ← new: tool output from tool_activity SSE
+}
+```
+
+**Store change** — update `completeToolCallEntry` (called from `handleToolActivity` when
+`role === "tool"`) to also accept and store the result `content` from the SSE event. Pass it
+from `useSseStore.ts` through to the store method.
+
+**UI change** — in `ToolRow` inside `ProcessingBlock.tsx`, when `result_content` is non-null and
+the tool is completed, render a collapsible result section beneath the tool name row. Keep it
+collapsed by default; a small toggle (e.g. `▶ output`) expands it inline. Style it with a
+left-border accent and monospace font, consistent with the existing `.reasoning` section
+treatment. Truncate long output at ~300 chars with a "show more" affordance to avoid
+overwhelming the block.
+
+---
+
+### Task 10 — Persist cancelled and completed processing rounds across phase transitions
+
+**Files:** `web/src/stores/useMessageStore.ts`, `web/src/components/ChatView.tsx`
+
+When streaming ends (normally or via cancel), `finalizeStream` transitions phase to `idle` and
+clears `phase.entries`. Any processing rounds that only exist in the streaming phase — cancelled
+mid-call rounds in particular — are lost at this point. Task 8's visibility fix covers the case
+where the server has committed tool messages, but cancelled rounds may never have been committed.
+
+Fix: add a `lastProcessingRounds: ProcessingRound[] | null` field to the thread state (alongside
+`messages`). In `finalizeStream`, before clearing the phase, extract any processing entries from
+`phase.entries` and write them to `lastProcessingRounds`. Apply the same in the `cancelRun` path.
+
+In `ChatView.tsx`, after `processedItems` is built, if `lastProcessingRounds` is non-null and no
+`tool_group` item already exists at the tail of the list (i.e. history hasn't caught up yet via
+Task 8), append a synthetic `tool_group` item from `lastProcessingRounds`. This acts as a
+fallback that disappears naturally once the server-side tool messages load and Task 8 takes over.
+
+```typescript
+// Thread state addition
+interface ThreadState {
+  messages: Message[];
+  phase: ThreadPhase;
+  lastProcessingRounds: ProcessingRound[] | null;
+  // ...existing fields
+}
+```
+
+---
+
+### New acceptance criteria
+
+- [ ] After streaming completes, the `<ProcessingBlock>` remains visible in the conversation as
+      a collapsed history item — it does not disappear when the streaming phase ends
+- [ ] When the agent is stopped mid-tool-call, the `<ProcessingBlock>` persists in a
+      cancelled/dashed state after streaming ends
+- [ ] Expanding a completed `ToolRow` shows the raw tool result content in a collapsible
+      inline section styled consistently with the reasoning block
+- [ ] Hidden `source: "tool"` messages are included in `visibleMessages` grouping regardless
+      of their `visibility` field; all other hidden message types remain filtered
+
 ---
 
 ## Approval
 
 - [x] **Implementation plan approved** — human has reviewed this plan and confirmed coding can begin
-- [ ] **Coding complete** — all tests pass, agent has verified against every acceptance criterion
+- [x] **Coding complete** — all tests pass, agent has verified against every acceptance criterion
 - [ ] **Human review approved** — human has tested the changes live and signed off
