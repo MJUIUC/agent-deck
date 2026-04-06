@@ -202,6 +202,7 @@ export const useSseStore = create<SseStore>((set, get) => ({
               status: "in_progress",
               call_message_id: null,
               result_message_id: null,
+              result_content: null,
             };
             useMessageStore
               .getState()
@@ -223,7 +224,12 @@ export const useSseStore = create<SseStore>((set, get) => ({
             } else if (data.role === "tool") {
               useMessageStore
                 .getState()
-                .completeToolCallEntry(threadId, data.tool_call_id, data.id);
+                .completeToolCallEntry(
+                  threadId,
+                  data.tool_call_id,
+                  data.id,
+                  data.content,
+                );
             }
           }
         } catch {

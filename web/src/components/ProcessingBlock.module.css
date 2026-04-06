@@ -199,3 +199,43 @@
     color: var(--text-secondary);
     white-space: pre-wrap;
 }
+
+/* ── Tool row wrapper (needed for result section below the row) ── */
+.toolRowWrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+/* ── Result section (collapsible tool output) ── */
+.resultSection {
+    margin: 2px 0 4px 20px;
+    padding-left: 10px;
+    border-left: 2px solid var(--border-subtle);
+}
+
+.resultContent {
+    font-family: var(--font-mono, monospace);
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    word-break: break-all;
+    margin: 0;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+/* ── Result / show-more toggle button ── */
+.resultToggle {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-tertiary);
+    font-size: 0.7rem;
+    padding: 0 4px;
+    margin-left: auto;
+}
+
+.resultToggle:hover {
+    color: var(--text-secondary);
+}

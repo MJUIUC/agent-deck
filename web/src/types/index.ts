@@ -263,6 +263,7 @@ export interface ToolCallEntry {
   status: "in_progress" | "completed" | "cancelled";
   call_message_id: string | null;
   result_message_id: string | null;
+  result_content: string | null; // tool output from tool_activity SSE
 }
 
 export interface ProcessingRound {
@@ -294,6 +295,9 @@ export interface ThreadState {
   hasMore?: boolean;
   /** True while a load-more fetch is in progress (prevents double-fetch) */
   isLoadingMore?: boolean;
+  /** Processing rounds from the most recent streaming turn. Preserved across
+   *  phase transitions so the ProcessingBubble survives finalizeStream/cancel. */
+  lastProcessingRounds?: ProcessingRound[] | null;
 }
 
 export type ThreadMap = Record<string, ThreadState>;

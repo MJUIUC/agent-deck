@@ -146,6 +146,9 @@ export function ChatView({
   const threadState = useMessageStore(
     (s) => s.threads[thread.id] ?? IDLE_THREAD_STATE,
   );
+  const lastProcessingRounds = useMessageStore(
+    (s) => s.threads[thread.id]?.lastProcessingRounds ?? null,
+  );
   const loadMessages = useMessageStore((s) => s.loadMessages);
   const sendMessage = useMessageStore((s) => s.sendMessage);
   const hasMore = useMessageStore(
@@ -170,7 +173,7 @@ export function ChatView({
   const messageError = phase.status === "error" ? phase.message : null;
 
   const visibleMessages = messages.filter((m) => {
-    if (m.visibility === "hidden") return false;
+    if (m.visibility === "hidden" && m.source !== "tool") return false;
     return true;
   });
 
@@ -228,7 +231,7 @@ export function ChatView({
           i++;
         }
         const calls = group.filter((m) => m.role === "assistant");
-        const results = group.filter((m) => m.role === "tool");
+        const results = group.filter((m) => (m.role as string) === "tool");
         const roundEntries = calls.map((call, idx): ToolCallEntry => {
           const nameMatch = call.content.match(/\*\*Tool call:\*\* `([^`]+)`/);
           const toolName = nameMatch?.[1] ?? "tool";
@@ -240,6 +243,7 @@ export function ChatView({
             status: "completed",
             call_message_id: call.id,
             result_message_id: result?.id ?? null,
+            result_content: result?.content ?? null,
           };
         });
         const rounds: ProcessingRound[] =
@@ -284,6 +288,11 @@ export function ChatView({
     }
     return result;
   }, [visibleMessages]);
+
+  const showFallbackProcessing =
+    lastProcessingRounds !== null &&
+    lastProcessingRounds.length > 0 &&
+    !processedItems.some((item) => item.type === "tool_group");
 
   const { containerRef } = useAutoScroll([
     messages.length,
@@ -452,6 +461,15 @@ export function ChatView({
                   </Fragment>
                 );
               })}
+
+              {showFallbackProcessing && (
+                <ProcessingBubble
+                  key="fallback-processing"
+                  rounds={lastProcessingRounds!}
+                  personaEmoji={personaEmoji}
+                  personaName={personaName}
+                />
+              )}
 
               {/* Sending state — waiting for first token */}
               {isSending && (

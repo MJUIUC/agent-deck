@@ -26,6 +26,7 @@ function getThread(threads: ThreadMap, threadId: string): ThreadState {
       oldestLoadedId: null,
       hasMore: false,
       isLoadingMore: false,
+      lastProcessingRounds: null,
     }
   );
 }
@@ -76,6 +77,7 @@ interface MessageStore {
     threadId: string,
     toolCallId: string,
     messageId: string,
+    content: string,
   ) => void;
   completeProcessingRound: (threadId: string, round: number) => void;
 }
@@ -436,7 +438,7 @@ const storeCreator: StateCreator<MessageStore> = (set, get) => ({
   // Called when tool_activity role=tool arrives. Sets result_message_id and
   // marks the entry as completed.
 
-  completeToolCallEntry: (threadId, toolCallId, messageId) => {
+  completeToolCallEntry: (threadId, toolCallId, messageId, content) => {
     set((state) => {
       const thread = getThread(state.threads, threadId);
       const phase = thread.phase;
@@ -453,6 +455,7 @@ const storeCreator: StateCreator<MessageStore> = (set, get) => ({
                 ? {
                     ...tool,
                     result_message_id: messageId,
+                    result_content: content,
                     status: "completed" as const,
                   }
                 : tool,
@@ -544,10 +547,23 @@ const storeCreator: StateCreator<MessageStore> = (set, get) => ({
       );
       const alreadyExists = existing.some((m) => m.id === message.id);
       const messages = alreadyExists ? existing : [...existing, message];
+
+      // Preserve processing rounds so ProcessingBubble survives phase reset
+      let lastProcessingRounds: ProcessingRound[] | null = null;
+      if (thread.phase.status === "streaming") {
+        const processingEntry = thread.phase.entries.find(
+          (e) => e.type === "processing",
+        );
+        if (processingEntry && processingEntry.type === "processing") {
+          lastProcessingRounds = processingEntry.rounds;
+        }
+      }
+
       return {
         threads: setThread(state.threads, threadId, {
           messages,
           phase: IDLE,
+          lastProcessingRounds,
         }),
       };
     });
@@ -656,10 +672,23 @@ const storeCreator: StateCreator<MessageStore> = (set, get) => ({
       const messages = thread.messages.filter(
         (m) => !m.id.startsWith("optimistic-"),
       );
+
+      // Preserve processing rounds so ProcessingBubble survives cancel
+      let lastProcessingRounds: ProcessingRound[] | null = null;
+      if (thread.phase.status === "streaming") {
+        const processingEntry = thread.phase.entries.find(
+          (e) => e.type === "processing",
+        );
+        if (processingEntry && processingEntry.type === "processing") {
+          lastProcessingRounds = processingEntry.rounds;
+        }
+      }
+
       return {
         threads: setThread(state.threads, threadId, {
           messages,
           phase: IDLE,
+          lastProcessingRounds,
         }),
       };
     });

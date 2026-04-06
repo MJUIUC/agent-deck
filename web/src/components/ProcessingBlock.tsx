@@ -90,23 +90,57 @@ export function ProcessingBlock({ rounds }: ProcessingBlockProps) {
 
 function ToolRow({ tool }: { tool: ToolCallEntry }) {
   const previewValue = Object.values(tool.input_preview)[0] ?? "";
+  const [resultOpen, setResultOpen] = useState(false);
+  const [showFull, setShowFull] = useState(false);
+  const hasResult = tool.status === "completed" && tool.result_content !== null;
+  const TRUNCATE_AT = 300;
+  const resultText = tool.result_content ?? "";
+  const displayText =
+    !showFull && resultText.length > TRUNCATE_AT
+      ? resultText.slice(0, TRUNCATE_AT) + "…"
+      : resultText;
+
   return (
-    <div className={styles.toolRow}>
-      <span className={styles.toolStatus}>
-        {tool.status === "in_progress" ? (
-          <InProgress size={12} className={styles.spinning} />
-        ) : tool.status === "cancelled" ? (
-          <CloseFilled size={12} className={styles.mutedIcon} />
-        ) : (
-          <CheckmarkFilled size={12} className={styles.done} />
+    <div className={styles.toolRowWrapper}>
+      <div className={styles.toolRow}>
+        <span className={styles.toolStatus}>
+          {tool.status === "in_progress" ? (
+            <InProgress size={12} className={styles.spinning} />
+          ) : tool.status === "cancelled" ? (
+            <CloseFilled size={12} className={styles.mutedIcon} />
+          ) : (
+            <CheckmarkFilled size={12} className={styles.done} />
+          )}
+        </span>
+        <span className={styles.toolName}>{tool.tool_name}</span>
+        {previewValue && (
+          <>
+            <span className={styles.toolSep}>·</span>
+            <span className={styles.toolPreview}>{previewValue}</span>
+          </>
         )}
-      </span>
-      <span className={styles.toolName}>{tool.tool_name}</span>
-      {previewValue && (
-        <>
-          <span className={styles.toolSep}>·</span>
-          <span className={styles.toolPreview}>{previewValue}</span>
-        </>
+        {hasResult && (
+          <button
+            className={styles.resultToggle}
+            onClick={() => setResultOpen((v) => !v)}
+            aria-expanded={resultOpen}
+          >
+            {resultOpen ? "▼ output" : "▶ output"}
+          </button>
+        )}
+      </div>
+      {hasResult && resultOpen && (
+        <div className={styles.resultSection}>
+          <pre className={styles.resultContent}>{displayText}</pre>
+          {resultText.length > TRUNCATE_AT && (
+            <button
+              className={styles.resultToggle}
+              onClick={() => setShowFull((v) => !v)}
+            >
+              {showFull ? "show less" : "show more"}
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
