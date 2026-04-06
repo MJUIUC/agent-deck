@@ -63,6 +63,26 @@ pub enum ThreadEvent {
         max_attempts: u32,
         reason: String,
     },
+    /// Tool call is about to execute — emitted before tool.run() so the client
+    /// can commit the current streaming segment and show an "executing" indicator.
+    ToolStart { tool_name: String },
+    /// A tool message (call or result) was persisted — pushed to connected clients
+    /// so tool activity appears in the streaming view in real-time.
+    ToolActivity {
+        id: String,
+        role: String,
+        content: String,
+        created_at: String,
+    },
+    /// A pre-tool text sub-turn has been committed to the database — emitted before
+    /// tool execution begins so the client can anchor the streaming text to a real
+    /// message ID.
+    ChatSegment {
+        id: String,
+        thread_id: String,
+        content: String,
+        created_at: String,
+    },
 }
 
 impl ThreadEvent {
@@ -75,6 +95,9 @@ impl ThreadEvent {
             ThreadEvent::SystemEvent { .. } => "system_event",
             ThreadEvent::Error { .. } => "stream_error",
             ThreadEvent::Retry { .. } => "retry",
+            ThreadEvent::ToolStart { .. } => "tool_start",
+            ThreadEvent::ToolActivity { .. } => "tool_activity",
+            ThreadEvent::ChatSegment { .. } => "chat_segment",
         }
     }
 }
@@ -519,6 +542,17 @@ mod tests {
             created_at: "2025-01-01".to_string(),
         };
         assert_eq!(e.event_name(), "routine_message");
+    }
+
+    #[test]
+    fn chat_segment_event_name() {
+        let e = ThreadEvent::ChatSegment {
+            id: "m1".to_string(),
+            thread_id: "t1".to_string(),
+            content: "thinking about this...".to_string(),
+            created_at: "2025-01-01".to_string(),
+        };
+        assert_eq!(e.event_name(), "chat_segment");
     }
 
     #[test]

@@ -13,7 +13,11 @@ import { useSseStore } from "@/stores/useSseStore";
 import { useThreadStore } from "@/stores/useThreadStore";
 import { useAutoScroll } from "@/hooks/useAutoScroll";
 import { groupByDate } from "@/hooks/useTimeFormat";
-import { MessageBubble, StreamingBubble } from "./MessageBubble";
+import {
+  MessageBubble,
+  StreamingBubble,
+  ToolExecutingIndicator,
+} from "./MessageBubble";
 import { MessageInput } from "./MessageInput";
 import { ChatHeader } from "./ChatHeader";
 import { ConfigPane } from "./ConfigPane";
@@ -154,7 +158,10 @@ export function ChatView({
   const queuedCount = useMessageStore(
     (s) => s.threads[thread.id]?.queuedCount ?? 0,
   );
-  const streamingContent = phase.status === "streaming" ? phase.content : "";
+  const streamingEntries = phase.status === "streaming" ? phase.entries : [];
+  const lastStreamingEntry = streamingEntries[streamingEntries.length - 1];
+  const streamingContent =
+    lastStreamingEntry?.type === "text" ? lastStreamingEntry.content : "";
   const messageError = phase.status === "error" ? phase.message : null;
 
   const visibleMessages = messages.filter((m) => {
@@ -191,7 +198,11 @@ export function ChatView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [thread.id]);
 
-  const { containerRef } = useAutoScroll([messages.length, streamingContent]);
+  const { containerRef } = useAutoScroll([
+    messages.length,
+    streamingContent,
+    streamingEntries.length,
+  ]);
 
   // Sentinel ref — a zero-size div pinned to the bottom of the message list.
   // Using a ref callback means React calls it synchronously when the element
@@ -344,15 +355,42 @@ export function ChatView({
                 </div>
               ))}
 
-              {/* Streaming bubble — shown as soon as the message is sent so the
-                animation appears immediately, not only after the first token */}
-              {(isSending || isStreaming) && (
+              {/* Sending state — waiting for first token */}
+              {isSending && (
                 <StreamingBubble
                   personaEmoji={personaEmoji}
                   personaName={personaName}
-                  content={streamingContent}
+                  content=""
                 />
               )}
+
+              {/* Streaming state — render each entry in order */}
+              {isStreaming &&
+                streamingEntries.map((entry, i) => {
+                  const isLast = i === streamingEntries.length - 1;
+
+                  if (entry.type === "text") {
+                    return (
+                      <StreamingBubble
+                        key={`stream-${i}`}
+                        personaEmoji={personaEmoji}
+                        personaName={personaName}
+                        content={entry.content}
+                        streaming={isLast}
+                      />
+                    );
+                  }
+
+                  if (
+                    entry.type === "tool_call" &&
+                    entry.status === "in_progress"
+                  ) {
+                    return <ToolExecutingIndicator key={`tool-${i}`} />;
+                  }
+
+                  // completed tool_call: no visible element (text entry appended by completeToolCall)
+                  return null;
+                })}
 
               {/* Scroll sentinel — always rendered at the bottom of the list */}
               <div ref={bottomRef} style={{ height: 0, overflow: "hidden" }} />

@@ -100,7 +100,10 @@ describe("loadMessages", () => {
       threads: {
         t1: {
           messages: [],
-          phase: { status: "streaming", content: "partial" },
+          phase: {
+            status: "streaming",
+            entries: [{ type: "text", content: "partial" }],
+          },
         },
       },
     });
@@ -110,7 +113,7 @@ describe("loadMessages", () => {
 
     expect(getThread("t1").phase).toEqual({
       status: "streaming",
-      content: "partial",
+      entries: [{ type: "text", content: "partial" }],
     });
   });
 
@@ -248,7 +251,10 @@ describe("appendToken", () => {
     const phase = getThread("t1").phase;
     expect(phase.status).toBe("streaming");
     if (phase.status === "streaming") {
-      expect(phase.content).toBe("Hello");
+      expect(phase.entries[0]).toMatchObject({
+        type: "text",
+        content: "Hello",
+      });
     }
   });
 
@@ -268,7 +274,10 @@ describe("appendToken", () => {
     const phase = getThread("t1").phase;
     expect(phase.status).toBe("streaming");
     if (phase.status === "streaming") {
-      expect(phase.content).toBe("Hello world");
+      expect(phase.entries[0]).toMatchObject({
+        type: "text",
+        content: "Hello world",
+      });
     }
   });
 
@@ -288,7 +297,10 @@ describe("appendToken", () => {
     const phase = getThread("t1").phase;
     expect(phase.status).toBe("streaming");
     if (phase.status === "streaming") {
-      expect(phase.content).toBe("Hello");
+      expect(phase.entries[0]).toMatchObject({
+        type: "text",
+        content: "Hello",
+      });
     }
   });
 
@@ -323,7 +335,10 @@ describe("finalizeStream", () => {
       threads: {
         t1: {
           messages: [],
-          phase: { status: "streaming", content: "partial" },
+          phase: {
+            status: "streaming",
+            entries: [{ type: "text", content: "partial" }],
+          },
         },
       },
     });
@@ -340,7 +355,10 @@ describe("finalizeStream", () => {
       threads: {
         t1: {
           messages: [userMsg],
-          phase: { status: "streaming", content: "Done" },
+          phase: {
+            status: "streaming",
+            entries: [{ type: "text", content: "Done" }],
+          },
         },
       },
     });
@@ -359,7 +377,10 @@ describe("finalizeStream", () => {
       threads: {
         t1: {
           messages: [optimistic],
-          phase: { status: "streaming", content: "Hi" },
+          phase: {
+            status: "streaming",
+            entries: [{ type: "text", content: "Hi" }],
+          },
         },
       },
     });
@@ -375,7 +396,13 @@ describe("finalizeStream", () => {
   it("is idempotent — does not duplicate message if called twice", () => {
     useMessageStore.setState({
       threads: {
-        t1: { messages: [], phase: { status: "streaming", content: "Hi" } },
+        t1: {
+          messages: [],
+          phase: {
+            status: "streaming",
+            entries: [{ type: "text", content: "Hi" }],
+          },
+        },
       },
     });
 
@@ -391,10 +418,19 @@ describe("finalizeStream", () => {
   it("does not affect other threads", () => {
     useMessageStore.setState({
       threads: {
-        t1: { messages: [], phase: { status: "streaming", content: "Hi" } },
+        t1: {
+          messages: [],
+          phase: {
+            status: "streaming",
+            entries: [{ type: "text", content: "Hi" }],
+          },
+        },
         t2: {
           messages: [makeMessage("m99", "t2")],
-          phase: { status: "streaming", content: "other" },
+          phase: {
+            status: "streaming",
+            entries: [{ type: "text", content: "other" }],
+          },
         },
       },
     });
@@ -405,7 +441,7 @@ describe("finalizeStream", () => {
 
     expect(getThread("t2").phase).toEqual({
       status: "streaming",
-      content: "other",
+      entries: [{ type: "text", content: "other" }],
     });
     expect(getThread("t2").messages).toHaveLength(1);
   });
@@ -419,7 +455,10 @@ describe("setStreamingError", () => {
       threads: {
         t1: {
           messages: [],
-          phase: { status: "streaming", content: "partial" },
+          phase: {
+            status: "streaming",
+            entries: [{ type: "text", content: "partial" }],
+          },
         },
       },
     });
@@ -442,7 +481,10 @@ describe("setStreamingError", () => {
       threads: {
         t1: {
           messages: [userMsg],
-          phase: { status: "streaming", content: "partial" },
+          phase: {
+            status: "streaming",
+            entries: [{ type: "text", content: "partial" }],
+          },
         },
       },
     });
@@ -464,7 +506,10 @@ describe("setStreamingError", () => {
       threads: {
         t1: {
           messages: [optimistic],
-          phase: { status: "streaming", content: "partial" },
+          phase: {
+            status: "streaming",
+            entries: [{ type: "text", content: "partial" }],
+          },
         },
       },
     });
@@ -549,7 +594,10 @@ describe("addMessage", () => {
       threads: {
         t1: {
           messages: [],
-          phase: { status: "streaming", content: "partial" },
+          phase: {
+            status: "streaming",
+            entries: [{ type: "text", content: "partial" }],
+          },
         },
       },
     });
@@ -560,7 +608,7 @@ describe("addMessage", () => {
 
     expect(getThread("t1").phase).toEqual({
       status: "streaming",
-      content: "partial",
+      entries: [{ type: "text", content: "partial" }],
     });
   });
 
@@ -617,7 +665,13 @@ describe("state machine transitions", () => {
   it("streaming → idle on finalizeStream", () => {
     useMessageStore.setState({
       threads: {
-        t1: { messages: [], phase: { status: "streaming", content: "Hi" } },
+        t1: {
+          messages: [],
+          phase: {
+            status: "streaming",
+            entries: [{ type: "text", content: "Hi" }],
+          },
+        },
       },
     });
 
@@ -633,7 +687,10 @@ describe("state machine transitions", () => {
       threads: {
         t1: {
           messages: [],
-          phase: { status: "streaming", content: "partial" },
+          phase: {
+            status: "streaming",
+            entries: [{ type: "text", content: "partial" }],
+          },
         },
       },
     });
@@ -703,7 +760,13 @@ describe("concurrency", () => {
     useMessageStore.setState({
       threads: {
         t1: { messages: [], phase: { status: "idle" } },
-        t2: { messages: [], phase: { status: "streaming", content: "live" } },
+        t2: {
+          messages: [],
+          phase: {
+            status: "streaming",
+            entries: [{ type: "text", content: "live" }],
+          },
+        },
       },
     });
 
@@ -712,7 +775,7 @@ describe("concurrency", () => {
 
     expect(getThread("t2").phase).toEqual({
       status: "streaming",
-      content: "live",
+      entries: [{ type: "text", content: "live" }],
     });
   });
 
@@ -744,7 +807,10 @@ describe("concurrency", () => {
         threads: {
           t1: {
             messages: getThread("t1").messages,
-            phase: { status: "streaming", content: "partial" },
+            phase: {
+              status: "streaming",
+              entries: [{ type: "text", content: "partial" }],
+            },
           },
         },
       });
@@ -755,7 +821,7 @@ describe("concurrency", () => {
       // POST success must NOT have clobbered the streaming phase
       expect(getThread("t1").phase).toEqual({
         status: "streaming",
-        content: "partial",
+        entries: [{ type: "text", content: "partial" }],
       });
     });
 
@@ -790,7 +856,13 @@ describe("concurrency", () => {
 
       useMessageStore.setState({
         threads: {
-          t1: { messages: [], phase: { status: "streaming", content: "hi" } },
+          t1: {
+            messages: [],
+            phase: {
+              status: "streaming",
+              entries: [{ type: "text", content: "hi" }],
+            },
+          },
         },
       });
 
@@ -805,7 +877,13 @@ describe("concurrency", () => {
 
       useMessageStore.setState({
         threads: {
-          t1: { messages: [], phase: { status: "streaming", content: "hi" } },
+          t1: {
+            messages: [],
+            phase: {
+              status: "streaming",
+              entries: [{ type: "text", content: "hi" }],
+            },
+          },
         },
       });
 
@@ -834,7 +912,10 @@ describe("concurrency", () => {
       const phase = getThread("t1").phase;
       expect(phase.status).toBe("streaming");
       if (phase.status === "streaming") {
-        expect(phase.content).toBe("Hello");
+        expect(phase.entries[0]).toMatchObject({
+          type: "text",
+          content: "Hello",
+        });
       }
     });
 
@@ -885,7 +966,10 @@ describe("cancelRun", () => {
       threads: {
         t1: {
           messages: [makeMessage("m1", "t1", "user", "hello")],
-          phase: { status: "streaming", content: "partial response" },
+          phase: {
+            status: "streaming",
+            entries: [{ type: "text", content: "partial response" }],
+          },
         },
       },
     });
@@ -921,7 +1005,10 @@ describe("cancelRun", () => {
       threads: {
         t1: {
           messages: [realMsg, optimistic],
-          phase: { status: "streaming", content: "..." },
+          phase: {
+            status: "streaming",
+            entries: [{ type: "text", content: "..." }],
+          },
         },
       },
     });
@@ -938,7 +1025,10 @@ describe("cancelRun", () => {
       threads: {
         t1: {
           messages: [],
-          phase: { status: "streaming", content: "hello" },
+          phase: {
+            status: "streaming",
+            entries: [{ type: "text", content: "hello" }],
+          },
         },
       },
     });
@@ -968,7 +1058,10 @@ describe("cancelRun", () => {
       threads: {
         t1: {
           messages: [],
-          phase: { status: "streaming", content: "..." },
+          phase: {
+            status: "streaming",
+            entries: [{ type: "text", content: "..." }],
+          },
         },
       },
     });
@@ -985,7 +1078,10 @@ describe("cancelRun", () => {
       threads: {
         t1: {
           messages: [],
-          phase: { status: "streaming", content: "partial" },
+          phase: {
+            status: "streaming",
+            entries: [{ type: "text", content: "partial" }],
+          },
         },
       },
     });
@@ -1004,7 +1100,10 @@ describe("cancelRun", () => {
       threads: {
         t1: {
           messages: [makeMessage("u1", "t1", "user", "hi")],
-          phase: { status: "streaming", content: "partial" },
+          phase: {
+            status: "streaming",
+            entries: [{ type: "text", content: "partial" }],
+          },
         },
       },
     });
@@ -1042,7 +1141,10 @@ describe("queuedCount — sending while active", () => {
       threads: {
         t1: {
           messages: [makeMessage("m1", "t1", "user", "first")],
-          phase: { status: "streaming", content: "partial response" },
+          phase: {
+            status: "streaming",
+            entries: [{ type: "text", content: "partial response" }],
+          },
         },
       },
     });
@@ -1055,7 +1157,10 @@ describe("queuedCount — sending while active", () => {
     const phase = getThread("t1").phase;
     expect(phase.status).toBe("streaming");
     if (phase.status === "streaming") {
-      expect(phase.content).toBe("partial response");
+      expect(phase.entries[0]).toMatchObject({
+        type: "text",
+        content: "partial response",
+      });
     }
 
     await sendPromise;
@@ -1066,7 +1171,10 @@ describe("queuedCount — sending while active", () => {
       threads: {
         t1: {
           messages: [],
-          phase: { status: "streaming", content: "hello" },
+          phase: {
+            status: "streaming",
+            entries: [{ type: "text", content: "hello" }],
+          },
         },
       },
     });
@@ -1109,7 +1217,10 @@ describe("queuedCount — sending while active", () => {
       threads: {
         t1: {
           messages: [],
-          phase: { status: "streaming", content: "streaming…" },
+          phase: {
+            status: "streaming",
+            entries: [{ type: "text", content: "streaming…" }],
+          },
         },
       },
     });
@@ -1141,7 +1252,10 @@ describe("queuedCount — sending while active", () => {
       threads: {
         t1: {
           messages: [],
-          phase: { status: "streaming", content: "active" },
+          phase: {
+            status: "streaming",
+            entries: [{ type: "text", content: "active" }],
+          },
         },
       },
     });
@@ -1191,7 +1305,10 @@ describe("queuedCount — appendToken starts next queued run", () => {
     const phase = getThread("t1").phase;
     expect(phase.status).toBe("streaming");
     if (phase.status === "streaming") {
-      expect(phase.content).toBe("first token");
+      expect(phase.entries[0]).toMatchObject({
+        type: "text",
+        content: "first token",
+      });
     }
   });
 
@@ -1250,7 +1367,10 @@ describe("queuedCount — appendToken starts next queued run", () => {
       threads: {
         t1: {
           messages: [makeMessage("u1", "t1", "user", "msg A")],
-          phase: { status: "streaming", content: "A partial" },
+          phase: {
+            status: "streaming",
+            entries: [{ type: "text", content: "A partial" }],
+          },
         },
       },
     });
@@ -1273,9 +1393,9 @@ describe("queuedCount — appendToken starts next queued run", () => {
     if (getThread("t1").phase.status === "streaming") {
       const p = getThread("t1").phase as {
         status: "streaming";
-        content: string;
+        entries: Array<{ type: "text"; content: string }>;
       };
-      expect(p.content).toBe("B token");
+      expect(p.entries[0]).toMatchObject({ type: "text", content: "B token" });
     }
     expect(getThread("t1").queuedCount).toBe(0); // consumed
   });

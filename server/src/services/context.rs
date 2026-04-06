@@ -212,11 +212,33 @@ pub fn assemble(input: AssemblyInput) -> AssembledContext {
         &input.history[..]
     };
 
+    let mut pending_assistant: Option<String> = None;
+
     for msg in history_slice {
-        // Skip hidden messages defensively — the caller should have filtered
-        // these out already, but we guard here for correctness.
         if msg.visibility != "visible" {
             continue;
+        }
+
+        if msg.role == "assistant" {
+            match pending_assistant {
+                Some(ref mut acc) => {
+                    acc.push_str("\n\n");
+                    acc.push_str(&msg.content);
+                }
+                None => pending_assistant = Some(msg.content.clone()),
+            }
+            continue;
+        }
+
+        // Non-assistant role: flush any buffered assistant content first.
+        if let Some(content) = pending_assistant.take() {
+            messages.push(
+                ChatCompletionRequestAssistantMessageArgs::default()
+                    .content(content.as_str())
+                    .build()
+                    .expect("assistant history msg")
+                    .into(),
+            );
         }
 
         let request_msg: Option<ChatCompletionRequestMessage> = match msg.role.as_str() {
@@ -227,13 +249,6 @@ pub fn assemble(input: AssemblyInput) -> AssembledContext {
                     .expect("user history msg")
                     .into(),
             ),
-            "assistant" => Some(
-                ChatCompletionRequestAssistantMessageArgs::default()
-                    .content(msg.content.as_str())
-                    .build()
-                    .expect("assistant history msg")
-                    .into(),
-            ),
             "system" => Some(
                 ChatCompletionRequestSystemMessageArgs::default()
                     .content(msg.content.as_str())
@@ -241,14 +256,23 @@ pub fn assemble(input: AssemblyInput) -> AssembledContext {
                     .expect("system history msg")
                     .into(),
             ),
-            // "tool" and other roles: skip for now — tool result handling is
-            // wired in the agent run-loop which re-assembles context inline.
             _ => None,
         };
 
         if let Some(m) = request_msg {
             messages.push(m);
         }
+    }
+
+    // Flush any trailing assistant buffer (history ends with assistant messages).
+    if let Some(content) = pending_assistant.take() {
+        messages.push(
+            ChatCompletionRequestAssistantMessageArgs::default()
+                .content(content.as_str())
+                .build()
+                .expect("assistant history msg")
+                .into(),
+        );
     }
 
     // ── 4. Routine context notice ─────────────────────────────────────────────
@@ -1047,5 +1071,61 @@ mod tests {
             found.is_some(),
             "recall_conversation must be in the registry"
         );
+    }
+
+    #[test]
+    fn consecutive_assistant_history_messages_are_merged() {
+        let input = AssemblyInput {
+            history: vec![
+                visible("assistant", "part one"),
+                visible("assistant", "part two"),
+                visible("assistant", "part three"),
+            ],
+            ..basic_input("next")
+        };
+        let ctx = assemble(input);
+        // [system, merged_assistant, user]
+        assert_eq!(ctx.messages.len(), 3);
+        assert!(is_assistant(&ctx.messages[1]));
+        assert_eq!(
+            assistant_content(&ctx.messages[1]).unwrap(),
+            "part one\n\npart two\n\npart three"
+        );
+    }
+
+    #[test]
+    fn non_consecutive_assistant_messages_stay_separate() {
+        let input = AssemblyInput {
+            history: vec![
+                visible("assistant", "a1"),
+                visible("user", "u"),
+                visible("assistant", "a2"),
+            ],
+            ..basic_input("next")
+        };
+        let ctx = assemble(input);
+        // [system, assistant_a1, user_u, assistant_a2, user_next]
+        assert_eq!(ctx.messages.len(), 5);
+        assert_eq!(assistant_content(&ctx.messages[1]).unwrap(), "a1");
+        assert_eq!(user_content(&ctx.messages[2]).unwrap(), "u");
+        assert_eq!(assistant_content(&ctx.messages[3]).unwrap(), "a2");
+    }
+
+    #[test]
+    fn trailing_consecutive_assistant_messages_are_flushed() {
+        let input = AssemblyInput {
+            history: vec![
+                visible("user", "u"),
+                visible("assistant", "a1"),
+                visible("assistant", "a2"),
+            ],
+            ..basic_input("next")
+        };
+        let ctx = assemble(input);
+        // [system, user_u, merged_assistant, user_next]
+        assert_eq!(ctx.messages.len(), 4);
+        assert!(is_user(&ctx.messages[1]));
+        assert!(is_assistant(&ctx.messages[2]));
+        assert_eq!(assistant_content(&ctx.messages[2]).unwrap(), "a1\n\na2");
     }
 }

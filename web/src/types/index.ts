@@ -158,6 +158,27 @@ export interface SseRetryEvent {
   reason: string;
 }
 
+export interface SseToolStartEvent {
+  event: "tool_start";
+  tool_name: string;
+}
+
+export interface SseToolActivityEvent {
+  event: "tool_activity";
+  id: string;
+  role: string;
+  content: string;
+  created_at: string;
+}
+
+export interface SseChatSegmentEvent {
+  event: "chat_segment";
+  id: string;
+  thread_id: string;
+  content: string;
+  created_at: string;
+}
+
 export type SseThreadEvent =
   | SseTokenEvent
   | SseMessageCompleteEvent
@@ -165,7 +186,10 @@ export type SseThreadEvent =
   | SseErrorEvent
   | SseSystemEventEvent
   | SseCancelledEvent
-  | SseRetryEvent;
+  | SseRetryEvent
+  | SseToolStartEvent
+  | SseToolActivityEvent
+  | SseChatSegmentEvent;
 
 // Global SSE event from copilot.rs GlobalEvent
 export interface SseThreadUpdatedEvent {
@@ -221,10 +245,18 @@ export interface StreamingMessage {
 
 // ── Thread state machine ──────────────────────────────────────────────────────
 
+export type StreamingEntry =
+  | { type: "text"; content: string }
+  | {
+      type: "tool_call";
+      tool_name: string;
+      status: "in_progress" | "completed";
+    };
+
 export type ThreadPhase =
   | { status: "idle" }
   | { status: "sending"; optimisticId: string }
-  | { status: "streaming"; content: string }
+  | { status: "streaming"; entries: StreamingEntry[] }
   | { status: "error"; message: string; recoverable: boolean };
 
 export interface ThreadState {
@@ -234,11 +266,11 @@ export interface ThreadState {
   queuedCount?: number;
   // ── Pagination ──────────────────────────────────────────────────────────────
   /** ID of the oldest loaded message — used as `before` cursor for load-more */
-  oldestLoadedId: string | null;
+  oldestLoadedId?: string | null;
   /** Whether older messages exist on the server beyond what's loaded */
-  hasMore: boolean;
+  hasMore?: boolean;
   /** True while a load-more fetch is in progress (prevents double-fetch) */
-  isLoadingMore: boolean;
+  isLoadingMore?: boolean;
 }
 
 export type ThreadMap = Record<string, ThreadState>;

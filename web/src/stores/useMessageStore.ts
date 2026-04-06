@@ -5,6 +5,7 @@ import { messagesApi } from "@/api/client";
 import type {
   Message,
   SlashCommandResponse,
+  StreamingEntry,
   ThreadMap,
   ThreadPhase,
   ThreadState,
@@ -53,11 +54,14 @@ interface MessageStore {
   ) => Promise<SlashCommandResponse | null>;
   appendToken: (threadId: string, token: string) => void;
   finalizeStream: (threadId: string, message: Message) => void;
+  commitSegment: (threadId: string, message: Message) => void;
   addMessage: (message: Message) => void;
   setStreamingError: (threadId: string, errorMsg: string) => void;
   clearMessages: (threadId: string) => void;
   clearError: (threadId: string) => void;
   cancelRun: (threadId: string) => Promise<void>;
+  beginToolCall: (threadId: string, toolName: string) => void;
+  completeToolCall: (threadId: string) => void;
 }
 
 // ── Store ─────────────────────────────────────────────────────────────────────
@@ -239,7 +243,7 @@ const storeCreator: StateCreator<MessageStore> = (set, get) => ({
 
   // ── appendToken ─────────────────────────────────────────────────────────────
   // sending → streaming (on first non-empty token)
-  // streaming → streaming (content accumulates)
+  // streaming → streaming (last text entry accumulates, or new text entry added)
   // Empty tokens are ignored — the server used to send an empty token as a
   // connection handshake which incorrectly kept isStreaming alive.
 
@@ -250,22 +254,31 @@ const storeCreator: StateCreator<MessageStore> = (set, get) => ({
       const phase = thread.phase;
 
       if (phase.status === "sending" || phase.status === "streaming") {
-        // Normal case: active run is streaming.
-        const currentContent =
-          phase.status === "streaming" ? phase.content : "";
+        const entries = phase.status === "streaming" ? phase.entries : [];
+        const lastEntry = entries[entries.length - 1];
+
+        const newEntries: StreamingEntry[] =
+          !lastEntry || lastEntry.type === "tool_call"
+            ? [...entries, { type: "text", content: token }]
+            : [
+                ...entries.slice(0, -1),
+                { type: "text", content: lastEntry.content + token },
+              ];
+
         return {
           threads: setThread(state.threads, threadId, {
-            phase: { status: "streaming", content: currentContent + token },
+            phase: { status: "streaming", entries: newEntries },
           }),
         };
       }
 
       if (phase.status === "idle" && (thread.queuedCount ?? 0) > 0) {
-        // A queued message is now starting to stream. Transition to streaming
-        // and decrement the queue counter so the indicator updates immediately.
         return {
           threads: setThread(state.threads, threadId, {
-            phase: { status: "streaming", content: token },
+            phase: {
+              status: "streaming",
+              entries: [{ type: "text", content: token }],
+            },
             queuedCount: Math.max(0, (thread.queuedCount ?? 0) - 1),
           }),
         };
@@ -275,6 +288,88 @@ const storeCreator: StateCreator<MessageStore> = (set, get) => ({
       // After a cancel (phase = idle, queuedCount = 0) stale SSE tokens from
       // the cancelled run must not reopen the streaming bubble.
       return state;
+    });
+  },
+
+  // ── beginToolCall ────────────────────────────────────────────────────────────
+  // Called when a tool_start SSE event arrives. Appends a new in_progress
+  // tool_call entry so the UI can show the spinning indicator.
+
+  beginToolCall: (threadId, toolName) => {
+    set((state) => {
+      const thread = getThread(state.threads, threadId);
+      const phase = thread.phase;
+      if (phase.status !== "streaming") return state;
+      return {
+        threads: setThread(state.threads, threadId, {
+          phase: {
+            status: "streaming",
+            entries: [
+              ...phase.entries,
+              { type: "tool_call", tool_name: toolName, status: "in_progress" },
+            ],
+          },
+        }),
+      };
+    });
+  },
+
+  // ── completeToolCall ─────────────────────────────────────────────────────────
+  // Called when a tool result (tool_activity with role=tool) arrives. Marks any
+  // in_progress tool_call entries as completed and appends a new empty text entry
+  // so the streaming bubble reappears for the next sub-turn.
+
+  completeToolCall: (threadId) => {
+    set((state) => {
+      const thread = getThread(state.threads, threadId);
+      const phase = thread.phase;
+      if (phase.status !== "streaming") return state;
+
+      const entries: StreamingEntry[] = [
+        ...phase.entries.map((entry) =>
+          entry.type === "tool_call" && entry.status === "in_progress"
+            ? { ...entry, status: "completed" as const }
+            : entry,
+        ),
+        { type: "text", content: "" },
+      ];
+
+      return {
+        threads: setThread(state.threads, threadId, {
+          phase: { status: "streaming", entries },
+        }),
+      };
+    });
+  },
+
+  // ── commitSegment ───────────────────────────────────────────────────────────
+  // Called when a chat_segment SSE event arrives. The server has persisted the
+  // pre-tool text as its own message; we anchor it in the store and clear the
+  // text entries from the streaming phase so the ToolExecutingIndicator has a
+  // clean, unambiguous slot to render in before the next sub-turn begins.
+
+  commitSegment: (threadId, message) => {
+    cancelTokenBuffer(threadId);
+    set((state) => {
+      const thread = getThread(state.threads, threadId);
+      const phase = thread.phase;
+      if (phase.status !== "streaming") return state;
+
+      // Drop text entries — they've been committed to the segment message.
+      // Any tool_call entries are preserved (shouldn't exist yet, but be safe).
+      const remainingEntries = phase.entries.filter((e) => e.type !== "text");
+
+      const alreadyExists = thread.messages.some((m) => m.id === message.id);
+      const messages = alreadyExists
+        ? thread.messages
+        : [...thread.messages, message];
+
+      return {
+        threads: setThread(state.threads, threadId, {
+          messages,
+          phase: { status: "streaming", entries: remainingEntries },
+        }),
+      };
     });
   },
 

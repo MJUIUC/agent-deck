@@ -656,15 +656,15 @@ async fn run_inner(
     // Only runs for non-cancelled completions to avoid titling partial responses.
     let assistant_content = &gen_result.content;
 
-    let message_count: (i64,) = sqlx::query_as(
+    let user_message_count: (i64,) = sqlx::query_as(
         "SELECT COUNT(*) FROM messages
-         WHERE thread_id = ? AND role IN ('user', 'assistant') AND visibility = 'visible'",
+         WHERE thread_id = ? AND role = 'user' AND visibility = 'visible'",
     )
     .bind(thread_id)
     .fetch_one(&state.pool)
     .await?;
 
-    if message_count.0 == 2 {
+    if user_message_count.0 == 1 {
         // Fetch the first user message to use as the title gen input.
         let first_user: Option<(String,)> = sqlx::query_as(
             "SELECT content FROM messages
@@ -833,12 +833,13 @@ async fn generation_loop(
     let mut run_context = RunContext {
         hidden_message_ids: Vec::new(),
     };
-    let mut final_content = String::new();
+    let mut all_content = String::new();
+    let mut last_turn_text = String::new();
     let mut cancelled = false;
 
-    // 20 rounds is generous enough for complex agentic workflows while still
+    // 50 rounds is generous enough for complex agentic workflows while still
     // guarding against infinite tool-call loops.
-    const MAX_TOOL_ROUNDS: usize = 20;
+    const MAX_TOOL_ROUNDS: usize = 50;
     let mut tool_rounds = 0;
 
     'turn_loop: loop {
@@ -864,31 +865,83 @@ async fn generation_loop(
             text_len = turn.text.len(), tools = turn.tool_calls.len(), "generation_loop: turn finished");
 
         if turn.cancelled {
-            final_content.push_str(&turn.text);
+            last_turn_text = turn.text.clone();
+            if !turn.text.is_empty() {
+                if !all_content.is_empty() {
+                    all_content.push_str("\n\n");
+                }
+                all_content.push_str(&turn.text);
+            }
             cancelled = true;
             break 'turn_loop;
         }
 
         if turn.tool_calls.is_empty() {
-            final_content.push_str(&turn.text);
+            last_turn_text = turn.text.clone();
+            if !turn.text.is_empty() {
+                if !all_content.is_empty() {
+                    all_content.push_str("\n\n");
+                }
+                all_content.push_str(&turn.text);
+            }
             break 'turn_loop;
         }
 
         if tool_rounds >= MAX_TOOL_ROUNDS {
             warn!(thread_id = %thread_id,
                 "Reached maximum tool-call rounds ({}); stopping generation", MAX_TOOL_ROUNDS);
-            final_content.push_str(&turn.text);
+            last_turn_text = turn.text.clone();
+            if !turn.text.is_empty() {
+                if !all_content.is_empty() {
+                    all_content.push_str("\n\n");
+                }
+                all_content.push_str(&turn.text);
+            }
             break 'turn_loop;
         }
 
-        // Fold any text the model produced before requesting tools into the
-        // running transcript. This ensures the final persisted message
-        // contains the agent's full thought process, not just the last turn.
         if !turn.text.is_empty() {
-            if !final_content.is_empty() {
-                final_content.push_str("\n\n");
+            let mut segment_msg = Message::new_chat_segment(thread_id, &turn.text);
+            if let Some(eid) = execution_id {
+                segment_msg.execution_id = Some(eid.to_string());
             }
-            final_content.push_str(&turn.text);
+            if let Some(rid) = routine_id {
+                segment_msg.routine_id = Some(rid.to_string());
+            }
+
+            sqlx::query(
+                "INSERT INTO messages (id, thread_id, role, content, source, routine_id, visibility,
+                                       execution_id, event_type, stopped, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(&segment_msg.id)
+            .bind(&segment_msg.thread_id)
+            .bind(&segment_msg.role)
+            .bind(&segment_msg.content)
+            .bind(&segment_msg.source)
+            .bind(&segment_msg.routine_id)
+            .bind(&segment_msg.visibility)
+            .bind(&segment_msg.execution_id)
+            .bind(&segment_msg.event_type)
+            .bind(segment_msg.stopped)
+            .bind(&segment_msg.created_at)
+            .execute(&state.pool)
+            .await?;
+
+            state.send_thread_event(
+                thread_id,
+                ThreadEvent::ChatSegment {
+                    id: segment_msg.id.clone(),
+                    thread_id: thread_id.to_string(),
+                    content: turn.text.clone(),
+                    created_at: segment_msg.created_at.clone(),
+                },
+            );
+
+            if !all_content.is_empty() {
+                all_content.push_str("\n\n");
+            }
+            all_content.push_str(&turn.text);
         }
 
         tool_rounds += 1;
@@ -918,22 +971,8 @@ async fn generation_loop(
         .await;
 
         if is_cancelled(cancellation_rx) {
-            final_content.push_str(&turn.text);
             cancelled = true;
             break 'turn_loop;
-        }
-
-        // Emit a paragraph separator into the SSE stream so the streaming
-        // bubble shows a visible gap between the pre-tool text and the next
-        // turn's response — matching the \n\n already written into
-        // final_content above.
-        if !turn.text.is_empty() {
-            state.send_thread_event(
-                thread_id,
-                ThreadEvent::Token {
-                    token: "\n\n".to_string(),
-                },
-            );
         }
 
         for (tc, result) in turn.tool_calls.iter().zip(tool_results) {
@@ -963,13 +1002,13 @@ async fn generation_loop(
             }
         }
 
-        let content = if final_content.is_empty() {
+        let stopped_content = if last_turn_text.is_empty() {
             "[Response cancelled before any content was generated]".to_string()
         } else {
-            final_content.clone()
+            last_turn_text.clone()
         };
 
-        let mut assistant_msg = Message::new_assistant_stopped(thread_id, &content);
+        let mut assistant_msg = Message::new_assistant_stopped(thread_id, &stopped_content);
         if let Some(eid) = execution_id {
             assistant_msg.execution_id = Some(eid.to_string());
         }
@@ -1027,7 +1066,11 @@ async fn generation_loop(
         );
 
         return Ok(GenerationResult {
-            content,
+            content: if all_content.is_empty() {
+                stopped_content
+            } else {
+                all_content
+            },
             cancelled: true,
             message_id: assistant_msg.id,
             created_at: assistant_msg.created_at,
@@ -1036,9 +1079,9 @@ async fn generation_loop(
 
     // ── Normal completion path ─────────────────────────────────────────────────
     let mut assistant_msg = if let Some(rid) = routine_id {
-        Message::new_routine(thread_id, &final_content, rid)
+        Message::new_routine(thread_id, &last_turn_text, rid)
     } else {
-        Message::new_assistant(thread_id, &final_content)
+        Message::new_assistant(thread_id, &last_turn_text)
     };
     if let Some(eid) = execution_id {
         assistant_msg.execution_id = Some(eid.to_string());
@@ -1111,7 +1154,7 @@ async fn generation_loop(
     );
 
     Ok(GenerationResult {
-        content: final_content,
+        content: all_content,
         cancelled: false,
         message_id: assistant_msg.id,
         created_at: assistant_msg.created_at,
@@ -1457,6 +1500,13 @@ async fn execute_tool_calls(
             "execute_tool_calls: dispatching tool call"
         );
 
+        state.send_thread_event(
+            thread_id,
+            ThreadEvent::ToolStart {
+                tool_name: tc.name.clone(),
+            },
+        );
+
         // ── Check built-in tool registry first ────────────────────────────────
         let built_in = state
             .built_in_tools
@@ -1491,7 +1541,7 @@ async fn execute_tool_calls(
             };
 
             // Persist hidden call + result so show_tool_activity can surface them.
-            if let Some(id) = persist_tool_message(
+            if let Some(msg) = persist_tool_message(
                 &state.pool,
                 thread_id,
                 "assistant",
@@ -1500,9 +1550,18 @@ async fn execute_tool_calls(
             )
             .await
             {
-                run_context.hidden_message_ids.push(id);
+                run_context.hidden_message_ids.push(msg.id.clone());
+                state.send_thread_event(
+                    thread_id,
+                    ThreadEvent::ToolActivity {
+                        id: msg.id.clone(),
+                        role: msg.role.clone(),
+                        content: msg.content.clone(),
+                        created_at: msg.created_at.clone(),
+                    },
+                );
             }
-            if let Some(id) = persist_tool_message(
+            if let Some(msg) = persist_tool_message(
                 &state.pool,
                 thread_id,
                 "tool",
@@ -1511,7 +1570,16 @@ async fn execute_tool_calls(
             )
             .await
             {
-                run_context.hidden_message_ids.push(id);
+                run_context.hidden_message_ids.push(msg.id.clone());
+                state.send_thread_event(
+                    thread_id,
+                    ThreadEvent::ToolActivity {
+                        id: msg.id.clone(),
+                        role: msg.role.clone(),
+                        content: msg.content.clone(),
+                        created_at: msg.created_at.clone(),
+                    },
+                );
             }
 
             output
@@ -1615,7 +1683,7 @@ async fn execute_mcp_tool(
                 "execute_mcp_tool: calling mcp.call_tool"
             );
 
-            if let Some(id) = persist_tool_message(
+            if let Some(msg) = persist_tool_message(
                 &state.pool,
                 thread_id,
                 "assistant",
@@ -1624,7 +1692,16 @@ async fn execute_mcp_tool(
             )
             .await
             {
-                run_context.hidden_message_ids.push(id);
+                run_context.hidden_message_ids.push(msg.id.clone());
+                state.send_thread_event(
+                    thread_id,
+                    ThreadEvent::ToolActivity {
+                        id: msg.id.clone(),
+                        role: msg.role.clone(),
+                        content: msg.content.clone(),
+                        created_at: msg.created_at.clone(),
+                    },
+                );
             }
 
             let mut cancellation_watcher = cancellation_rx.clone();
@@ -1646,7 +1723,7 @@ async fn execute_mcp_tool(
                                 result_preview = %text.chars().take(120).collect::<String>(),
                                 "execute_mcp_tool: MCP tool success"
                             );
-                            if let Some(id) = persist_tool_message(
+                            if let Some(msg) = persist_tool_message(
                                 &state.pool,
                                 thread_id,
                                 "tool",
@@ -1655,7 +1732,16 @@ async fn execute_mcp_tool(
                             )
                             .await
                             {
-                                run_context.hidden_message_ids.push(id);
+                                run_context.hidden_message_ids.push(msg.id.clone());
+                                state.send_thread_event(
+                                    thread_id,
+                                    ThreadEvent::ToolActivity {
+                                        id: msg.id.clone(),
+                                        role: msg.role.clone(),
+                                        content: msg.content.clone(),
+                                        created_at: msg.created_at.clone(),
+                                    },
+                                );
                             }
                             Ok(text)
                         }
@@ -1699,15 +1785,15 @@ async fn execute_mcp_tool(
 /// These are stored with `visibility = 'hidden'` and are only surfaced in the
 /// UI when `show_tool_activity` is enabled on the thread.
 ///
-/// Returns `Some(id)` on success so the caller can record the ID for precise
-/// cleanup if the run is later cancelled.
+/// Returns `Some(msg)` on success so the caller can record the ID for precise
+/// cleanup if the run is later cancelled, and emit SSE events with message metadata.
 async fn persist_tool_message(
     pool: &SqlitePool,
     thread_id: &str,
     role: &str,
     content: &str,
     execution_id: Option<&str>,
-) -> Option<String> {
+) -> Option<Message> {
     let msg = Message {
         id: uuid::Uuid::new_v4().to_string(),
         thread_id: thread_id.to_string(),
@@ -1743,7 +1829,7 @@ async fn persist_tool_message(
     .execute(pool)
     .await
     {
-        Ok(_) => Some(msg.id),
+        Ok(_) => Some(msg),
         Err(e) => {
             warn!(thread_id = %thread_id, error = %e, "Failed to persist tool message");
             None
