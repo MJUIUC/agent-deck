@@ -7,8 +7,6 @@ import {
   ChevronDown,
 } from "@carbon/icons-react";
 import type { ProcessingRound, ToolCallEntry } from "@/types";
-import { AgentAvatar } from "./MessageBubble";
-import bubbleStyles from "./MessageBubble.module.css";
 import styles from "./ProcessingBlock.module.css";
 
 // ── ProcessingBlock ──────────────────────────────────────────────────────────
@@ -128,13 +126,13 @@ export function ProcessingBubble({
   personaName,
 }: ProcessingBubbleProps) {
   return (
-    <div className={bubbleStyles.rowAgent}>
-      <AgentAvatar emoji={personaEmoji} />
-      <div className={bubbleStyles.col}>
-        <div className={bubbleStyles.bubbleAgent}>
+    <div className={styles.row}>
+      <div className={styles.avatar}>{personaEmoji}</div>
+      <div className={styles.col}>
+        <div className={styles.bubble}>
           <ProcessingBlock rounds={rounds} />
         </div>
-        <div className={bubbleStyles.meta}>{personaName ?? "Agent"}</div>
+        <div className={styles.bubbleMeta}>{personaName ?? "Agent"}</div>
       </div>
     </div>
   );

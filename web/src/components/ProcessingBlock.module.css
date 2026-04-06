@@ -1,3 +1,48 @@
+/* ── Bubble row wrapper ── */
+.row {
+    display: flex;
+    gap: 10px;
+    padding: 3px 18px;
+}
+
+/* ── Avatar ── */
+.avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    flex-shrink: 0;
+    margin-top: 2px;
+    background: var(--bg-elevated);
+}
+
+/* ── Column ── */
+.col {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+/* ── Bubble shell ── */
+.bubble {
+    max-width: 400px;
+    background: var(--bubble-agent);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px 12px 12px 4px;
+    overflow: hidden;
+}
+
+/* ── Meta label (name · time) ── */
+.bubbleMeta {
+    font-size: 0.6875rem;
+    color: var(--text-tertiary);
+    margin-top: 3px;
+    padding: 0 2px;
+}
+
 /* ── Block container ── */
 .block {
     border: 1px solid var(--border-subtle);
