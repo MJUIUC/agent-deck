@@ -16,6 +16,7 @@ import { useSseStore } from "@/stores/useSseStore";
 import { resolveDisplayNames } from "@/components/ChatHeader";
 import { MessageBubble, StreamingBubble } from "@/components/MessageBubble";
 import { ProcessingBubble } from "@/components/ProcessingBlock";
+import { useProcessedMessages } from "@/hooks/useProcessedMessages";
 import { MobileConfigSheet } from "./MobileConfigSheet";
 import styles from "./MobileChatView.module.css";
 
@@ -162,7 +163,12 @@ export function MobileChatView({
   const isSending = phase.status === "sending";
   const streamingEntries = phase.status === "streaming" ? phase.entries : [];
 
-  const visibleMessages = messages.filter((m) => m.visibility === "visible");
+  const visibleMessages = messages.filter((m) => {
+    if (m.visibility === "hidden" && m.source !== "tool") return false;
+    return true;
+  });
+
+  const processedItems = useProcessedMessages(visibleMessages);
 
   const lastProcessingRounds = useMessageStore(
     (s) => s.threads[threadId ?? ""]?.lastProcessingRounds ?? null,
@@ -423,14 +429,33 @@ export function MobileChatView({
             {isLoadingMore && (
               <p className={styles.loadingMore}>Loading older messages…</p>
             )}
-            {visibleMessages.map((message) => (
-              <MessageBubble
-                key={message.id}
-                message={message}
-                personaEmoji={personaEmoji}
-                personaName={personaName}
-              />
-            ))}
+            {processedItems.map((item) => {
+              if (item.type === "date_divider") {
+                return (
+                  <div key={`date-${item.key}`} className="date-divider">
+                    {item.label}
+                  </div>
+                );
+              }
+              if (item.type === "tool_group") {
+                return (
+                  <ProcessingBubble
+                    key={item.executionId}
+                    rounds={item.rounds}
+                    personaEmoji={personaEmoji}
+                    personaName={personaName}
+                  />
+                );
+              }
+              return (
+                <MessageBubble
+                  key={item.message.id}
+                  message={item.message}
+                  personaEmoji={personaEmoji}
+                  personaName={personaName}
+                />
+              );
+            })}
 
             {isSending && (
               <StreamingBubble
