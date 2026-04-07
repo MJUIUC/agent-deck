@@ -84,7 +84,15 @@ export function ProcessingBlock({
                 </div>
               )}
               {round.tools.map((tool) => (
-                <ToolRow key={tool.tool_call_id} tool={tool} />
+                <ToolRow
+                  key={tool.tool_call_id}
+                  tool={
+                    round.status === "completed" &&
+                    tool.status === "in_progress"
+                      ? { ...tool, status: "completed" }
+                      : tool
+                  }
+                />
               ))}
               {round.reasoning && (
                 <div className={styles.reasoning}>
