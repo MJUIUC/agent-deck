@@ -341,9 +341,10 @@ const storeCreator: StateCreator<MessageStore> = (set, get) => ({
     set((state) => {
       const thread = getThread(state.threads, threadId);
       const phase = thread.phase;
-      if (phase.status !== "streaming") return state;
+      if (phase.status !== "streaming" && phase.status !== "sending")
+        return state;
 
-      const entries = phase.entries;
+      const entries = phase.status === "streaming" ? phase.entries : [];
       const lastEntry = entries[entries.length - 1];
 
       if (lastEntry?.type === "processing") {
