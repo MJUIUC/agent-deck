@@ -16,6 +16,7 @@ import { useSseStore } from "@/stores/useSseStore";
 import { resolveDisplayNames } from "@/components/ChatHeader";
 import { MessageBubble, StreamingBubble } from "@/components/MessageBubble";
 import { ProcessingBubble } from "@/components/ProcessingBlock";
+import { useProcessedMessages } from "@/hooks/useProcessedMessages";
 import { MobileConfigSheet } from "./MobileConfigSheet";
 import styles from "./MobileChatView.module.css";
 
@@ -162,7 +163,22 @@ export function MobileChatView({
   const isSending = phase.status === "sending";
   const streamingEntries = phase.status === "streaming" ? phase.entries : [];
 
-  const visibleMessages = messages.filter((m) => m.visibility === "visible");
+  const visibleMessages = messages.filter((m) => {
+    if (m.visibility === "hidden" && m.source !== "tool") return false;
+    return true;
+  });
+
+  const processedItems = useProcessedMessages(visibleMessages);
+
+  const lastProcessingRounds = useMessageStore(
+    (s) => s.threads[threadId ?? ""]?.lastProcessingRounds ?? null,
+  );
+
+  const showFallbackProcessing =
+    !isStreaming &&
+    lastProcessingRounds !== null &&
+    lastProcessingRounds.length > 0 &&
+    !processedItems.some((item) => item.type === "tool_group");
 
   const personaEmoji = thread?.persona?.emoji ?? "🤖";
   const personaName = thread?.persona?.name ?? "Agent";
@@ -311,16 +327,6 @@ export function MobileChatView({
     }
   }, [inputValue, isStreaming, threadId, onFirstSend, sendMessage]);
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        void handleSend();
-      }
-    },
-    [handleSend],
-  );
-
   const handleInputChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       setInputValue(e.target.value);
@@ -414,14 +420,45 @@ export function MobileChatView({
             {isLoadingMore && (
               <p className={styles.loadingMore}>Loading older messages…</p>
             )}
-            {visibleMessages.map((message) => (
-              <MessageBubble
-                key={message.id}
-                message={message}
-                personaEmoji={personaEmoji}
-                personaName={personaName}
-              />
-            ))}
+            {(() => {
+              const lastToolGroupItem = processedItems
+                .filter((i) => i.type === "tool_group")
+                .at(-1);
+              return processedItems.map((item) => {
+                if (item.type === "date_divider") {
+                  return (
+                    <div key={`date-${item.key}`} className="date-divider">
+                      {item.label}
+                    </div>
+                  );
+                }
+                if (item.type === "tool_group") {
+                  const isLast = item === lastToolGroupItem;
+                  const rounds =
+                    isLast &&
+                    lastProcessingRounds &&
+                    lastProcessingRounds.length > 0
+                      ? lastProcessingRounds
+                      : item.rounds;
+                  return (
+                    <ProcessingBubble
+                      key={item.executionId}
+                      rounds={rounds}
+                      personaEmoji={personaEmoji}
+                      personaName={personaName}
+                    />
+                  );
+                }
+                return (
+                  <MessageBubble
+                    key={item.message.id}
+                    message={item.message}
+                    personaEmoji={personaEmoji}
+                    personaName={personaName}
+                  />
+                );
+              });
+            })()}
 
             {isSending && (
               <StreamingBubble
@@ -455,12 +492,22 @@ export function MobileChatView({
                       rounds={entry.rounds}
                       personaEmoji={personaEmoji}
                       personaName={personaName}
+                      streaming={isLast}
                     />
                   );
                 }
 
                 return null;
               })}
+
+            {showFallbackProcessing && (
+              <ProcessingBubble
+                key="fallback-processing"
+                rounds={lastProcessingRounds!}
+                personaEmoji={personaEmoji}
+                personaName={personaName}
+              />
+            )}
           </>
         )}
 
@@ -484,7 +531,6 @@ export function MobileChatView({
               placeholder="Message…"
               value={inputValue}
               onChange={handleInputChange}
-              onKeyDown={handleKeyDown}
               rows={1}
               aria-label="Message input"
               aria-multiline="true"

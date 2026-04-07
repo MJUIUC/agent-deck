@@ -7,7 +7,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useThreadStore, makeDraftThread } from "@/stores/useThreadStore";
 import { useSseStore } from "@/stores/useSseStore";
 import { useMessageStore } from "@/stores/useMessageStore";
-import { providersApi } from "@/api/client";
+import { providersApi, pushApi } from "@/api/client";
 import { PersonaPickerModal } from "@/components/PersonaPickerModal";
 import { MobileThreadList } from "./mobile/MobileThreadList";
 import { MobileChatView } from "./mobile/MobileChatView";
@@ -107,6 +107,33 @@ export function MobileLayout() {
       .finally(() => setIsCheckingProviders(false));
 
     connectGlobal();
+
+    // Re-sync push subscription with the server on every startup. If the server
+    // previously deleted the subscription row after a 410 Gone, the browser
+    // still reports it as active. Re-posting it restores the server record so
+    // future notifications can be delivered.
+    if (
+      navigator.serviceWorker &&
+      typeof Notification !== "undefined" &&
+      Notification.permission === "granted"
+    ) {
+      navigator.serviceWorker.ready
+        .then(async (reg) => {
+          const sub = await reg.pushManager.getSubscription();
+          if (!sub) return;
+          const subJson = sub.toJSON() as {
+            endpoint: string;
+            keys: { p256dh: string; auth: string };
+          };
+          await pushApi.subscribe({
+            endpoint: subJson.endpoint,
+            p256dh: subJson.keys.p256dh,
+            auth: subJson.keys.auth,
+            user_agent: navigator.userAgent,
+          });
+        })
+        .catch((err) => console.warn("[push] startup re-sync failed:", err));
+    }
 
     // Deep-link from notification tap (cold start)
     const searchParams = new URLSearchParams(window.location.search);

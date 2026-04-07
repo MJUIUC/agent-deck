@@ -101,6 +101,17 @@
     flex-shrink: 0;
 }
 
+/* ── Tool row ring spinner (same style, smaller) ── */
+.toolSpinner {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 1.5px solid var(--border-subtle);
+    border-top-color: var(--accent-primary);
+    animation: spin 0.75s linear infinite;
+    flex-shrink: 0;
+}
+
 /* ── Icon colors ── */
 .done {
     color: var(--accent-primary);

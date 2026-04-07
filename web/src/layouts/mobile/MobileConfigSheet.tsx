@@ -4,9 +4,16 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import cronstrue from "cronstrue";
-import type { Thread, Routine, Provider, Model } from "@/types";
-import { routinesApi, providersApi, modelsApi, threadsApi } from "@/api/client";
+import type { Thread, Routine, Provider, Model, McpServer } from "@/types";
+import {
+  routinesApi,
+  providersApi,
+  modelsApi,
+  threadsApi,
+  mcpServersApi,
+} from "@/api/client";
 import { useThreadStore } from "@/stores/useThreadStore";
+import { useSseStore } from "@/stores/useSseStore";
 import styles from "./MobileConfigSheet.module.css";
 
 // ─── Internal types ───────────────────────────────────────────────────────────
@@ -14,6 +21,13 @@ import styles from "./MobileConfigSheet.module.css";
 interface ProviderWithModels {
   provider: Provider;
   models: Model[];
+}
+
+interface ThreadMcpEntry {
+  id: string;
+  thread_id: string;
+  mcp_server_id: string;
+  enabled: boolean;
 }
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -152,6 +166,19 @@ function cx(...classes: Array<string | undefined | false>): string {
   return classes.filter(Boolean).join(" ");
 }
 
+function mcpStatusDotClass(status: McpServer["status"]): string {
+  switch (status) {
+    case "connected":
+      return styles.statusConnected;
+    case "connecting":
+      return styles.statusConnecting;
+    case "error":
+      return styles.statusError;
+    default:
+      return styles.statusInactive;
+  }
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function MobileConfigSheet({
@@ -172,6 +199,17 @@ export function MobileConfigSheet({
     null,
   );
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
+
+  // ── MCP state ─────────────────────────────────────────────────────────────
+  const [attachedEntries, setAttachedEntries] = useState<ThreadMcpEntry[]>([]);
+  const [mcpServersMap, setMcpServersMap] = useState<Record<string, McpServer>>(
+    {},
+  );
+  const [mcpLoading, setMcpLoading] = useState(false);
+  const [showMcpPicker, setShowMcpPicker] = useState(false);
+
+  // ── SSE ───────────────────────────────────────────────────────────────────
+  const lastMcpStatusChange = useSseStore((s) => s.lastMcpStatusChange);
 
   // ── Refs ─────────────────────────────────────────────────────────────────
   const sheetRef = useRef<HTMLDivElement>(null);
@@ -272,6 +310,44 @@ export function MobileConfigSheet({
     };
   }, [isOpen]);
 
+  // ── Fetch MCP data when sheet opens ──────────────────────────────────────
+  useEffect(() => {
+    if (!isOpen) return;
+    setMcpLoading(true);
+    Promise.all([threadsApi.listMcpServers(thread.id), mcpServersApi.list()])
+      .then(([entriesRes, serversRes]) => {
+        setAttachedEntries(entriesRes.data);
+        const map: Record<string, McpServer> = {};
+        for (const server of serversRes.data) {
+          map[server.id] = server;
+        }
+        setMcpServersMap(map);
+      })
+      .catch(() => {
+        setAttachedEntries([]);
+        setMcpServersMap({});
+      })
+      .finally(() => {
+        setMcpLoading(false);
+      });
+  }, [isOpen, thread.id]);
+
+  // ── Live MCP status updates via SSE ──────────────────────────────────────
+  useEffect(() => {
+    if (!lastMcpStatusChange) return;
+    const { mcp_server_id, status } = lastMcpStatusChange;
+    setMcpServersMap((prev) => {
+      if (!prev[mcp_server_id]) return prev;
+      return {
+        ...prev,
+        [mcp_server_id]: {
+          ...prev[mcp_server_id],
+          status: status as McpServer["status"],
+        },
+      };
+    });
+  }, [lastMcpStatusChange]);
+
   // ── Routine toggle ────────────────────────────────────────────────────────
   const handleToggleRoutine = useCallback(
     async (routine: Routine) => {
@@ -364,6 +440,48 @@ export function MobileConfigSheet({
       dragStartY.current = null;
     },
     [onClose],
+  );
+
+  // ── MCP attach/detach handlers ────────────────────────────────────────────
+
+  const handleDetachServer = useCallback(
+    async (mcpServerId: string) => {
+      const server = mcpServersMap[mcpServerId];
+      try {
+        await threadsApi.detachMcpServer(thread.id, mcpServerId);
+        setAttachedEntries((prev) =>
+          prev.filter((e) => e.mcp_server_id !== mcpServerId),
+        );
+        if (server) {
+          threadsApi
+            .notify(thread.id, "mcp_server_detached", { name: server.name })
+            .catch(() => {});
+        }
+      } catch {
+        // Silent fail on mobile
+      }
+    },
+    [thread.id, mcpServersMap],
+  );
+
+  const handleAttachServer = useCallback(
+    async (server: McpServer) => {
+      try {
+        const { data: entry } = await threadsApi.attachMcpServer(
+          thread.id,
+          server.id,
+        );
+        setAttachedEntries((prev) => [...prev, entry]);
+        setMcpServersMap((prev) => ({ ...prev, [server.id]: server }));
+        setShowMcpPicker(false);
+        threadsApi
+          .notify(thread.id, "mcp_server_attached", { name: server.name })
+          .catch(() => {});
+      } catch {
+        // Silent fail on mobile
+      }
+    },
+    [thread.id],
   );
 
   // ── Render guard — don't mount until the sheet has been opened once ───────
@@ -585,6 +703,119 @@ export function MobileConfigSheet({
                 })}
               </div>
             )}
+          </section>
+
+          <div className={styles.divider} aria-hidden="true" />
+
+          {/* ── Tools ────────────────────────────────────────────────── */}
+          <section className={styles.section} aria-labelledby="mcs-label-tools">
+            <div id="mcs-label-tools" className={styles.sectionLabel}>
+              Tools
+            </div>
+
+            {mcpLoading ? (
+              <div
+                className={styles.stateText}
+                role="status"
+                aria-live="polite"
+              >
+                Loading…
+              </div>
+            ) : (
+              <div className={styles.toolsList}>
+                {attachedEntries.map((entry) => {
+                  const server = mcpServersMap[entry.mcp_server_id];
+                  if (!server) return null;
+                  return (
+                    <div key={entry.id} className={styles.toolRow}>
+                      <span
+                        className={cx(
+                          styles.mcpStatusDot,
+                          mcpStatusDotClass(server.status),
+                        )}
+                        aria-hidden="true"
+                      />
+                      <span className={styles.toolName}>{server.name}</span>
+                      <button
+                        type="button"
+                        className={styles.detachBtn}
+                        onClick={() => handleDetachServer(entry.mcp_server_id)}
+                        aria-label={`Detach ${server.name}`}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  );
+                })}
+
+                <button
+                  type="button"
+                  className={styles.attachRow}
+                  onClick={() => setShowMcpPicker(true)}
+                >
+                  + Attach Server
+                </button>
+              </div>
+            )}
+
+            {/* Picker overlay */}
+            {showMcpPicker &&
+              (() => {
+                const attachedIds = new Set(
+                  attachedEntries.map((e) => e.mcp_server_id),
+                );
+                const available = Object.values(mcpServersMap).filter(
+                  (s) => !attachedIds.has(s.id),
+                );
+                return (
+                  <div
+                    className={styles.pickerOverlay}
+                    role="dialog"
+                    aria-label="Attach MCP Server"
+                  >
+                    <div className={styles.pickerOverlayHeader}>
+                      <span className={styles.pickerOverlayTitle}>
+                        Attach MCP Server
+                      </span>
+                      <button
+                        type="button"
+                        className={styles.closeBtn}
+                        onClick={() => setShowMcpPicker(false)}
+                        aria-label="Close picker"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    <div className={styles.pickerOverlayBody}>
+                      {available.length === 0 ? (
+                        <div className={styles.stateText}>
+                          All available servers are attached.
+                        </div>
+                      ) : (
+                        available.map((server) => (
+                          <button
+                            key={server.id}
+                            type="button"
+                            className={styles.pickerServerRow}
+                            onClick={() => handleAttachServer(server)}
+                          >
+                            <span
+                              className={cx(
+                                styles.mcpStatusDot,
+                                mcpStatusDotClass(server.status),
+                              )}
+                              aria-hidden="true"
+                            />
+                            <span className={styles.pickerServerName}>
+                              {server.name}
+                            </span>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
           </section>
         </div>
         {/* /body */}

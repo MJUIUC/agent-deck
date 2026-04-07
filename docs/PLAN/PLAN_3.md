@@ -1420,10 +1420,10 @@ Acceptance criteria:
 
 ---
 
-**Story 8.3 — Mobile settings parity**  
+**Story 8.3 — Mobile settings parity + per-thread MCP** ✅ Complete  
 Branch: `feature/phase8-mobile-settings`
 
-The mobile app currently only lets users chat and toggle routines on/off. Since agent-deck is designed to run on headless computers, the phone is often the only admin interface. This story expands `MobileSettings.tsx` with four new global-config sections: Providers, Credentials, MCP Servers, and Personas — bringing mobile settings to functional parity with the desktop sidebar.
+The mobile app currently only lets users chat and toggle routines on/off. Since agent-deck is designed to run on headless computers, the phone is often the only admin interface. This story expands `MobileSettings.tsx` with four new global-config sections: Providers, Credentials, MCP Servers, and Personas — bringing mobile settings to functional parity with the desktop sidebar. It also adds per-thread MCP attach/detach to `MobileConfigSheet.tsx`, which is the only way to attach tools to a thread on mobile.
 
 Acceptance criteria:
 - Providers section: list with enable/disable toggle per row, add new (name, kind, base URL, API key), delete with confirmation
@@ -1433,8 +1433,19 @@ Acceptance criteria:
 - All four sections appear below the existing "Install as App" and "Notifications" sections in `MobileSettings.tsx`
 - Forms use slide-up full-screen drawers consistent with the existing `MobileConfigSheet` visual style
 - No desktop-only features (env-var editor, tool inspector, Copilot device auth) are required on mobile
+- Per-thread MCP section in `MobileConfigSheet`: lists attached servers with live status dots, detach (×) button per row, and an "+ Attach Server" picker showing only unattached servers; attach/detach calls `threadsApi.notify` for both events (silently degrades on failure)
 
 ---
+
+### As-built notes (Story 8.3)
+
+- **All four settings sections shipped in `MobileSettings.tsx`:** Providers, Credentials, MCP Servers, and Personas — each with add, edit/toggle, and delete-with-confirmation. Sections appear below "Install as App" and "Notifications".
+- **Slide-up drawers:** All forms (add provider, add credential, add MCP server, add/edit persona) use a full-screen slide-up drawer consistent with `MobileConfigSheet` style, implemented via a reusable `MobileDrawer` pattern.
+- **MCP live status dots:** Status dots in the MCP Servers section subscribe to `lastMcpStatusChange` SSE events for real-time updates without page reload.
+- **Personas:** Default persona delete button is disabled; edit drawer pre-fills all fields. `PUT /api/personas/:id` called on save.
+- **Per-thread MCP in `MobileConfigSheet`:** "Tools" section added below Routines; lists attached servers with status dots and ✕ detach buttons. "+ Attach Server" opens a picker showing only unattached servers; both attach and detach call `threadsApi.notify` (silently degrades on failure).
+- **No desktop-only features:** Env-var editor, tool inspector, and Copilot device auth were intentionally omitted from mobile.
+- **Branch:** `feature/phase8-mobile-settings` — PR merged to `dev`.
 
 ---
 

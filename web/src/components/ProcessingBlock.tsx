@@ -1,6 +1,5 @@
 import { useState } from "react";
 import {
-  InProgress,
   CheckmarkFilled,
   CloseFilled,
   ChevronRight,
@@ -20,12 +19,15 @@ export function ProcessingBlock({
   rounds,
   streaming = false,
 }: ProcessingBlockProps) {
-  const [expanded, setExpanded] = useState(false);
-
   const anyRoundInProgress = rounds.some((r) => r.status === "in_progress");
   // Keep the spinner active while the parent streaming phase is still live
   // (e.g. all tool rounds finished but the final text message hasn't arrived yet).
   const isActive = streaming || anyRoundInProgress;
+
+  // null means the user hasn't manually toggled yet — follow isActive automatically.
+  // Once the user clicks, their choice is stored and takes precedence.
+  const [manualExpanded, setManualExpanded] = useState<boolean | null>(null);
+  const expanded = manualExpanded !== null ? manualExpanded : isActive;
   const allCancelled =
     rounds.every((r) => r.status === "cancelled") && rounds.length > 0;
   let label: string;
@@ -54,7 +56,7 @@ export function ProcessingBlock({
     <div className={`${styles.block} ${allCancelled ? styles.cancelled : ""}`}>
       <button
         className={styles.header}
-        onClick={() => setExpanded((v) => !v)}
+        onClick={() => setManualExpanded((v) => (v !== null ? !v : !expanded))}
         aria-expanded={expanded}
       >
         <span className={styles.statusIcon}>
@@ -85,7 +87,15 @@ export function ProcessingBlock({
                 </div>
               )}
               {round.tools.map((tool) => (
-                <ToolRow key={tool.tool_call_id} tool={tool} />
+                <ToolRow
+                  key={tool.tool_call_id}
+                  tool={
+                    round.status === "completed" &&
+                    tool.status === "in_progress"
+                      ? { ...tool, status: "completed" }
+                      : tool
+                  }
+                />
               ))}
               {round.reasoning && (
                 <div className={styles.reasoning}>
@@ -118,7 +128,7 @@ function ToolRow({ tool }: { tool: ToolCallEntry }) {
       <div className={styles.toolRow}>
         <span className={styles.toolStatus}>
           {tool.status === "in_progress" ? (
-            <InProgress size={12} className={styles.spinning} />
+            <span className={styles.toolSpinner} />
           ) : tool.status === "cancelled" ? (
             <CloseFilled size={12} className={styles.mutedIcon} />
           ) : (

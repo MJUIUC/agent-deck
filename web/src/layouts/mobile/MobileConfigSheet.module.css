@@ -528,3 +528,151 @@
     transform: translateX(16px);
     background: var(--text-primary);
 }
+
+/* ── MCP status dots ─────────────────────────────────────────────────────── */
+
+.mcpStatusDot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.statusConnected {
+    background: #4caf7d;
+    box-shadow: 0 0 4px #4caf7d;
+}
+.statusConnecting {
+    background: #e8b84b;
+    box-shadow: 0 0 4px #e8b84b;
+}
+.statusError {
+    background: #c45a5a;
+    box-shadow: 0 0 4px #c45a5a;
+}
+.statusInactive {
+    background: var(--text-tertiary);
+}
+
+/* ── Tools section ───────────────────────────────────────────────────────── */
+
+.toolsList {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-subtle);
+    border-radius: 11px;
+    overflow: hidden;
+}
+
+.toolRow {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.toolRow:last-of-type {
+    border-bottom: none;
+}
+
+.toolName {
+    flex: 1;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.detachBtn {
+    background: none;
+    border: none;
+    color: var(--text-tertiary);
+    font-size: 0.875rem;
+    cursor: pointer;
+    padding: 4px 6px;
+    border-radius: 4px;
+    flex-shrink: 0;
+    line-height: 1;
+}
+
+.detachBtn:hover {
+    color: var(--text-secondary);
+}
+
+.attachRow {
+    width: 100%;
+    background: none;
+    border: none;
+    border-top: 1px solid var(--border-subtle);
+    padding: 11px 14px;
+    font-size: 0.875rem;
+    color: var(--accent-primary);
+    cursor: pointer;
+    text-align: left;
+    font-weight: 500;
+}
+
+/* ── MCP server picker overlay ───────────────────────────────────────────── */
+
+.pickerOverlay {
+    position: fixed;
+    inset: 0;
+    z-index: 210;
+    background: var(--bg-secondary);
+    display: flex;
+    flex-direction: column;
+}
+
+.pickerOverlayHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border-subtle);
+    flex-shrink: 0;
+}
+
+.pickerOverlayTitle {
+    font-size: 0.9375rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.pickerOverlayBody {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.pickerServerRow {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 13px 18px;
+    background: none;
+    border: none;
+    border-bottom: 1px solid var(--border-subtle);
+    cursor: pointer;
+    text-align: left;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.pickerServerRow:last-child {
+    border-bottom: none;
+}
+
+.pickerServerRow:active {
+    background: var(--bg-elevated);
+}
+
+.pickerServerName {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--text-primary);
+}

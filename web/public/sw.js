@@ -36,13 +36,31 @@ self.addEventListener("push", (event) => {
     data: data.data ?? {},
   };
 
-  console.log("[sw] calling showNotification:", notifTitle, notifOptions);
-
   event.waitUntil(
-    self.registration
-      .showNotification(notifTitle, notifOptions)
-      .then(() => console.log("[sw] showNotification resolved OK"))
-      .catch((err) => console.error("[sw] showNotification rejected:", err)),
+    self.clients
+      .matchAll({ type: "window", includeUncontrolled: true })
+      .then((clients) => {
+        // If any window is currently visible (app is in the foreground), suppress
+        // the notification — the user will already see the message via the live
+        // SSE stream.
+        const anyVisible = clients.some(
+          (client) => client.visibilityState === "visible",
+        );
+        if (anyVisible) {
+          console.log(
+            "[sw] app is in foreground — suppressing push notification",
+          );
+          return Promise.resolve();
+        }
+
+        console.log("[sw] calling showNotification:", notifTitle, notifOptions);
+        return self.registration
+          .showNotification(notifTitle, notifOptions)
+          .then(() => console.log("[sw] showNotification resolved OK"))
+          .catch((err) =>
+            console.error("[sw] showNotification rejected:", err),
+          );
+      }),
   );
 });
 
