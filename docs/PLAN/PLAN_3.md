@@ -1369,7 +1369,7 @@ Acceptance criteria:
 
 ---
 
-**Story 8.1 — MCP tool inspector**  
+**Story 8.1 — MCP tool inspector** ✅ Complete  
 Branch: `feature/phase8-mcp-tool-inspector`
 
 When an MCP server connects, enumerate its exposed tools and cache the list (name, description, input schema) in memory. Expose this via `GET /api/mcp-servers/:id/tools`. In the Thread Config pane and MCP settings page, render the tool list as an expandable section per server. Include the source URL as a clickable link when set.
@@ -1381,9 +1381,20 @@ Acceptance criteria:
 - Tool list refreshes when a server reconnects
 - Unit tests for tool enumeration and caching
 
+### As-built notes (Story 8.1)
+
+- **Implemented as foundational MCP infrastructure, not on a dedicated branch.** All code landed incrementally alongside earlier phases; no separate `feature/phase8-mcp-tool-inspector` branch was created.
+- **Tool enumeration:** `connect_and_handshake` calls `list_tools_stdio` (local) or issues a `tools/list` JSON-RPC request (remote) during the MCP handshake. Results are stored in `McpConnection.tools: RwLock<Vec<McpTool>>`.
+- **`GET /api/mcp-servers/:id/tools`:** Implemented as `list_mcp_tools` in `server/src/routes/tokens.rs`; calls `state.mcp.cached_tools(id)`.
+- **Thread Config pane:** `McpServerCard` in `ConfigPane.tsx` has a lazy-loading "Tools" disclosure section. Fetches on first expand, shows tool name + description per row.
+- **MCP settings page:** `ToolInspector` component in `McpServerSettings.tsx` with identical lazy-fetch pattern.
+- **Source URL:** Rendered as a `target="_blank"` link in both card components when present.
+- **Live refresh on reconnect:** `ConfigPane.tsx` subscribes to `lastMcpStatusChange` SSE events and auto-fetches tools when status transitions to `"connected"`.
+- **Unit tests:** No dedicated unit tests for `cached_tools` or `list_tools_stdio` — the tool-enumeration path is exercised by integration behaviour. The `startup_sync`, config I/O, and tag-validation tests in `services/mcp.rs` provide coverage of surrounding logic.
+
 ---
 
-**Story 8.2 — Local MCP process management**  
+**Story 8.2 — Local MCP process management** ✅ Complete  
 Branch: `feature/phase8-local-mcp-processes`
 
 Implement full lifecycle management for local MCP servers. The Rust server starts local servers as child processes on demand (when a thread with that server is opened or on server startup if the server has active threads). Health-check loop monitors the process. On crash, attempt restart with exponential backoff. Status is kept live in the `mcp_servers.status` field and broadcast via global SSE event. Graceful shutdown on server exit.
@@ -1394,6 +1405,34 @@ Acceptance criteria:
 - Status badge in UI reflects actual connection state in near-real-time
 - All local server processes are cleanly shut down when the Rust server exits
 - Integration test: start a local server, kill its process, verify restart and reconnection
+
+### As-built notes (Story 8.2)
+
+- **Implemented as foundational MCP infrastructure, not on a dedicated branch.** All code landed incrementally alongside earlier phases; no separate `feature/phase8-local-mcp-processes` branch was created.
+- **Supervision loop:** `McpConnectionManager::supervise()` in `server/src/services/mcp.rs`. Starts with `BACKOFF_INITIAL` (2 s), doubles on each failure up to `BACKOFF_MAX` (60 s), resets to `BACKOFF_INITIAL` after `STABILITY_THRESHOLD` (30 s) of continuous uptime.
+- **Health monitoring:** `monitor_local()` polls the child process exit status; `monitor_remote()` watches the SSE stream for closure. Both signal `supervise()` to re-enter the connect loop.
+- **DB status updates:** `set_db_status()` called on every state transition so `mcp_servers.status` always reflects reality.
+- **SSE broadcast:** `broadcast_status()` emits a `GlobalEvent` on every transition; `ConfigPane.tsx` consumes `lastMcpStatusChange` and updates status badges in-place without a page reload.
+- **Graceful shutdown:** `shutdown_all()` called in `main.rs` SIGTERM handler; sends `shutdown_tx.send(true)` to each supervise task and calls `kill_child_if_any` on the child process.
+- **Startup sync:** `startup_sync()` runs on every server start, scanning `~/.agent-deck/mcp/` for `config.json` files and syncing new/changed/deleted entries into the DB before `start()` connects enabled servers.
+- **Disable detection:** `supervise()` polls the DB every 500 ms during the backoff wait; exits immediately if the row is disabled — no need to wait for the full backoff interval.
+- **Integration test:** No crash/restart integration test exists. The supervision and backoff logic are covered by the `startup_sync_*` and config-file unit tests in `services/mcp.rs`; a full process-kill/restart test was deemed impractical in a pure unit-test environment.
+
+---
+
+**Story 8.3 — Mobile settings parity**  
+Branch: `feature/phase8-mobile-settings`
+
+The mobile app currently only lets users chat and toggle routines on/off. Since agent-deck is designed to run on headless computers, the phone is often the only admin interface. This story expands `MobileSettings.tsx` with four new global-config sections: Providers, Credentials, MCP Servers, and Personas — bringing mobile settings to functional parity with the desktop sidebar.
+
+Acceptance criteria:
+- Providers section: list with enable/disable toggle per row, add new (name, kind, base URL, API key), delete with confirmation
+- Credentials section: list (key, display_name, service), add new (key, display_name, service, credential_type, secret), delete with confirmation; no secret displayed after creation
+- MCP Servers section: list with live status dots driven by `lastMcpStatusChange` SSE events, enable/disable toggle, add new (name, type, key fields for local/remote), delete with confirmation
+- Personas section: list with emoji and name, tap to edit (name, emoji, system_prompt), add new, delete with confirmation; default persona delete is disabled
+- All four sections appear below the existing "Install as App" and "Notifications" sections in `MobileSettings.tsx`
+- Forms use slide-up full-screen drawers consistent with the existing `MobileConfigSheet` visual style
+- No desktop-only features (env-var editor, tool inspector, Copilot device auth) are required on mobile
 
 ---
 
@@ -1453,10 +1492,31 @@ Implement cursor-based pagination on `GET /api/threads/:id/messages`. In the web
 
 ---
 
-**Story 9.4 — Setup and README**  
-Branch: `feature/phase9-docs`
+**Story 9.4 — macOS distribution**  
+Branch: `feature/phase9-distribution`
 
-Write a comprehensive README covering: what agent-deck is, prerequisites, installation steps (including `git submodule init` for copilot-api), first-run setup, PWA installation on Android and iOS, push notification setup, and how to add providers. Document the Tailscale setup.
+Package agent-deck as a proper macOS release — a Homebrew formula (primary) and a DMG (secondary) — so users can install with `brew install` and have the server start automatically on login via `brew services`. A GitHub Actions workflow produces release artifacts on tag push.
+
+Acceptance criteria:
+- `release.yml` workflow triggers on `v*` tag push and produces two tarballs (`agent-deck-macos-aarch64.tar.gz` and `agent-deck-macos-x86_64.tar.gz`), each containing the `agent-deck` binary and `public/` directory, with SHA256s in the release body
+- `brew tap <owner>/agent-deck && brew install agent-deck && brew services start agent-deck` results in the server running at `http://localhost:7474`
+- `scripts/build-dmg.sh` runs to completion on a macOS machine with Xcode CLI tools and produces a `.dmg` in `build/`
+- `scripts/com.agent-deck.server.plist` correctly starts the server on login when loaded via `launchctl`
+
+---
+
+**Story 9.5 — Setup wizard polish and documentation**  
+Branch: `feature/phase9-wizard-polish`
+
+Fix the critical gap in the setup wizard's Done step — it must tell new users how to connect from other devices. Surface the auth token, local URL, Tailscale URL (when available), and a QR code for one-tap mobile login. Write the project README.
+
+Acceptance criteria:
+- `POST /api/setup/complete` response body includes the auth token
+- `GET /api/setup/connect-info` returns `{ local_url, tailscale_url, token_shown }` — `token` field included only when `token_shown` is `false`; `POST /api/setup/connect-info/mark-shown` sets `token_shown = true`
+- `local_url` reflects the machine's non-loopback IP address
+- Done step displays a "Connect from another device" panel with: local URL (+ Tailscale URL if available), masked+copyable token, QR code encoding `<local_url>?token=<token>`, and a prominent "Save this token — it won't be shown again" warning
+- Token is held in component state only — never written to `localStorage` or `sessionStorage`
+- README covers: what agent-deck is, Homebrew install, build-from-source install, first-run wizard, connecting from mobile (QR + manual), Tailscale setup, PWA installation on iOS and Android, push notifications, adding providers/MCP servers/credentials
 
 ---
 

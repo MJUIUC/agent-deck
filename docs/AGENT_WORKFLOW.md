@@ -31,6 +31,8 @@ Then open `docs/PLAN/PLAN_3.md` and scan the phase table. Find the first story t
 
 Cross-reference the branch name against the story. If the current branch matches a story that is mid-flight (has commits but is not marked complete), that is the story you are working. If the current branch is `dev` or `main` and no story is in flight, the next unstarted story is your target.
 
+**`docs/PLAN/PLAN_3.md` is the single source of truth for story sequencing.** The `docs/` directory may contain pre-written `AD-xxx.md` plan files for stories that have not started yet — this is normal. Do not treat the presence of an AD file as evidence that a story is in progress. The git branch and the ✅ markers in PLAN_3 determine what is active.
+
 **At the end of Step 1 you should know:**
 - Which story you are working (e.g. Story 7.1)
 - Whether it is in-progress or not yet started
@@ -71,7 +73,13 @@ If the story is **already in progress** (branch exists, some commits present), c
 
 Before writing a single line of code, create a plan file at `docs/AD-xxx.md` where `xxx` is the story number from PLAN_3 (e.g. `AD-7.1.md`, `AD-6.2.md`).
 
-Check whether this file already exists. If it does (story was in progress), read it — the plan may already be approved and you can skip to Step 4.
+Check whether this file already exists in `docs/`. If it does, read it and check the approval boxes:
+
+- If `- [x] **Implementation plan approved**` → the plan is approved; skip to Step 4.
+- If the first box is **not** checked → the plan exists but has not been approved yet. Present it to the human and wait for approval before writing any code. Do not proceed to Step 4.
+- If the file does not exist → write it now using the template below, then stop and present it to the human.
+
+Note: pre-written plan files for future stories may already exist in `docs/` when you arrive at a story. This is expected. Treat them the same way — check the approval box.
 
 ### How to build the plan
 
