@@ -379,16 +379,27 @@ export function ChatView({
     prevScrollTop: number;
   } | null>(null);
 
+  // Tracks the ID of the oldest (first) message seen on the previous render.
+  // When it changes to a different (older) ID we know a prepend just happened.
+  const prevFirstMsgIdRef = useRef<string | null>(null);
+
   // Top sentinel — watched by IntersectionObserver to trigger load-more.
   const topSentinelRef = useRef<HTMLDivElement>(null);
 
-  // Run on every render (no dep array) — see original comment above. When a
-  // load-more prepend just happened, scrollAdjustRef holds a snapshot so we
-  // can restore the viewport position instead of jumping back to the bottom.
+  // Fires only when the messages array changes — not on every render.
+  // Detects prepend vs append by comparing the first message ID:
+  //   • first ID changed  + snapshot present  → prepend → restore scroll position
+  //   • anything else                         → append / initial load → scroll to bottom
+  //
+  // Streaming scroll (token-by-token) is handled separately by useAutoScroll.
   useLayoutEffect(() => {
+    const firstId = messages[0]?.id ?? null;
+    const prevFirstId = prevFirstMsgIdRef.current;
     const adj = scrollAdjustRef.current;
-    if (adj !== null) {
-      // Prepend just happened — restore scroll so the viewport doesn't jump.
+
+    if (firstId !== prevFirstId && prevFirstId !== null && adj !== null) {
+      // Oldest message changed and we have a snapshot: prepend happened.
+      // Shift scrollTop by the height added above the previous top item.
       const el = containerRef.current;
       if (el) {
         el.scrollTop =
@@ -396,10 +407,13 @@ export function ChatView({
       }
       scrollAdjustRef.current = null;
     } else {
-      // Normal render — scroll to bottom instantly.
+      // Append, initial load, or thread switch — scroll to bottom.
       bottomRef.current?.scrollIntoView({ behavior: "instant" });
     }
-  });
+
+    prevFirstMsgIdRef.current = firstId;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages]);
 
   const persona = thread.persona;
   const personaEmoji = persona?.emoji ?? "🤖";
