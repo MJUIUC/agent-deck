@@ -1,5 +1,6 @@
 import { useState } from "react";
 import {
+  Settings,
   InProgress,
   CheckmarkFilled,
   CloseFilled,
@@ -21,20 +22,13 @@ export function ProcessingBlock({ rounds }: ProcessingBlockProps) {
   const anyInProgress = rounds.some((r) => r.status === "in_progress");
   const allCancelled =
     rounds.every((r) => r.status === "cancelled") && rounds.length > 0;
-  const totalTools = rounds.reduce((sum, r) => sum + r.tools.length, 0);
-  const multiRound = rounds.length > 1;
-
   let label: string;
   if (anyInProgress) {
     label = "Processing…";
   } else if (allCancelled) {
     label = "Stopped";
-  } else if (totalTools === 0) {
-    label = "Processing";
-  } else if (multiRound) {
-    label = `Processing · ${totalTools} tools, ${rounds.length} rounds`;
   } else {
-    label = `Processing · ${totalTools} tool${totalTools === 1 ? "" : "s"}`;
+    label = "Processing complete";
   }
 
   return (
@@ -46,7 +40,7 @@ export function ProcessingBlock({ rounds }: ProcessingBlockProps) {
       >
         <span className={styles.statusIcon}>
           {anyInProgress ? (
-            <InProgress size={14} className={styles.spinning} />
+            <Settings size={14} className={styles.spinning} />
           ) : allCancelled ? (
             <CloseFilled size={14} />
           ) : (
@@ -63,7 +57,7 @@ export function ProcessingBlock({ rounds }: ProcessingBlockProps) {
         <div className={styles.body}>
           {rounds.map((round, roundIdx) => (
             <div key={round.round} className={styles.round}>
-              {multiRound && (
+              {rounds.length > 1 && (
                 <div className={styles.roundHeader}>
                   Round {round.round}
                   {round.status === "completed" && (
