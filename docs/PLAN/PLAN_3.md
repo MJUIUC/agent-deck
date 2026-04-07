@@ -1420,10 +1420,10 @@ Acceptance criteria:
 
 ---
 
-**Story 8.3 — Mobile settings parity**  
+**Story 8.3 — Mobile settings parity + per-thread MCP**  
 Branch: `feature/phase8-mobile-settings`
 
-The mobile app currently only lets users chat and toggle routines on/off. Since agent-deck is designed to run on headless computers, the phone is often the only admin interface. This story expands `MobileSettings.tsx` with four new global-config sections: Providers, Credentials, MCP Servers, and Personas — bringing mobile settings to functional parity with the desktop sidebar.
+The mobile app currently only lets users chat and toggle routines on/off. Since agent-deck is designed to run on headless computers, the phone is often the only admin interface. This story expands `MobileSettings.tsx` with four new global-config sections: Providers, Credentials, MCP Servers, and Personas — bringing mobile settings to functional parity with the desktop sidebar. It also adds per-thread MCP attach/detach to `MobileConfigSheet.tsx`, which is the only way to attach tools to a thread on mobile.
 
 Acceptance criteria:
 - Providers section: list with enable/disable toggle per row, add new (name, kind, base URL, API key), delete with confirmation
@@ -1433,6 +1433,7 @@ Acceptance criteria:
 - All four sections appear below the existing "Install as App" and "Notifications" sections in `MobileSettings.tsx`
 - Forms use slide-up full-screen drawers consistent with the existing `MobileConfigSheet` visual style
 - No desktop-only features (env-var editor, tool inspector, Copilot device auth) are required on mobile
+- Per-thread MCP section in `MobileConfigSheet`: lists attached servers with live status dots, detach (×) button per row, and an "+ Attach Server" picker showing only unattached servers; attach/detach calls `threadsApi.notify` for both events (silently degrades on failure)
 
 ---
 
