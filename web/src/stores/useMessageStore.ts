@@ -515,8 +515,22 @@ const storeCreator: StateCreator<MessageStore> = (set, get) => ({
       if (phase.status !== "streaming") return state;
 
       // Drop text entries — they've been committed to the segment message.
-      // Any tool_call entries are preserved (shouldn't exist yet, but be safe).
+      // Any processing entries are preserved.
       const remainingEntries = phase.entries.filter((e) => e.type !== "text");
+
+      // If a processing entry already exists this is an inter-round segment —
+      // its tokens are already captured in round.reasoning via appendToken.
+      // Don't surface it as a separate message bubble.
+      const hasProcessingEntry = phase.entries.some(
+        (e) => e.type === "processing",
+      );
+      if (hasProcessingEntry) {
+        return {
+          threads: setThread(state.threads, threadId, {
+            phase: { status: "streaming", entries: remainingEntries },
+          }),
+        };
+      }
 
       const alreadyExists = thread.messages.some((m) => m.id === message.id);
       const messages = alreadyExists

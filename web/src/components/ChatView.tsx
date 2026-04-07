@@ -224,31 +224,62 @@ export function ChatView({
 
     const toolMsgsByExecId = new Map<string, Message[]>();
     const nullSlotKeys = new Map<string, string>(); // msg.id → slot key
+    // Reasoning text collected from inter-round chat_segment messages,
+    // keyed by the same slot/execution_id used for tool grouping.
+    const reasoningByKey = new Map<string, string>();
+    // IDs of chat_segments that follow tool messages in the same run —
+    // these are suppressed as standalone bubbles and shown only inside
+    // the ProcessingBlock.
+    const interRoundSegIds = new Set<string>();
     let slotCounter = 0;
     let openSlotKey: string | null = null;
+    let openSlotSeenTool = false;
+    // Track which execution_ids have already received at least one tool message
+    const execIdsWithTools = new Set<string>();
 
     for (const m of visibleMessages) {
       if (m.source === "tool") {
         let key: string;
         if (m.execution_id) {
           key = m.execution_id;
-          openSlotKey = null; // execution_id run doesn't share a null slot
+          execIdsWithTools.add(key);
+          openSlotKey = null;
+          openSlotSeenTool = false;
         } else {
           if (openSlotKey === null) {
             openSlotKey = `__slot_${slotCounter++}`;
           }
           key = openSlotKey;
           nullSlotKeys.set(m.id, key);
+          openSlotSeenTool = true;
         }
         const arr = toolMsgsByExecId.get(key);
         if (arr) arr.push(m);
         else toolMsgsByExecId.set(key, [m]);
       } else if (m.event_type === "chat_segment") {
-        // Inter-round reasoning segment: keep the current null slot open so
-        // the following round's tool messages join the same block.
+        // Classify as inter-round if it follows at least one tool message
+        // in the same run; keep the current slot open either way.
+        if (m.execution_id && execIdsWithTools.has(m.execution_id)) {
+          interRoundSegIds.add(m.id);
+          reasoningByKey.set(
+            m.execution_id,
+            (
+              (reasoningByKey.get(m.execution_id) ?? "") +
+              "\n" +
+              m.content
+            ).trim(),
+          );
+        } else if (!m.execution_id && openSlotKey && openSlotSeenTool) {
+          interRoundSegIds.add(m.id);
+          reasoningByKey.set(
+            openSlotKey,
+            ((reasoningByKey.get(openSlotKey) ?? "") + "\n" + m.content).trim(),
+          );
+        }
       } else {
         // User message or final assistant text: close the current null slot.
         openSlotKey = null;
+        openSlotSeenTool = false;
       }
     }
 
@@ -278,6 +309,7 @@ export function ChatView({
             result_content: result?.content ?? null,
           };
         });
+        const reasoning = reasoningByKey.get(key) ?? "";
         const rounds: ProcessingRound[] =
           roundEntries.length > 0
             ? [
@@ -285,11 +317,14 @@ export function ChatView({
                   round: 1,
                   tools: roundEntries,
                   status: "completed",
-                  reasoning: "",
+                  reasoning,
                 },
               ]
             : [];
         rawItems.push({ type: "tool_group", executionId: key, rounds });
+      } else if (interRoundSegIds.has(msg.id)) {
+        // Suppress — content is shown as reasoning inside the ProcessingBlock.
+        continue;
       } else {
         rawItems.push({ type: "message", message: msg });
       }
