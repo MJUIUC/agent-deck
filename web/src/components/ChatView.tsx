@@ -356,34 +356,46 @@ export function ChatView({
                   Loading older messages…
                 </div>
               )}
-              {processedItems.map((item) => {
-                if (item.type === "date_divider") {
+              {(() => {
+                const lastToolGroupItem = processedItems
+                  .filter((i) => i.type === "tool_group")
+                  .at(-1);
+                return processedItems.map((item) => {
+                  if (item.type === "date_divider") {
+                    return (
+                      <div key={`date-${item.key}`} className="date-divider">
+                        {item.label}
+                      </div>
+                    );
+                  }
+                  if (item.type === "tool_group") {
+                    const isLast = item === lastToolGroupItem;
+                    const rounds =
+                      isLast &&
+                      lastProcessingRounds &&
+                      lastProcessingRounds.length > 0
+                        ? lastProcessingRounds
+                        : item.rounds;
+                    return (
+                      <ProcessingBubble
+                        key={item.executionId}
+                        rounds={rounds}
+                        personaEmoji={personaEmoji}
+                        personaName={personaName}
+                      />
+                    );
+                  }
                   return (
-                    <div key={`date-${item.key}`} className="date-divider">
-                      {item.label}
-                    </div>
+                    <Fragment key={item.message.id}>
+                      <MessageBubble
+                        message={item.message}
+                        personaEmoji={personaEmoji}
+                        personaName={personaName}
+                      />
+                    </Fragment>
                   );
-                }
-                if (item.type === "tool_group") {
-                  return (
-                    <ProcessingBubble
-                      key={item.executionId}
-                      rounds={item.rounds}
-                      personaEmoji={personaEmoji}
-                      personaName={personaName}
-                    />
-                  );
-                }
-                return (
-                  <Fragment key={item.message.id}>
-                    <MessageBubble
-                      message={item.message}
-                      personaEmoji={personaEmoji}
-                      personaName={personaName}
-                    />
-                  </Fragment>
-                );
-              })}
+                });
+              })()}
 
               {showFallbackProcessing && (
                 <ProcessingBubble
