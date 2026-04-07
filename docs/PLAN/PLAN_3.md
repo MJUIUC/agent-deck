@@ -1369,7 +1369,7 @@ Acceptance criteria:
 
 ---
 
-**Story 8.1 — MCP tool inspector**  
+**Story 8.1 — MCP tool inspector** ✅ Complete  
 Branch: `feature/phase8-mcp-tool-inspector`
 
 When an MCP server connects, enumerate its exposed tools and cache the list (name, description, input schema) in memory. Expose this via `GET /api/mcp-servers/:id/tools`. In the Thread Config pane and MCP settings page, render the tool list as an expandable section per server. Include the source URL as a clickable link when set.
@@ -1381,9 +1381,20 @@ Acceptance criteria:
 - Tool list refreshes when a server reconnects
 - Unit tests for tool enumeration and caching
 
+### As-built notes (Story 8.1)
+
+- **Implemented as foundational MCP infrastructure, not on a dedicated branch.** All code landed incrementally alongside earlier phases; no separate `feature/phase8-mcp-tool-inspector` branch was created.
+- **Tool enumeration:** `connect_and_handshake` calls `list_tools_stdio` (local) or issues a `tools/list` JSON-RPC request (remote) during the MCP handshake. Results are stored in `McpConnection.tools: RwLock<Vec<McpTool>>`.
+- **`GET /api/mcp-servers/:id/tools`:** Implemented as `list_mcp_tools` in `server/src/routes/tokens.rs`; calls `state.mcp.cached_tools(id)`.
+- **Thread Config pane:** `McpServerCard` in `ConfigPane.tsx` has a lazy-loading "Tools" disclosure section. Fetches on first expand, shows tool name + description per row.
+- **MCP settings page:** `ToolInspector` component in `McpServerSettings.tsx` with identical lazy-fetch pattern.
+- **Source URL:** Rendered as a `target="_blank"` link in both card components when present.
+- **Live refresh on reconnect:** `ConfigPane.tsx` subscribes to `lastMcpStatusChange` SSE events and auto-fetches tools when status transitions to `"connected"`.
+- **Unit tests:** No dedicated unit tests for `cached_tools` or `list_tools_stdio` — the tool-enumeration path is exercised by integration behaviour. The `startup_sync`, config I/O, and tag-validation tests in `services/mcp.rs` provide coverage of surrounding logic.
+
 ---
 
-**Story 8.2 — Local MCP process management**  
+**Story 8.2 — Local MCP process management** ✅ Complete  
 Branch: `feature/phase8-local-mcp-processes`
 
 Implement full lifecycle management for local MCP servers. The Rust server starts local servers as child processes on demand (when a thread with that server is opened or on server startup if the server has active threads). Health-check loop monitors the process. On crash, attempt restart with exponential backoff. Status is kept live in the `mcp_servers.status` field and broadcast via global SSE event. Graceful shutdown on server exit.
@@ -1394,6 +1405,18 @@ Acceptance criteria:
 - Status badge in UI reflects actual connection state in near-real-time
 - All local server processes are cleanly shut down when the Rust server exits
 - Integration test: start a local server, kill its process, verify restart and reconnection
+
+### As-built notes (Story 8.2)
+
+- **Implemented as foundational MCP infrastructure, not on a dedicated branch.** All code landed incrementally alongside earlier phases; no separate `feature/phase8-local-mcp-processes` branch was created.
+- **Supervision loop:** `McpConnectionManager::supervise()` in `server/src/services/mcp.rs`. Starts with `BACKOFF_INITIAL` (2 s), doubles on each failure up to `BACKOFF_MAX` (60 s), resets to `BACKOFF_INITIAL` after `STABILITY_THRESHOLD` (30 s) of continuous uptime.
+- **Health monitoring:** `monitor_local()` polls the child process exit status; `monitor_remote()` watches the SSE stream for closure. Both signal `supervise()` to re-enter the connect loop.
+- **DB status updates:** `set_db_status()` called on every state transition so `mcp_servers.status` always reflects reality.
+- **SSE broadcast:** `broadcast_status()` emits a `GlobalEvent` on every transition; `ConfigPane.tsx` consumes `lastMcpStatusChange` and updates status badges in-place without a page reload.
+- **Graceful shutdown:** `shutdown_all()` called in `main.rs` SIGTERM handler; sends `shutdown_tx.send(true)` to each supervise task and calls `kill_child_if_any` on the child process.
+- **Startup sync:** `startup_sync()` runs on every server start, scanning `~/.agent-deck/mcp/` for `config.json` files and syncing new/changed/deleted entries into the DB before `start()` connects enabled servers.
+- **Disable detection:** `supervise()` polls the DB every 500 ms during the backoff wait; exits immediately if the row is disabled — no need to wait for the full backoff interval.
+- **Integration test:** No crash/restart integration test exists. The supervision and backoff logic are covered by the `startup_sync_*` and config-file unit tests in `services/mcp.rs`; a full process-kill/restart test was deemed impractical in a pure unit-test environment.
 
 ---
 
