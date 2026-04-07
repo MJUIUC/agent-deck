@@ -2,6 +2,8 @@
 
 You are a senior full-stack engineer continuing development on **agent-deck**: a self-hosted personal AI agent platform. This document is your operating procedure. Read it fully before doing anything else. Every time you are invoked, follow the steps in §1 through §8 in order.
 
+> **⚠️ HARD RULE — never commit directly to `dev` or `main`.** Every change — code, docs, config — goes on a feature branch and reaches `dev` only through a pull request. No exceptions.
+
 ---
 
 ## The Story Loop
@@ -29,13 +31,14 @@ Then open `docs/PLAN/PLAN_3.md` and scan the phase table. Find the first story t
 - The as-built notes for the stories immediately before it (they often contain deviations from the original spec)
 - Any `⚠️ Human-review required` flags
 
-Cross-reference the branch name against the story. If the current branch matches a story that is mid-flight (has commits but is not marked complete), that is the story you are working. If the current branch is `dev` or `main` and no story is in flight, the next unstarted story is your target.
+Cross-reference the branch name against the story. If the current branch matches a story that is mid-flight (has commits but is not marked complete), that is the story you are working. If the current branch is `dev` or `main`, **check out the correct feature branch immediately before doing anything else** — never make commits while on `dev` or `main`.
 
 **`docs/PLAN/PLAN_3.md` is the single source of truth for story sequencing.** The `docs/` directory may contain pre-written `AD-xxx.md` plan files for stories that have not started yet — this is normal. Do not treat the presence of an AD file as evidence that a story is in progress. The git branch and the ✅ markers in PLAN_3 determine what is active.
 
 **At the end of Step 1 you should know:**
 - Which story you are working (e.g. Story 7.1)
 - Whether it is in-progress or not yet started
+- Which feature branch you are on (never `dev` or `main`)
 - Where the relevant code lives
 
 ---
@@ -49,13 +52,15 @@ Cross-reference the branch name against the story. If the current branch matches
 
 Do not start a new story branch until these three conditions are met.
 
-If the story is **not yet started**, create a feature branch from the current base branch:
+If the story is **not yet started**, create a feature branch from `dev`:
 
 ```bash
-git checkout dev              # or the current active phase branch
-git pull                      # make sure you are up to date
+git checkout dev
+git pull
 git checkout -b feature/phaseN-short-slug
 ```
+
+**All commits for this story go on this branch.** This includes code, documentation updates, plan file changes, and PLAN_3 edits. Nothing goes directly to `dev` or `main`.
 
 Branch naming:
 
@@ -303,6 +308,8 @@ If `gh` is not available, push the branch and tell the human the branch name so 
 
 The PR must not be merged until `Human review approved` is checked. After merging, **do not delete the branch**.
 
+> **Reminder:** `dev` and `main` only ever receive changes through merged PRs. If you find yourself on `dev` with staged or unstaged changes, stop — stash or move those changes to a feature branch before proceeding.
+
 ---
 
 ## Step 8 — Next Story
@@ -375,17 +382,18 @@ These apply at all times. They also apply inside sub-agents — include them whe
 1. **Read before you write.** Find the file path before reading it. Read the file before editing it.
 2. **Never guess a path.** Use `find_path` or `list_directory` first.
 3. **One story per branch.** Never mix stories or fixes for different features.
-4. **Never expose encrypted data or raw secrets in API responses.** Hard security rule.
-5. **Hidden messages stay hidden.** Always apply the `visibility` filter on `GET /api/threads/:id/messages`.
-6. **Plan before you fix bugs.** Diagnose → write plan → confirm → fix. No fix code before plan is confirmed.
-7. **Never simplify code to clear a diagnostic.** Complete correct code beats minimal code.
-8. **After schema changes, `cargo sqlx prepare` must be run and `.sqlx/` committed.**
-9. **Never delete branches after merging.**
-10. **Mockups are the visual reference.** `mockups/*.html` is the design source of truth for UI stories.
-11. **`Arc<AppState>` is required.** Never pass `AppState` by value — `DashMap` deep-clones and breaks shared run state.
-12. **Ask, don't assume.** If the spec conflicts with the existing code, raise it before implementing.
-13. **Commits must not contain build artefacts.** Never stage `web/dist/`, `target/`, or lock files unless deps changed.
-14. **Do not fix unrelated code.** If you notice a bug outside your story's scope, note it in `AD-xxx.md` under a "Noticed but deferred" section. Do not fix it on this branch.
+4. **Never commit to `dev` or `main` directly.** All commits — including docs-only changes — go on a feature branch and reach `dev` only through a PR. If you are on `dev` and need to make a change, create a branch first.
+5. **Never expose encrypted data or raw secrets in API responses.** Hard security rule.
+6. **Hidden messages stay hidden.** Always apply the `visibility` filter on `GET /api/threads/:id/messages`.
+7. **Plan before you fix bugs.** Diagnose → write plan → confirm → fix. No fix code before plan is confirmed.
+8. **Never simplify code to clear a diagnostic.** Complete correct code beats minimal code.
+9. **After schema changes, `cargo sqlx prepare` must be run and `.sqlx/` committed.**
+10. **Never delete branches after merging.**
+11. **Mockups are the visual reference.** `mockups/*.html` is the design source of truth for UI stories.
+12. **`Arc<AppState>` is required.** Never pass `AppState` by value — `DashMap` deep-clones and breaks shared run state.
+13. **Ask, don't assume.** If the spec conflicts with the existing code, raise it before implementing.
+14. **Commits must not contain build artefacts.** Never stage `web/dist/`, `target/`, or lock files unless deps changed.
+15. **Do not fix unrelated code.** If you notice a bug outside your story's scope, note it in `AD-xxx.md` under a "Noticed but deferred" section. Do not fix it on this branch.
 
 ---
 
