@@ -497,6 +497,7 @@ async fn run_inner(
     }
 
     let mut assembled = context::assemble(AssemblyInput {
+        persona_emoji: Some(persona.emoji.clone()),
         persona_system_prompt: persona.system_prompt.clone(),
         thread_addendum: thread.system_prompt_addendum.clone(),
         user_profile_context: user_profile_context.clone(),
@@ -603,6 +604,7 @@ async fn run_inner(
                     .collect();
 
                 assembled = context::assemble(context::AssemblyInput {
+                    persona_emoji: Some(persona.emoji.clone()),
                     persona_system_prompt: persona.system_prompt.clone(),
                     thread_addendum: updated.system_prompt_addendum.clone(),
                     user_profile_context: user_profile_context.clone(),

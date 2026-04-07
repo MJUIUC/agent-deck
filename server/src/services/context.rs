@@ -68,6 +68,8 @@ pub struct HistoryMessage {
 /// All inputs required to assemble a context window.
 #[derive(Debug)]
 pub struct AssemblyInput {
+    /// Optional emoji for the persona, prepended to the system message when present.
+    pub persona_emoji: Option<String>,
     /// The persona's custom system prompt.
     pub persona_system_prompt: String,
     /// Optional per-thread addendum (thread.system_prompt_addendum).
@@ -137,14 +139,19 @@ pub fn assemble(input: AssemblyInput) -> AssembledContext {
     // We combine these into a single system message so the persona's voice
     // is not interrupted by a second system turn.  The memory instructions
     // are always appended — they are not user-editable.
+    //
+    // When a persona emoji is present it is prepended to the prompt so the
+    // model is aware of its identity symbol (e.g. "🧙🏿‍♂️\n\nYou are Aldous…").
+    let persona_base = match &input.persona_emoji {
+        Some(emoji) if !emoji.trim().is_empty() => {
+            format!("{}\n\n{}", emoji.trim(), input.persona_system_prompt.trim())
+        }
+        _ => input.persona_system_prompt.trim().to_string(),
+    };
     let system_content = if input.include_memory {
-        format!(
-            "{}{}",
-            input.persona_system_prompt.trim(),
-            MEMORY_INSTRUCTIONS
-        )
+        format!("{}{}", persona_base, MEMORY_INSTRUCTIONS)
     } else {
-        input.persona_system_prompt.trim().to_string()
+        persona_base
     };
 
     messages.push(
@@ -184,17 +191,48 @@ pub fn assemble(input: AssemblyInput) -> AssembledContext {
     }
 
     // ── 2.5. System message: conversation summary (optional) ──────────────────
+    //
+    // When a summary window has lapsed we inject a rich context block that
+    // re-anchors the model with (a) who it is, (b) who the user is, and
+    // (c) what was discussed.  This ensures persona identity and user details
+    // are never lost across summarisation boundaries.
     if let Some(ref summary) = input.conversation_summary {
         let trimmed = summary.trim();
         if !trimmed.is_empty() {
+            let mut ctx_block = String::new();
+
+            ctx_block.push_str("## Conversation Context\n\n");
+
+            // (a) Persona identity — re-inject the persona system prompt so the
+            //     model always knows who it is after a window lapse.
+            let persona_prompt = input.persona_system_prompt.trim();
+            if !persona_prompt.is_empty() {
+                ctx_block.push_str("### Your Persona\n\n");
+                ctx_block.push_str(persona_prompt);
+                ctx_block.push_str("\n\n");
+            }
+
+            // (b) User profile — include a condensed user block when available
+            //     (mirrors the profile context already assembled by the caller).
+            if let Some(ref profile) = input.user_profile_context {
+                let profile_trimmed = profile.trim();
+                if !profile_trimmed.is_empty() {
+                    ctx_block.push_str(profile_trimmed);
+                    ctx_block.push_str("\n\n");
+                }
+            }
+
+            // (c) Rolling conversation summary.
+            ctx_block.push_str("### Conversation Summary\n\n");
+            ctx_block.push_str(
+                "The following is a summary of the conversation history up to this point. \
+                 The most recent messages follow below.\n\n",
+            );
+            ctx_block.push_str(trimmed);
+
             messages.push(
                 ChatCompletionRequestSystemMessageArgs::default()
-                    .content(format!(
-                        "## Conversation Summary\n\n\
-                         The following is a summary of the conversation history up to this point. \
-                         The most recent messages follow below.\n\n{}",
-                        trimmed
-                    ))
+                    .content(ctx_block)
                     .build()
                     .expect("summary message build")
                     .into(),
@@ -420,6 +458,7 @@ mod tests {
 
     fn basic_input(user_message: &str) -> AssemblyInput {
         AssemblyInput {
+            persona_emoji: None,
             persona_system_prompt: "You are a helpful assistant.".to_string(),
             thread_addendum: None,
             user_profile_context: None,
@@ -475,6 +514,7 @@ mod tests {
     #[test]
     fn persona_system_prompt_is_first_content() {
         let input = AssemblyInput {
+            persona_emoji: None,
             persona_system_prompt: "You are Jarvis.".to_string(),
             ..basic_input("hi")
         };
@@ -489,6 +529,7 @@ mod tests {
     #[test]
     fn memory_instructions_appended_after_persona_prompt() {
         let input = AssemblyInput {
+            persona_emoji: None,
             persona_system_prompt: "You are Jarvis.".to_string(),
             ..basic_input("hi")
         };
@@ -769,6 +810,7 @@ mod tests {
     #[test]
     fn empty_persona_prompt_still_includes_memory_instructions() {
         let input = AssemblyInput {
+            persona_emoji: None,
             persona_system_prompt: String::new(),
             ..basic_input("hi")
         };
@@ -836,6 +878,7 @@ mod tests {
     #[test]
     fn full_assembly_with_all_components() {
         let input = AssemblyInput {
+            persona_emoji: None,
             persona_system_prompt: "You are a coding assistant.".to_string(),
             thread_addendum: Some("Only answer Rust questions.".to_string()),
             user_profile_context: None,
@@ -885,6 +928,7 @@ mod tests {
     #[test]
     fn memory_excluded_for_default_persona() {
         let input = AssemblyInput {
+            persona_emoji: None,
             persona_system_prompt: "You are helpful.".to_string(),
             thread_addendum: None,
             user_profile_context: None,
@@ -935,6 +979,7 @@ mod tests {
             },
         };
         let input = AssemblyInput {
+            persona_emoji: None,
             persona_system_prompt: "".to_string(),
             thread_addendum: None,
             user_profile_context: None,
@@ -1128,4 +1173,151 @@ mod tests {
         assert!(is_assistant(&ctx.messages[2]));
         assert_eq!(assistant_content(&ctx.messages[2]).unwrap(), "a1\n\na2");
     }
+    // ── Enriched summary block content ───────────────────────────────────────
+
+    #[test]
+    fn summary_block_includes_persona_identity() {
+        let mut input = basic_input("hello");
+        input.persona_system_prompt = "You are Aldous, a wizard turned engineer.".to_string();
+        input.conversation_summary = Some("We built a Tavily MCP server.".to_string());
+
+        let ctx = assemble(input);
+        let summary_msg = ctx
+            .messages
+            .iter()
+            .find_map(|m| {
+                let c = system_content(m)?;
+                if c.contains("Conversation Context") {
+                    Some(c)
+                } else {
+                    None
+                }
+            })
+            .expect("should have a Conversation Context system message");
+
+        assert!(summary_msg.contains("Your Persona"), "should include persona section");
+        assert!(
+            summary_msg.contains("You are Aldous"),
+            "should include persona system prompt"
+        );
+        assert!(
+            summary_msg.contains("Conversation Summary"),
+            "should include summary section"
+        );
+        assert!(
+            summary_msg.contains("We built a Tavily MCP server."),
+            "should include summary text"
+        );
+    }
+
+    #[test]
+    fn summary_block_includes_user_profile_when_present() {
+        let mut input = basic_input("hello");
+        input.conversation_summary = Some("Previous chats happened.".to_string());
+        input.user_profile_context =
+            Some("## About the User\n\nName: Marcus\nLocation: Fairview, CA".to_string());
+
+        let ctx = assemble(input);
+        let summary_msg = ctx
+            .messages
+            .iter()
+            .find_map(|m| {
+                let c = system_content(m)?;
+                if c.contains("Conversation Context") {
+                    Some(c)
+                } else {
+                    None
+                }
+            })
+            .expect("should have a Conversation Context system message");
+
+        assert!(summary_msg.contains("About the User"), "should include user profile");
+        assert!(summary_msg.contains("Marcus"), "should include user name");
+    }
+
+    #[test]
+    fn summary_block_omits_user_profile_when_absent() {
+        let mut input = basic_input("hello");
+        input.conversation_summary = Some("Some summary.".to_string());
+        input.user_profile_context = None;
+
+        let ctx = assemble(input);
+        let summary_msg = ctx
+            .messages
+            .iter()
+            .find_map(|m| {
+                let c = system_content(m)?;
+                if c.contains("Conversation Context") {
+                    Some(c)
+                } else {
+                    None
+                }
+            })
+            .expect("should have a Conversation Context system message");
+
+        assert!(
+            !summary_msg.contains("About the User"),
+            "profile should be absent when not provided"
+        );
+        assert!(
+            summary_msg.contains("Conversation Summary"),
+            "summary section should still be present"
+        );
+    }
+
+    // ── Persona emoji ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn persona_emoji_prepended_to_system_prompt() {
+        let input = AssemblyInput {
+            persona_emoji: Some("🧙🏿\u{200d}♂️".to_string()),
+            persona_system_prompt: "You are Aldous.".to_string(),
+            ..basic_input("hi")
+        };
+        let ctx = assemble(input);
+        let content = system_content(&ctx.messages[0]).unwrap();
+        assert!(
+            content.starts_with("🧙🏿\u{200d}♂️"),
+            "emoji must be at the very start of the system message"
+        );
+        assert!(
+            content.contains("You are Aldous."),
+            "persona prompt must still be present after the emoji"
+        );
+        let emoji_pos = content.find("🧙🏿").unwrap();
+        let prompt_pos = content.find("You are Aldous.").unwrap();
+        assert!(prompt_pos > emoji_pos, "persona prompt must come after the emoji");
+    }
+
+    #[test]
+    fn no_emoji_system_prompt_unchanged() {
+        let input = AssemblyInput {
+            persona_emoji: None,
+            persona_system_prompt: "You are Aldous.".to_string(),
+            ..basic_input("hi")
+        };
+        let ctx = assemble(input);
+        let content = system_content(&ctx.messages[0]).unwrap();
+        assert!(
+            content.starts_with("You are Aldous."),
+            "without emoji the system message should start with the persona prompt"
+        );
+    }
+
+    #[test]
+    fn empty_emoji_treated_as_absent() {
+        let input = AssemblyInput {
+            persona_emoji: Some("   ".to_string()),
+            persona_system_prompt: "You are Aldous.".to_string(),
+            ..basic_input("hi")
+        };
+        let ctx = assemble(input);
+        let content = system_content(&ctx.messages[0]).unwrap();
+        assert!(
+            content.starts_with("You are Aldous."),
+            "whitespace-only emoji must be ignored"
+        );
+    }
+
+
 }
