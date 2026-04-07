@@ -68,7 +68,7 @@ function TreeEntry({
       </div>
       {node.kind === "dir" && node.isExpanded && node.childPaths && (
         <div>
-          {node.childPaths.map(childPath => (
+          {node.childPaths.map((childPath) => (
             <TreeEntry
               key={childPath}
               path={childPath}
@@ -148,9 +148,7 @@ function PreviewPane({ data, loading, error, onRetry }: PreviewPaneProps) {
     );
   }
   if (!data) {
-    return (
-      <div className={styles.previewEmpty}>Select a file to preview</div>
-    );
+    return <div className={styles.previewEmpty}>Select a file to preview</div>;
   }
   if (!data.previewable) {
     return (
@@ -237,7 +235,7 @@ export function FileExplorerModal({
   const loadDir = useCallback(async (path: string): Promise<string[]> => {
     const res = await fsApi.list(path);
     const entries = res.data.entries;
-    setNodes(prev => {
+    setNodes((prev) => {
       const next = { ...prev };
       for (const entry of entries) {
         next[entry.path] = {
@@ -253,13 +251,13 @@ export function FileExplorerModal({
       if (next[path]) {
         next[path] = {
           ...next[path],
-          childPaths: entries.map(e => e.path),
+          childPaths: entries.map((e) => e.path),
           isLoading: false,
         };
       }
       return next;
     });
-    return entries.map(e => e.path);
+    return entries.map((e) => e.path);
   }, []);
 
   const handleSelectFile = useCallback(async (path: string) => {
@@ -283,31 +281,31 @@ export function FileExplorerModal({
       const node = nodes[path];
       if (!node || node.kind !== "dir") return;
       if (node.isExpanded) {
-        setNodes(prev => ({
+        setNodes((prev) => ({
           ...prev,
           [path]: { ...prev[path], isExpanded: false },
         }));
         return;
       }
       if (node.childPaths === null) {
-        setNodes(prev => ({
+        setNodes((prev) => ({
           ...prev,
           [path]: { ...prev[path], isLoading: true },
         }));
         try {
           await loadDir(path);
-          setNodes(prev => ({
+          setNodes((prev) => ({
             ...prev,
             [path]: { ...prev[path], isExpanded: true, isLoading: false },
           }));
         } catch {
-          setNodes(prev => ({
+          setNodes((prev) => ({
             ...prev,
             [path]: { ...prev[path], isLoading: false },
           }));
         }
       } else {
-        setNodes(prev => ({
+        setNodes((prev) => ({
           ...prev,
           [path]: { ...prev[path], isExpanded: true },
         }));
@@ -335,7 +333,7 @@ export function FileExplorerModal({
       });
       setRootEntries([]);
       loadDir(newPath)
-        .then(paths => {
+        .then((paths) => {
           setRootEntries(paths);
         })
         .catch(() => {});
@@ -371,7 +369,7 @@ export function FileExplorerModal({
     setRootEntries([]);
 
     loadDir(rootDir)
-      .then(paths => {
+      .then((paths) => {
         setRootEntries(paths);
         if (isFile) {
           void handleSelectFile(initialPath);
@@ -388,8 +386,8 @@ export function FileExplorerModal({
   return (
     <div
       className={styles.overlay}
-      onClick={e => {
-        if (e.target === e.currentTarget) onClose();
+      onClick={(e) => {
+        if (!isMobile && e.target === e.currentTarget) onClose();
       }}
     >
       <div
@@ -423,7 +421,7 @@ export function FileExplorerModal({
             <div className={styles.treePanel}>
               <Breadcrumb path={rootPath} onNavigate={navigateToDir} />
               <div className={styles.treeScroll}>
-                {rootEntries.map(path => (
+                {rootEntries.map((path) => (
                   <TreeEntry
                     key={path}
                     path={path}
