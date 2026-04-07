@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, type ReactNode } from "react";
 import remarkBreaks from "remark-breaks";
 import { MagicWandFilled } from "@carbon/icons-react";
 import ReactMarkdown from "react-markdown";
@@ -30,6 +30,19 @@ export function AgentAvatar({
       className={`${styles.avatar} ${styles.avatarAgent} ${className ?? ""}`}
     >
       {emoji}
+    </div>
+  );
+}
+
+function ScrollableTable({
+  children,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  node: _node,
+  ...props
+}: React.HTMLAttributes<HTMLTableElement> & { node?: unknown }) {
+  return (
+    <div className={styles.tableWrapper}>
+      <table {...props}>{children as ReactNode}</table>
     </div>
   );
 }
@@ -130,7 +143,7 @@ export function MessageBubble({
             <div className={styles.markdown}>
               <ReactMarkdown
                 remarkPlugins={[remarkGfm, remarkBreaks]}
-                components={{ pre: CodeBlock }}
+                components={{ pre: CodeBlock, table: ScrollableTable }}
               >
                 {message.content}
               </ReactMarkdown>
@@ -168,7 +181,7 @@ export function StreamingBubble({
             <div className={styles.markdown}>
               <ReactMarkdown
                 remarkPlugins={[remarkGfm, remarkBreaks]}
-                components={{ pre: CodeBlock }}
+                components={{ pre: CodeBlock, table: ScrollableTable }}
               >
                 {content}
               </ReactMarkdown>
