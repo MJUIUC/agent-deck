@@ -1,4 +1,4 @@
-# AD-8.3 — Mobile Settings Parity + Per-Thread MCP
+# AD-8.3 — Mobile Settings Parity
 
 **Story:** 8.3 — Mobile Settings Parity  
 **Branch:** `feature/phase8-mobile-settings`  
@@ -8,7 +8,7 @@
 
 ## Summary
 
-The mobile app currently only lets users chat and toggle routines on/off. Because agent-deck is designed to run on headless computers, the phone is often the only available admin interface. This story expands `MobileSettings.tsx` with four new global-configuration sections — Providers, Credentials, MCP Servers, and Personas — bringing mobile settings to functional parity with the desktop sidebar. It also adds per-thread MCP attach/detach to `MobileConfigSheet.tsx`, which is the only way to attach tools to a thread on mobile. All work uses the existing API layer and types without modification; the work is entirely in the web layer.
+The mobile app currently only lets users chat and toggle routines on/off. Because agent-deck is designed to run on headless computers, the phone is often the only available admin interface. This story expands `MobileSettings.tsx` with four new global-configuration sections — Providers, Credentials, MCP Servers, and Personas — bringing mobile settings to functional parity with the desktop sidebar. All four sections use the existing API layer and types without modification; the work is entirely in the web layer.
 
 ---
 
@@ -17,7 +17,7 @@ The mobile app currently only lets users chat and toggle routines on/off. Becaus
 ### Mobile files
 
 - `web/src/layouts/mobile/MobileSettings.tsx` — currently contains only "Install as App" instructions and a push-notification toggle. No provider, credential, MCP, or persona management.
-- `web/src/layouts/mobile/MobileConfigSheet.tsx` — per-thread config (persona picker, model picker, routine toggles). **Extended by Task 6 of this story** to add MCP attach/detach.
+- `web/src/layouts/mobile/MobileConfigSheet.tsx` — per-thread config (persona picker, model picker, routine toggles). **Not touched by this story.**
 - `web/src/layouts/MobileLayout.tsx` — two-tab layout (Threads + Settings tab renders `MobileSettings`).
 - `web/src/layouts/mobile/MobileSettings.module.css` — existing styles for the settings screen.
 
@@ -201,70 +201,16 @@ const [editingPersona, setEditingPersona] = useState<AgentPersona | null>(null);
 
 ---
 
----
-
-### Task 6 — Per-thread MCP attach/detach
-**File:** `web/src/layouts/mobile/MobileConfigSheet.tsx`
-
-This is the mobile equivalent of the MCP section in the desktop `ConfigPane`. It lets the user attach and detach MCP servers for the current thread directly from the per-thread config sheet.
-
-**State**
-```
-const [attachedEntries, setAttachedEntries] = useState<ThreadMcpEntry[]>([]);
-const [mcpServersMap, setMcpServersMap] = useState<Record<string, McpServer>>({});
-const [mcpLoading, setMcpLoading] = useState(false);
-const [showMcpPicker, setShowMcpPicker] = useState(false);
-```
-
-Where `ThreadMcpEntry` matches the shape already used in `ConfigPane`:
-```
-interface ThreadMcpEntry {
-  id: string;
-  thread_id: string;
-  mcp_server_id: string;
-  enabled: boolean;
-}
-```
-
-**On sheet open** — fetch in parallel:
-- `threadsApi.listMcpServers(thread.id)` → populate `attachedEntries`
-- `mcpServersApi.list()` → populate `mcpServersMap` (keyed by id)
-
-**Live status updates** — subscribe to `lastMcpStatusChange` from `useSseStore`. On each event, update the matching server's `status` in `mcpServersMap` in place, matching the pattern already used in `ConfigPane`.
-
-**Section rendering** — a new "Tools" section in the sheet, below Routines:
-- One row per attached server showing a `.statusDot` (reuse class from `MobileSettings.module.css`), the server name, and a detach button (×)
-- Tapping detach calls `threadsApi.detachMcpServer(thread.id, mcpServerId)`, then removes the entry from `attachedEntries`; also calls `threadsApi.notify(thread.id, "mcp_server_detached", { name })` (silently degrade on failure)
-- An "+ Attach Server" row at the bottom of the section that sets `showMcpPicker = true`
-
-**Attach picker** — rendered as a `<PickerDrawer>` (reuse the existing component in the file) with the title "Attach MCP Server":
-- List only servers that are not already attached (filter `mcpServersMap` values against `attachedEntries`)
-- Each row shows the status dot and server name
-- Tapping a row calls `threadsApi.attachMcpServer(thread.id, server.id)`, appends the returned entry to `attachedEntries`, updates `mcpServersMap`, and closes the picker; also calls `threadsApi.notify(thread.id, "mcp_server_attached", { name })` (silently degrade on failure)
-- If all servers are already attached, show a "All available servers are attached" empty state
-
-**No tool inspector** — tool enumeration is out of scope for this sheet; that remains desktop-only in `ConfigPane`.
-
----
-
 ### Parallelisation note
 
-Tasks 1–4 all write to `MobileSettings.tsx` and must be done sequentially to avoid merge conflicts. Task 5 (CSS) is independent and should be written as a skeleton before Task 1 begins, then extended as needed alongside each subsequent task. Task 6 writes only to `MobileConfigSheet.tsx` and `MobileSettings.module.css` (for the `.statusDot` classes, which Task 3 will already have added) and can be done in parallel with Tasks 1–4 once Task 5's CSS skeleton is in place. The recommended order is:
+Tasks 1–4 all write to `MobileSettings.tsx` and must be done sequentially to avoid merge conflicts. Task 5 (CSS) is independent and should be written as a skeleton before Task 1 begins, then extended as needed alongside each subsequent task. The recommended order is:
 
 **T5 skeleton → T1 → T2 → T3 → T4 → T5 fill-in**
-**T6 can run in parallel with T1–T4 after T5 skeleton is written**
 
 ---
 
 ## Acceptance Criteria
 
-- [ ] Per-thread MCP section renders in `MobileConfigSheet` below the Routines section
-- [ ] Per-thread MCP: lists currently attached servers with status dot and server name
-- [ ] Per-thread MCP: status dots update in near-real-time via `lastMcpStatusChange` SSE events
-- [ ] Per-thread MCP: tapping × detaches the server, calls `DELETE /api/threads/:id/mcp-servers/:mcpServerId`, and removes the row
-- [ ] Per-thread MCP: "+ Attach Server" opens a picker showing only unattached servers
-- [ ] Per-thread MCP: selecting a server from the picker attaches it, calls `POST /api/threads/:id/mcp-servers`, and adds the row
-- [ ] Per-thread MCP: picker shows an empty state when all available servers are already attached
 - [ ] Providers section renders in `MobileSettings` below the existing "Install as App" and "Notifications" sections
 - [ ] Providers: list shows all configured providers with name, base URL, and enabled toggle
 - [ ] Providers: toggling enabled calls `PUT /api/providers/:id` and the UI reflects the updated state
@@ -296,7 +242,6 @@ Tasks 1–4 all write to `MobileSettings.tsx` and must be done sequentially to a
 - [ ] All drawers are full-screen slide-up overlays consistent with the existing `MobileConfigSheet` visual style
 - [ ] All drawers include a sticky header with title and close button, a scrollable body, and a sticky footer with the primary action
 - [ ] No desktop-only features are included: no env-var editor, no tool inspector, no Copilot device-auth flow
-- [ ] Per-thread MCP attach/detach calls `threadsApi.notify` for both attach and detach events (silently degrades on failure)
 
 ---
 
