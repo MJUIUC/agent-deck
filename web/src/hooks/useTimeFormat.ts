@@ -39,13 +39,39 @@ export function formatThreadTime(isoString: string): string {
 }
 
 /**
- * Format a message timestamp for display in the chat view.
- * Returns e.g. "Aldous · 10:32 AM"
+ * Format a message timestamp for display under a message bubble.
+ * - Today     → "6:45 PM"
+ * - Yesterday → "Yesterday · 6:45 PM"
+ * - Older     → "Dec 15 · 6:45 PM"
  */
 export function formatMessageTime(isoString: string): string {
   const date = new Date(isoString);
   if (isNaN(date.getTime())) return "";
-  return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+
+  const timeStr = date.toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
+  const now = new Date();
+  const startOfToday = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+  );
+  const startOfYesterday = new Date(startOfToday.getTime() - 86_400_000);
+
+  if (date >= startOfToday) {
+    return timeStr;
+  } else if (date >= startOfYesterday) {
+    return `Yesterday · ${timeStr}`;
+  } else {
+    const dateStr = date.toLocaleDateString([], {
+      month: "short",
+      day: "numeric",
+    });
+    return `${dateStr} · ${timeStr}`;
+  }
 }
 
 /**
