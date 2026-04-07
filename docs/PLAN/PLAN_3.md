@@ -1397,6 +1397,22 @@ Acceptance criteria:
 
 ---
 
+**Story 8.3 — Mobile settings parity**  
+Branch: `feature/phase8-mobile-settings`
+
+The mobile app currently only lets users chat and toggle routines on/off. Since agent-deck is designed to run on headless computers, the phone is often the only admin interface. This story expands `MobileSettings.tsx` with four new global-config sections: Providers, Credentials, MCP Servers, and Personas — bringing mobile settings to functional parity with the desktop sidebar.
+
+Acceptance criteria:
+- Providers section: list with enable/disable toggle per row, add new (name, kind, base URL, API key), delete with confirmation
+- Credentials section: list (key, display_name, service), add new (key, display_name, service, credential_type, secret), delete with confirmation; no secret displayed after creation
+- MCP Servers section: list with live status dots driven by `lastMcpStatusChange` SSE events, enable/disable toggle, add new (name, type, key fields for local/remote), delete with confirmation
+- Personas section: list with emoji and name, tap to edit (name, emoji, system_prompt), add new, delete with confirmation; default persona delete is disabled
+- All four sections appear below the existing "Install as App" and "Notifications" sections in `MobileSettings.tsx`
+- Forms use slide-up full-screen drawers consistent with the existing `MobileConfigSheet` visual style
+- No desktop-only features (env-var editor, tool inspector, Copilot device auth) are required on mobile
+
+---
+
 ---
 
 ### Phase 8.5 — Tailscale Platform Layer + Webhook Integration
@@ -1453,10 +1469,31 @@ Implement cursor-based pagination on `GET /api/threads/:id/messages`. In the web
 
 ---
 
-**Story 9.4 — Setup and README**  
-Branch: `feature/phase9-docs`
+**Story 9.4 — macOS distribution**  
+Branch: `feature/phase9-distribution`
 
-Write a comprehensive README covering: what agent-deck is, prerequisites, installation steps (including `git submodule init` for copilot-api), first-run setup, PWA installation on Android and iOS, push notification setup, and how to add providers. Document the Tailscale setup.
+Package agent-deck as a proper macOS release — a Homebrew formula (primary) and a DMG (secondary) — so users can install with `brew install` and have the server start automatically on login via `brew services`. A GitHub Actions workflow produces release artifacts on tag push.
+
+Acceptance criteria:
+- `release.yml` workflow triggers on `v*` tag push and produces two tarballs (`agent-deck-macos-aarch64.tar.gz` and `agent-deck-macos-x86_64.tar.gz`), each containing the `agent-deck` binary and `public/` directory, with SHA256s in the release body
+- `brew tap <owner>/agent-deck && brew install agent-deck && brew services start agent-deck` results in the server running at `http://localhost:7474`
+- `scripts/build-dmg.sh` runs to completion on a macOS machine with Xcode CLI tools and produces a `.dmg` in `build/`
+- `scripts/com.agent-deck.server.plist` correctly starts the server on login when loaded via `launchctl`
+
+---
+
+**Story 9.5 — Setup wizard polish and documentation**  
+Branch: `feature/phase9-wizard-polish`
+
+Fix the critical gap in the setup wizard's Done step — it must tell new users how to connect from other devices. Surface the auth token, local URL, Tailscale URL (when available), and a QR code for one-tap mobile login. Write the project README.
+
+Acceptance criteria:
+- `POST /api/setup/complete` response body includes the auth token
+- `GET /api/setup/connect-info` returns `{ local_url, tailscale_url, token_shown }` — `token` field included only when `token_shown` is `false`; `POST /api/setup/connect-info/mark-shown` sets `token_shown = true`
+- `local_url` reflects the machine's non-loopback IP address
+- Done step displays a "Connect from another device" panel with: local URL (+ Tailscale URL if available), masked+copyable token, QR code encoding `<local_url>?token=<token>`, and a prominent "Save this token — it won't be shown again" warning
+- Token is held in component state only — never written to `localStorage` or `sessionStorage`
+- README covers: what agent-deck is, Homebrew install, build-from-source install, first-run wizard, connecting from mobile (QR + manual), Tailscale setup, PWA installation on iOS and Android, push notifications, adding providers/MCP servers/credentials
 
 ---
 
