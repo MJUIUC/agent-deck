@@ -177,7 +177,8 @@ export function MobileChatView({
   const showFallbackProcessing =
     !isStreaming &&
     lastProcessingRounds !== null &&
-    lastProcessingRounds.length > 0;
+    lastProcessingRounds.length > 0 &&
+    !processedItems.some((item) => item.type === "tool_group");
 
   const personaEmoji = thread?.persona?.emoji ?? "🤖";
   const personaName = thread?.persona?.name ?? "Agent";

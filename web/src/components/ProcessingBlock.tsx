@@ -20,7 +20,7 @@ export function ProcessingBlock({
   rounds,
   streaming = false,
 }: ProcessingBlockProps) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
 
   const anyRoundInProgress = rounds.some((r) => r.status === "in_progress");
   // Keep the spinner active while the parent streaming phase is still live
