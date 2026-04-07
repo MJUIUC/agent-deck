@@ -595,63 +595,6 @@ export function MobileSettings() {
 
       {/* ── Scrollable body ── */}
       <div className={`${styles.body} scrollbar-thin`}>
-        {/* ── Theme ── */}
-        <section className={styles.section}>
-          <div className={styles.sectionLabel}>Theme</div>
-          <div className={styles.sectionCard}>
-            {/* Palette swatches row */}
-            <div className={styles.row}>
-              <div className={styles.rowTitle}>Palette</div>
-              <div className={styles.paletteGrid}>
-                {PALETTES.map((p) => {
-                  const selected = palette === p.id;
-                  return (
-                    <button
-                      key={p.id}
-                      type="button"
-                      className={[
-                        styles.paletteSwatch,
-                        selected ? styles.paletteSwatchActive : "",
-                      ].join(" ")}
-                      style={
-                        { "--swatch-color": p.accent } as React.CSSProperties
-                      }
-                      onClick={() => setPalette(p.id)}
-                      aria-label={p.label}
-                      aria-pressed={selected}
-                      title={p.label}
-                    >
-                      <span className={styles.paletteSwatchDot} />
-                      <span className={styles.paletteSwatchLabel}>
-                        {p.label}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            {/* Appearance mode */}
-            <div className={styles.row}>
-              <div className={styles.rowTitle}>Appearance</div>
-              <div className={styles.modeSegmented}>
-                {(["system", "light", "dark"] as Mode[]).map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    className={[
-                      styles.modeBtn,
-                      mode === m ? styles.modeBtnActive : "",
-                    ].join(" ")}
-                    onClick={() => setMode(m)}
-                  >
-                    {m.charAt(0).toUpperCase() + m.slice(1)}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        </section>
-
         {/* ── Install as App ── */}
         <section className={styles.section}>
           <div className={styles.sectionLabel}>Install as App</div>
@@ -945,6 +888,63 @@ export function MobileSettings() {
             >
               + Add Persona
             </button>
+          </div>
+        </section>
+
+        {/* ── Theme ── */}
+        <section className={styles.section}>
+          <div className={styles.sectionLabel}>Theme</div>
+          <div className={styles.sectionCard}>
+            {/* Palette swatches row */}
+            <div className={styles.row}>
+              <div className={styles.rowTitle}>Palette</div>
+              <div className={styles.paletteGrid}>
+                {PALETTES.map((p) => {
+                  const selected = palette === p.id;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      className={[
+                        styles.paletteSwatch,
+                        selected ? styles.paletteSwatchActive : "",
+                      ].join(" ")}
+                      style={
+                        { "--swatch-color": p.accent } as React.CSSProperties
+                      }
+                      onClick={() => setPalette(p.id)}
+                      aria-label={p.label}
+                      aria-pressed={selected}
+                      title={p.label}
+                    >
+                      <span className={styles.paletteSwatchDot} />
+                      <span className={styles.paletteSwatchLabel}>
+                        {p.label}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            {/* Appearance mode */}
+            <div className={styles.row}>
+              <div className={styles.rowTitle}>Appearance</div>
+              <div className={styles.modeSegmented}>
+                {(["system", "light", "dark"] as Mode[]).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    className={[
+                      styles.modeBtn,
+                      mode === m ? styles.modeBtnActive : "",
+                    ].join(" ")}
+                    onClick={() => setMode(m)}
+                  >
+                    {m.charAt(0).toUpperCase() + m.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         </section>
       </div>
