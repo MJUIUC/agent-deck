@@ -164,6 +164,15 @@ export function MobileChatView({
 
   const visibleMessages = messages.filter((m) => m.visibility === "visible");
 
+  const lastProcessingRounds = useMessageStore(
+    (s) => s.threads[threadId ?? ""]?.lastProcessingRounds ?? null,
+  );
+
+  const showFallbackProcessing =
+    !isStreaming &&
+    lastProcessingRounds !== null &&
+    lastProcessingRounds.length > 0;
+
   const personaEmoji = thread?.persona?.emoji ?? "🤖";
   const personaName = thread?.persona?.name ?? "Agent";
 
@@ -455,12 +464,22 @@ export function MobileChatView({
                       rounds={entry.rounds}
                       personaEmoji={personaEmoji}
                       personaName={personaName}
+                      streaming={isLast}
                     />
                   );
                 }
 
                 return null;
               })}
+
+            {showFallbackProcessing && (
+              <ProcessingBubble
+                key="fallback-processing"
+                rounds={lastProcessingRounds!}
+                personaEmoji={personaEmoji}
+                personaName={personaName}
+              />
+            )}
           </>
         )}
 
