@@ -494,12 +494,6 @@ export function ConfigPane({
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
   const [isArchiving, setIsArchiving] = useState(false);
 
-  // ── Tool activity ──
-  const [showToolActivity, setShowToolActivity] = useState(
-    thread.show_tool_activity ?? false,
-  );
-  const [isSavingToolActivity, setIsSavingToolActivity] = useState(false);
-
   // ── System events ──
   const [showSystemEvents, setShowSystemEvents] = useState(
     thread.show_system_events ?? false,
@@ -555,7 +549,6 @@ export function ConfigPane({
   // Sync local state when thread prop changes (different thread selected)
   useEffect(() => {
     setAddendum(thread.system_prompt_addendum ?? "");
-    setShowToolActivity(thread.show_tool_activity ?? false);
     setShowSystemEvents(thread.show_system_events ?? false);
     setAutoSummarize(thread.auto_summarize ?? true);
     setShowAttachPicker(false);
@@ -574,7 +567,6 @@ export function ConfigPane({
   }, [
     thread.id,
     thread.system_prompt_addendum,
-    thread.show_tool_activity,
     thread.show_system_events,
     thread.auto_summarize,
   ]);
@@ -726,21 +718,6 @@ export function ConfigPane({
       setAddendum(thread.system_prompt_addendum ?? "");
     } finally {
       setIsSavingAddendum(false);
-    }
-  };
-
-  const handleToolActivityChange = async (value: boolean) => {
-    setShowToolActivity(value);
-    setIsSavingToolActivity(true);
-    try {
-      const res = await threadsApi.update(thread.id, {
-        show_tool_activity: value,
-      });
-      onThreadUpdated(res.data);
-    } catch {
-      setShowToolActivity(!value);
-    } finally {
-      setIsSavingToolActivity(false);
     }
   };
 
@@ -1350,23 +1327,6 @@ export function ConfigPane({
                     <div className={styles.advancedDivider} />
                   </>
                 )}
-
-                {/* Show tool activity toggle */}
-                <div className={styles.toolActivityRow}>
-                  <div className={styles.toolActivityInfo}>
-                    <div className={styles.toolActivityLabel}>
-                      Show tool activity in chat
-                    </div>
-                    <div className={styles.toolActivityHint}>
-                      Display tool calls and results inline in the conversation
-                    </div>
-                  </div>
-                  <Toggle
-                    checked={showToolActivity}
-                    onChange={handleToolActivityChange}
-                    disabled={isSavingToolActivity}
-                  />
-                </div>
 
                 {/* Show system events toggle */}
                 <div className={styles.toolActivityRow}>

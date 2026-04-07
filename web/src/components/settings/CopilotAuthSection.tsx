@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { RefreshCw, ExternalLink, CheckCircle2, Loader2 } from "lucide-react";
+import { LogoGithub } from "@carbon/icons-react";
 import { copilotApi } from "@/api/client";
 import { Btn, type CopilotAuthStep } from "./shared";
 
@@ -218,7 +219,7 @@ export function CopilotAuthSection() {
     >
       {/* Header row */}
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <span style={{ fontSize: 22 }}>🐙</span>
+        <LogoGithub size={22} />
         <div>
           <div
             style={{

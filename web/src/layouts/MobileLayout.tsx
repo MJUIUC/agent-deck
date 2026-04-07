@@ -108,8 +108,27 @@ export function MobileLayout() {
 
     connectGlobal();
 
+    // Deep-link from notification tap (cold start)
+    const searchParams = new URLSearchParams(window.location.search);
+    const deepLinkThreadId = searchParams.get("thread");
+    if (deepLinkThreadId) {
+      setActiveThread(deepLinkThreadId);
+      // Clean up the URL so it doesn't persist across navigation
+      window.history.replaceState({}, "", "/");
+    }
+
+    function handleSwMessage(event: MessageEvent) {
+      if (event.data?.type === "OPEN_THREAD" && event.data.threadId) {
+        setActiveThread(event.data.threadId);
+        setActiveTab("threads");
+      }
+    }
+
+    navigator.serviceWorker?.addEventListener("message", handleSwMessage);
+
     return () => {
       disconnectGlobal();
+      navigator.serviceWorker?.removeEventListener("message", handleSwMessage);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

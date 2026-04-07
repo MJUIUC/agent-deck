@@ -15,6 +15,7 @@ import { useMessageStore } from "@/stores/useMessageStore";
 import { useSseStore } from "@/stores/useSseStore";
 import { resolveDisplayNames } from "@/components/ChatHeader";
 import { MessageBubble, StreamingBubble } from "@/components/MessageBubble";
+import { ProcessingBubble } from "@/components/ProcessingBlock";
 import { MobileConfigSheet } from "./MobileConfigSheet";
 import styles from "./MobileChatView.module.css";
 
@@ -158,7 +159,8 @@ export function MobileChatView({
   const phase = threadState?.phase ?? { status: "idle" as const };
   const isStreaming =
     phase.status === "streaming" || phase.status === "sending";
-  const streamingContent = phase.status === "streaming" ? phase.content : "";
+  const isSending = phase.status === "sending";
+  const streamingEntries = phase.status === "streaming" ? phase.entries : [];
 
   const visibleMessages = messages.filter((m) => m.visibility === "visible");
 
@@ -421,13 +423,44 @@ export function MobileChatView({
               />
             ))}
 
-            {isStreaming && (
+            {isSending && (
               <StreamingBubble
                 personaEmoji={personaEmoji}
                 personaName={personaName}
-                content={streamingContent}
+                content=""
               />
             )}
+
+            {isStreaming &&
+              !isSending &&
+              streamingEntries.map((entry, i) => {
+                const isLast = i === streamingEntries.length - 1;
+
+                if (entry.type === "text") {
+                  return (
+                    <StreamingBubble
+                      key={`stream-${i}`}
+                      personaEmoji={personaEmoji}
+                      personaName={personaName}
+                      content={entry.content}
+                      streaming={isLast}
+                    />
+                  );
+                }
+
+                if (entry.type === "processing") {
+                  return (
+                    <ProcessingBubble
+                      key={`processing-${i}`}
+                      rounds={entry.rounds}
+                      personaEmoji={personaEmoji}
+                      personaName={personaName}
+                    />
+                  );
+                }
+
+                return null;
+              })}
           </>
         )}
 

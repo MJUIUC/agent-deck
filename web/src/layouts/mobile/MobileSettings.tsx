@@ -1,7 +1,21 @@
 import { useEffect, useState, type ReactNode } from "react";
 
+import { pushApi } from "../../api/client";
 import { usePlatform } from "../../hooks/usePlatform";
 import styles from "./MobileSettings.module.css";
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuffer> {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = window.atob(base64);
+  const output = new Uint8Array(new ArrayBuffer(rawData.length));
+  for (let i = 0; i < rawData.length; i++) {
+    output[i] = rawData.charCodeAt(i);
+  }
+  return output;
+}
 
 // ─── Notification status ──────────────────────────────────────────────────────
 
@@ -12,8 +26,12 @@ type NotifState =
   | "blocked"
   | "unavailable";
 
-function useNotificationStatus(): NotifState {
+function useNotificationStatus(): {
+  state: NotifState;
+  recheck: () => void;
+} {
   const [state, setState] = useState<NotifState>("loading");
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     async function check(): Promise<void> {
@@ -51,9 +69,9 @@ function useNotificationStatus(): NotifState {
     }
 
     check().catch(() => setState("unavailable"));
-  }, []);
+  }, [refreshKey]);
 
-  return state;
+  return { state, recheck: () => setRefreshKey((k) => k + 1) };
 }
 
 // ─── Install steps ────────────────────────────────────────────────────────────
@@ -92,7 +110,8 @@ const ANDROID_STEPS: ReactNode[] = [
 
 export function MobileSettings() {
   const platform = usePlatform();
-  const notifState = useNotificationStatus();
+  const { state: notifState, recheck } = useNotificationStatus();
+  const [notifLoading, setNotifLoading] = useState(false);
 
   const steps =
     platform === "ios"
@@ -128,6 +147,56 @@ export function MobileSettings() {
         return "";
     }
   })();
+
+  async function handleEnable() {
+    setNotifLoading(true);
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") {
+        recheck();
+        setNotifLoading(false);
+        return;
+      }
+      const reg = await navigator.serviceWorker.ready;
+      const { data } = await pushApi.getVapidPublicKey();
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(data.public_key),
+      });
+      const subJson = sub.toJSON() as {
+        endpoint: string;
+        keys: { p256dh: string; auth: string };
+      };
+      await pushApi.subscribe({
+        endpoint: subJson.endpoint,
+        p256dh: subJson.keys.p256dh,
+        auth: subJson.keys.auth,
+        user_agent: navigator.userAgent,
+      });
+      recheck();
+    } catch (err) {
+      console.error("Enable notifications failed:", err);
+    } finally {
+      setNotifLoading(false);
+    }
+  }
+
+  async function handleDisable() {
+    setNotifLoading(true);
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) {
+        await sub.unsubscribe();
+        await pushApi.unsubscribe(sub.endpoint);
+      }
+      recheck();
+    } catch (err) {
+      console.error("Disable notifications failed:", err);
+    } finally {
+      setNotifLoading(false);
+    }
+  }
 
   return (
     <div className={styles.container}>
@@ -173,12 +242,24 @@ export function MobileSettings() {
                   </div>
                   {notifState === "not-enabled" && (
                     <div style={{ marginTop: 12 }}>
-                      <button className={styles.enableBtn} disabled>
+                      <button
+                        className={styles.enableBtn}
+                        onClick={handleEnable}
+                        disabled={notifLoading}
+                      >
                         Enable Notifications
                       </button>
-                      <div className={styles.comingSoonLabel}>
-                        (coming soon)
-                      </div>
+                    </div>
+                  )}
+                  {notifState === "enabled" && (
+                    <div style={{ marginTop: 12 }}>
+                      <button
+                        className={styles.disableBtn}
+                        onClick={handleDisable}
+                        disabled={notifLoading}
+                      >
+                        Disable Notifications
+                      </button>
                     </div>
                   )}
                 </>

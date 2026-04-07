@@ -39,7 +39,7 @@
 
 .avatarRoutine {
     background: var(--bubble-routine);
-    border: 1px solid #3a4a60;
+    border: 1px solid var(--border-default);
 }
 
 /* ── Bubble column ── */
@@ -253,9 +253,11 @@
 }
 
 .bubbleRoutine {
-    background: var(--bubble-routine);
-    border: 1px solid #3a4a60;
+    background: var(--bubble-agent);
+    /*border: 1px solid var(--border-subtle);*/
+    border: 0.5px solid var(--accent-primary);
     border-radius: 12px 12px 12px 4px;
+    box-shadow: 0px 0px 8px 2px rgba(255, 255, 255, 0.15);
 }
 
 /* ── Routine label inside bubble ── */
@@ -334,58 +336,4 @@
         transform: translateY(-5px);
         opacity: 1;
     }
-}
-
-/* ── Tool activity ── */
-.toolRow {
-    display: flex;
-    padding: 2px 16px;
-}
-
-.toolBubble {
-    background: var(--bg-elevated);
-    border: 1px solid var(--border-subtle);
-    border-radius: 8px;
-    padding: 8px 12px;
-    max-width: 85%;
-    min-width: 0;
-    font-size: 0.6875rem;
-}
-
-.toolLabel {
-    font-size: 0.625rem;
-    font-weight: 600;
-    color: var(--text-tertiary);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    margin-bottom: 4px;
-}
-
-.toolContent {
-    color: var(--text-secondary);
-    line-height: 1.5;
-}
-
-.toolContent p {
-    margin: 0 0 4px 0;
-}
-
-.toolContent pre {
-    background: var(--bg-secondary);
-    border-radius: 4px;
-    padding: 6px 8px;
-    overflow-x: auto;
-    font-size: 10px;
-    margin: 4px 0 0 0;
-}
-
-.toolContent code {
-    font-family: monospace;
-    font-size: 0.625rem;
-}
-
-.toolMeta {
-    font-size: 0.625rem;
-    color: var(--text-tertiary);
-    margin-top: 4px;
 }

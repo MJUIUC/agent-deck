@@ -150,6 +150,23 @@ impl Message {
                 .to_string(),
         }
     }
+    pub fn new_chat_segment(thread_id: impl Into<String>, content: impl Into<String>) -> Self {
+        Self {
+            id: Uuid::new_v4().to_string(),
+            thread_id: thread_id.into(),
+            role: "assistant".to_string(),
+            content: content.into(),
+            source: "chat".to_string(),
+            routine_id: None,
+            visibility: "visible".to_string(),
+            execution_id: None,
+            event_type: Some("chat_segment".to_string()),
+            stopped: false,
+            created_at: chrono::Utc::now()
+                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+                .to_string(),
+        }
+    }
 }
 
 impl From<Message> for MessageResponse {

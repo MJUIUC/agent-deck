@@ -5,11 +5,24 @@ import { DesktopLayout } from "@/layouts/DesktopLayout";
 import { MobileLayout } from "@/layouts/MobileLayout";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import styles from "@/App.module.css";
+import { useThemeStore } from "@/stores/useThemeStore";
 
 export function App() {
   // null = not yet checked, false = incomplete, true = complete
   const [setupComplete, setSetupComplete] = useState<boolean | null>(null);
   const isMobile = useIsMobile();
+  const palette = useThemeStore((s) => s.palette);
+  const mode = useThemeStore((s) => s.mode);
+
+  // Apply theme attributes to <html> whenever palette or mode changes.
+  useEffect(() => {
+    document.documentElement.setAttribute("data-palette", palette);
+    if (mode === "system") {
+      document.documentElement.removeAttribute("data-mode");
+    } else {
+      document.documentElement.setAttribute("data-mode", mode);
+    }
+  }, [palette, mode]);
 
   useEffect(() => {
     setupApi

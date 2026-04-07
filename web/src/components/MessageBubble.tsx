@@ -1,4 +1,6 @@
 import { useState, useRef } from "react";
+import remarkBreaks from "remark-breaks";
+import { MagicWandFilled } from "@carbon/icons-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Message } from "@/types";
@@ -16,7 +18,7 @@ function UserAvatar() {
   return <div className={`${styles.avatar} ${styles.avatarUser}`}>M</div>;
 }
 
-function AgentAvatar({
+export function AgentAvatar({
   emoji,
   className,
 }: {
@@ -81,57 +83,16 @@ function CodeBlock({
   );
 }
 
-const TOOL_CONTENT_LIMIT = 4000;
-
-export function ToolActivityBubble({ message }: { message: Message }) {
-  const isCall = message.role === "assistant";
-  const timeStr = formatMessageTime(message.created_at);
-
-  const raw = message.content ?? "";
-  const truncated = raw.length > TOOL_CONTENT_LIMIT;
-  const displayContent = truncated
-    ? raw.slice(0, TOOL_CONTENT_LIMIT) +
-      "\n\n…(truncated — content too large to display)"
-    : raw;
-
-  return (
-    <div className={styles.toolRow}>
-      <div className={styles.toolBubble}>
-        <div className={styles.toolLabel}>
-          {isCall ? "⚙ Tool call" : "⚙ Tool result"}
-        </div>
-        <div className={styles.toolContent}>
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            components={{ pre: CodeBlock }}
-          >
-            {displayContent}
-          </ReactMarkdown>
-        </div>
-        <div className={styles.toolMeta}>{timeStr}</div>
-      </div>
-    </div>
-  );
-}
-
 export function MessageBubble({
   message,
   personaEmoji = "🤖",
   personaName = "Agent",
 }: MessageBubbleProps) {
-  if (message.source === "tool") {
-    return <ToolActivityBubble message={message} />;
-  }
-
   const isUser = message.role === "user";
   const isRoutine = message.source === "routine";
 
   const timeStr = formatMessageTime(message.created_at);
-  const metaText = isUser
-    ? `You · ${timeStr}`
-    : isRoutine
-      ? `Routine · ${timeStr}`
-      : `${personaName} · ${timeStr}`;
+  const metaText = isUser ? `You · ${timeStr}` : `${personaName} · ${timeStr}`;
 
   const bubbleClass = isUser
     ? styles.bubbleUser
@@ -155,7 +116,11 @@ export function MessageBubble({
 
       <div className={[styles.col, isUser ? styles.colUser : ""].join(" ")}>
         <div className={`${styles.bubble} ${bubbleClass}`}>
-          {isRoutine && <div className={styles.routineLabel}>⚡ Routine</div>}
+          {isRoutine && (
+            <div className={styles.routineLabel}>
+              <MagicWandFilled size={10} /> Routine
+            </div>
+          )}
           {message.stopped && (
             <div className={styles.stoppedLabel}>⏹ Stopped</div>
           )}
@@ -164,7 +129,7 @@ export function MessageBubble({
           ) : (
             <div className={styles.markdown}>
               <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
+                remarkPlugins={[remarkGfm, remarkBreaks]}
                 components={{ pre: CodeBlock }}
               >
                 {message.content}
@@ -185,12 +150,14 @@ interface StreamingBubbleProps {
   personaEmoji?: string;
   personaName?: string;
   content: string;
+  streaming?: boolean;
 }
 
 export function StreamingBubble({
   personaEmoji = "🤖",
   personaName = "Agent",
   content,
+  streaming = true,
 }: StreamingBubbleProps) {
   return (
     <div className={`${styles.row} ${styles.rowAgent}`}>
@@ -200,14 +167,14 @@ export function StreamingBubble({
           {content && (
             <div className={styles.markdown}>
               <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
+                remarkPlugins={[remarkGfm, remarkBreaks]}
                 components={{ pre: CodeBlock }}
               >
                 {content}
               </ReactMarkdown>
             </div>
           )}
-          <StreamingIndicator />
+          {streaming && <StreamingIndicator />}
         </div>
         <div className={styles.meta}>{personaName} · now</div>
       </div>

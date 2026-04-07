@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Plus } from "lucide-react";
+import { Laptop, Network_3, ToolKit } from "@carbon/icons-react";
 import type { McpServer, McpTool } from "@/types";
 import { mcpServersApi, credentialsApi } from "@/api/client";
 import type { Credential } from "@/api/client";
@@ -838,7 +839,14 @@ function McpForm({
                   transition: "all 0.15s",
                 }}
               >
-                {t === "local" ? "🖥 Local (stdio)" : "🌐 Remote (HTTP/SSE)"}
+                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  {t === "local" ? (
+                    <Laptop size={14} />
+                  ) : (
+                    <Network_3 size={14} />
+                  )}
+                  {t === "local" ? "Local (stdio)" : "Remote (HTTP/SSE)"}
+                </span>
               </button>
             ))}
           </div>
@@ -1480,7 +1488,9 @@ export function McpServerSettings() {
             color: "var(--text-tertiary)",
           }}
         >
-          <div style={{ fontSize: 28, marginBottom: 10 }}>🔧</div>
+          <div style={{ marginBottom: 10 }}>
+            <ToolKit size={28} />
+          </div>
           <div
             style={{
               fontSize: 13,

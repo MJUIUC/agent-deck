@@ -311,11 +311,7 @@ async fn run_inner(
         None
     };
 
-    let execution_id: Option<String> = if is_routine {
-        Some(uuid::Uuid::new_v4().to_string())
-    } else {
-        None
-    };
+    let execution_id: Option<String> = Some(uuid::Uuid::new_v4().to_string());
 
     // Create the routine_executions row (best-effort — log on failure, don't abort)
     if let (Some(ref rid), Some(ref exec_id)) = (&routine_id_opt, &execution_id) {
@@ -501,6 +497,7 @@ async fn run_inner(
     }
 
     let mut assembled = context::assemble(AssemblyInput {
+        persona_emoji: Some(persona.emoji.clone()),
         persona_system_prompt: persona.system_prompt.clone(),
         thread_addendum: thread.system_prompt_addendum.clone(),
         user_profile_context: user_profile_context.clone(),
@@ -607,6 +604,7 @@ async fn run_inner(
                     .collect();
 
                 assembled = context::assemble(context::AssemblyInput {
+                    persona_emoji: Some(persona.emoji.clone()),
                     persona_system_prompt: persona.system_prompt.clone(),
                     thread_addendum: updated.system_prompt_addendum.clone(),
                     user_profile_context: user_profile_context.clone(),
@@ -656,15 +654,15 @@ async fn run_inner(
     // Only runs for non-cancelled completions to avoid titling partial responses.
     let assistant_content = &gen_result.content;
 
-    let message_count: (i64,) = sqlx::query_as(
+    let user_message_count: (i64,) = sqlx::query_as(
         "SELECT COUNT(*) FROM messages
-         WHERE thread_id = ? AND role IN ('user', 'assistant') AND visibility = 'visible'",
+         WHERE thread_id = ? AND role = 'user' AND visibility = 'visible'",
     )
     .bind(thread_id)
     .fetch_one(&state.pool)
     .await?;
 
-    if message_count.0 == 2 {
+    if user_message_count.0 == 1 {
         // Fetch the first user message to use as the title gen input.
         let first_user: Option<(String,)> = sqlx::query_as(
             "SELECT content FROM messages
@@ -731,21 +729,7 @@ async fn run_inner(
             );
         }
 
-        // ── Web Push dispatch ──────────────────────────────────────────────────────
-        // Send a push notification if no SSE client is watching this thread.
-        // The notification body is the first 100 chars of the assistant response.
-        let push_title = format!("{} {}", persona.emoji, persona.name);
-        let push_body: String = gen_result.content.chars().take(100).collect();
-        crate::services::push::send_routine_push_notifications(
-            state,
-            thread_id,
-            user_id,
-            &push_title,
-            &push_body,
-        )
-        .await;
-
-        // Fetch the routine name for the global event
+        // Fetch the routine name — used for both the push notification and the global event.
         let routine_name: String =
             sqlx::query_as::<_, (String,)>("SELECT name FROM routines WHERE id = ?")
                 .bind(rid)
@@ -755,6 +739,19 @@ async fn run_inner(
                 .flatten()
                 .map(|(n,)| n)
                 .unwrap_or_default();
+
+        // ── Web Push dispatch ──────────────────────────────────────────────────────
+        // Send a push notification if no SSE client is watching this thread.
+        let push_title = format!("{} {}", persona.emoji, persona.name);
+        let push_body = format!("Finished executing: {}", routine_name);
+        crate::services::push::send_routine_push_notifications(
+            state,
+            thread_id,
+            user_id,
+            &push_title,
+            &push_body,
+        )
+        .await;
 
         // Emit global RoutineFired event
         if let Err(e) = state.send_global_event(GlobalEvent::RoutineFired {
@@ -834,12 +831,13 @@ async fn generation_loop(
     let mut run_context = RunContext {
         hidden_message_ids: Vec::new(),
     };
-    let mut final_content = String::new();
+    let mut all_content = String::new();
+    let mut last_turn_text = String::new();
     let mut cancelled = false;
 
-    // 20 rounds is generous enough for complex agentic workflows while still
+    // 50 rounds is generous enough for complex agentic workflows while still
     // guarding against infinite tool-call loops.
-    const MAX_TOOL_ROUNDS: usize = 20;
+    const MAX_TOOL_ROUNDS: usize = 50;
     let mut tool_rounds = 0;
 
     'turn_loop: loop {
@@ -865,34 +863,84 @@ async fn generation_loop(
             text_len = turn.text.len(), tools = turn.tool_calls.len(), "generation_loop: turn finished");
 
         if turn.cancelled {
-            final_content.push_str(&turn.text);
+            last_turn_text = turn.text.clone();
+            if !turn.text.is_empty() {
+                if !all_content.is_empty() {
+                    all_content.push_str("\n\n");
+                }
+                all_content.push_str(&turn.text);
+            }
             cancelled = true;
             break 'turn_loop;
         }
 
         if turn.tool_calls.is_empty() {
-            final_content.push_str(&turn.text);
+            last_turn_text = turn.text.clone();
+            if !turn.text.is_empty() {
+                if !all_content.is_empty() {
+                    all_content.push_str("\n\n");
+                }
+                all_content.push_str(&turn.text);
+            }
             break 'turn_loop;
         }
 
         if tool_rounds >= MAX_TOOL_ROUNDS {
             warn!(thread_id = %thread_id,
                 "Reached maximum tool-call rounds ({}); stopping generation", MAX_TOOL_ROUNDS);
-            final_content.push_str(&turn.text);
+            last_turn_text = turn.text.clone();
+            if !turn.text.is_empty() {
+                if !all_content.is_empty() {
+                    all_content.push_str("\n\n");
+                }
+                all_content.push_str(&turn.text);
+            }
             break 'turn_loop;
         }
 
-        // Fold any text the model produced before requesting tools into the
-        // running transcript. This ensures the final persisted message
-        // contains the agent's full thought process, not just the last turn.
         if !turn.text.is_empty() {
-            if !final_content.is_empty() {
-                final_content.push_str("\n\n");
+            let mut segment_msg = Message::new_chat_segment(thread_id, &turn.text);
+            if let Some(eid) = execution_id {
+                segment_msg.execution_id = Some(eid.to_string());
             }
-            final_content.push_str(&turn.text);
-        }
+            if let Some(rid) = routine_id {
+                segment_msg.routine_id = Some(rid.to_string());
+            }
 
-        tool_rounds += 1;
+            sqlx::query(
+                "INSERT INTO messages (id, thread_id, role, content, source, routine_id, visibility,
+                                       execution_id, event_type, stopped, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(&segment_msg.id)
+            .bind(&segment_msg.thread_id)
+            .bind(&segment_msg.role)
+            .bind(&segment_msg.content)
+            .bind(&segment_msg.source)
+            .bind(&segment_msg.routine_id)
+            .bind(&segment_msg.visibility)
+            .bind(&segment_msg.execution_id)
+            .bind(&segment_msg.event_type)
+            .bind(segment_msg.stopped)
+            .bind(&segment_msg.created_at)
+            .execute(&state.pool)
+            .await?;
+
+            state.send_thread_event(
+                thread_id,
+                ThreadEvent::ChatSegment {
+                    id: segment_msg.id.clone(),
+                    thread_id: thread_id.to_string(),
+                    content: turn.text.clone(),
+                    created_at: segment_msg.created_at.clone(),
+                },
+            );
+
+            if !all_content.is_empty() {
+                all_content.push_str("\n\n");
+            }
+            all_content.push_str(&turn.text);
+        }
 
         let pending: Vec<PendingToolCall> = turn
             .tool_calls
@@ -905,7 +953,7 @@ async fn generation_loop(
             .collect();
         messages.push(build_assistant_tool_call_message(&turn.text, &pending));
 
-        let tool_results = execute_tool_calls(
+        let (tool_results, hidden_ids) = execute_tool_calls(
             state,
             thread_id,
             user_id,
@@ -913,28 +961,25 @@ async fn generation_loop(
             &turn.tool_calls,
             attached_mcp,
             cancellation_rx,
-            &mut run_context,
             execution_id,
+            (tool_rounds + 1) as u32,
         )
         .await;
+        run_context.hidden_message_ids.extend(hidden_ids);
+
+        state.send_thread_event(
+            thread_id,
+            ThreadEvent::ToolRoundComplete {
+                round: (tool_rounds + 1) as u32,
+                tool_count: turn.tool_calls.len() as u32,
+            },
+        );
+
+        tool_rounds += 1;
 
         if is_cancelled(cancellation_rx) {
-            final_content.push_str(&turn.text);
             cancelled = true;
             break 'turn_loop;
-        }
-
-        // Emit a paragraph separator into the SSE stream so the streaming
-        // bubble shows a visible gap between the pre-tool text and the next
-        // turn's response — matching the \n\n already written into
-        // final_content above.
-        if !turn.text.is_empty() {
-            state.send_thread_event(
-                thread_id,
-                ThreadEvent::Token {
-                    token: "\n\n".to_string(),
-                },
-            );
         }
 
         for (tc, result) in turn.tool_calls.iter().zip(tool_results) {
@@ -964,13 +1009,13 @@ async fn generation_loop(
             }
         }
 
-        let content = if final_content.is_empty() {
+        let stopped_content = if last_turn_text.is_empty() {
             "[Response cancelled before any content was generated]".to_string()
         } else {
-            final_content.clone()
+            last_turn_text.clone()
         };
 
-        let mut assistant_msg = Message::new_assistant_stopped(thread_id, &content);
+        let mut assistant_msg = Message::new_assistant_stopped(thread_id, &stopped_content);
         if let Some(eid) = execution_id {
             assistant_msg.execution_id = Some(eid.to_string());
         }
@@ -1028,7 +1073,11 @@ async fn generation_loop(
         );
 
         return Ok(GenerationResult {
-            content,
+            content: if all_content.is_empty() {
+                stopped_content
+            } else {
+                all_content
+            },
             cancelled: true,
             message_id: assistant_msg.id,
             created_at: assistant_msg.created_at,
@@ -1037,9 +1086,9 @@ async fn generation_loop(
 
     // ── Normal completion path ─────────────────────────────────────────────────
     let mut assistant_msg = if let Some(rid) = routine_id {
-        Message::new_routine(thread_id, &final_content, rid)
+        Message::new_routine(thread_id, &last_turn_text, rid)
     } else {
-        Message::new_assistant(thread_id, &final_content)
+        Message::new_assistant(thread_id, &last_turn_text)
     };
     if let Some(eid) = execution_id {
         assistant_msg.execution_id = Some(eid.to_string());
@@ -1112,7 +1161,7 @@ async fn generation_loop(
     );
 
     Ok(GenerationResult {
-        content: final_content,
+        content: all_content,
         cancelled: false,
         message_id: assistant_msg.id,
         created_at: assistant_msg.created_at,
@@ -1414,17 +1463,49 @@ async fn handle_stream_event(
 
 // ─── execute_tool_calls ───────────────────────────────────────────────────────
 
-/// Dispatch all tool calls for one round and return their result strings in
-/// the same order as `calls`.  Each result is suitable for feeding directly
-/// back to the model as a `tool` role message.
+/// Compute a brief preview of a tool call's inputs for the `ToolStart` SSE event.
+fn compute_input_preview(tool_name: &str, args_json: &str) -> serde_json::Value {
+    let args: serde_json::Value =
+        serde_json::from_str(args_json).unwrap_or(serde_json::Value::Object(Default::default()));
+    match tool_name {
+        "edit_file" | "read_file" | "delete_file" | "create_file" => {
+            if let Some(path) = args.get("path").and_then(|v| v.as_str()) {
+                serde_json::json!({"path": path})
+            } else {
+                serde_json::json!({})
+            }
+        }
+        "bash" | "shell" | "run_command" | "execute_command" => {
+            if let Some(cmd) = args.get("command").and_then(|v| v.as_str()) {
+                let truncated = if cmd.len() > 80 { &cmd[..80] } else { cmd };
+                serde_json::json!({"command": truncated})
+            } else {
+                serde_json::json!({})
+            }
+        }
+        "save_memory" | "recall_memory" | "delete_memory" | "recall_conversation" => {
+            if let Some(query) = args.get("query").and_then(|v| v.as_str()) {
+                serde_json::json!({"query": query})
+            } else if let Some(key) = args.get("key").and_then(|v| v.as_str()) {
+                serde_json::json!({"key": key})
+            } else {
+                serde_json::json!({})
+            }
+        }
+        _ if tool_name.contains("__") => {
+            let (tag, name) = tool_name.split_once("__").unwrap_or(("", tool_name));
+            serde_json::json!({"tool": name, "server": tag})
+        }
+        _ => serde_json::json!({}),
+    }
+}
+
+/// Dispatch all tool calls for one round and return `(results, hidden_message_ids)`.
 ///
-/// Built-in tools (from `AppState::built_in_tools`) are checked first.
-/// If no built-in matches, the call falls through to MCP routing.
-/// Errors from individual tools are converted to error strings so one failing
-/// tool does not abort the entire round.
-///
-/// The `_cancellation_rx` parameter is reserved for Story C.2, which will add
-/// per-tool cancellation checks inside this function.
+/// All `ToolStart` events are emitted upfront so the frontend sees the complete
+/// round's tool list at once.  The individual calls then run in parallel via
+/// `join_all`.  Each result string is in the same order as `calls` and is
+/// suitable for feeding back to the model as a `tool` role message.
 async fn execute_tool_calls(
     state: &AppState,
     thread_id: &str,
@@ -1433,123 +1514,200 @@ async fn execute_tool_calls(
     calls: &[ResolvedToolCall],
     attached_mcp: &[AttachedMcpServer],
     cancellation_rx: &tokio::sync::watch::Receiver<bool>,
-    run_context: &mut RunContext,
     execution_id: Option<&str>,
-) -> Vec<String> {
+    round: u32,
+) -> (Vec<String>, Vec<String>) {
     use crate::services::tools::ToolContext;
 
-    let mut results = Vec::with_capacity(calls.len());
-
+    // Emit all ToolStart events upfront so the frontend sees the full round immediately.
     for tc in calls {
-        if is_cancelled(cancellation_rx) {
-            info!(
-                thread_id = %thread_id,
-                remaining = calls.len() - results.len(),
-                "execute_tool_calls: cancellation detected before dispatch, skipping remaining tools"
-            );
-            break;
-        }
-
-        info!(
-            thread_id = %thread_id,
-            tool = %tc.name,
-            tool_call_id = %tc.id,
-            args_len = tc.args.len(),
-            "execute_tool_calls: dispatching tool call"
+        let input_preview = compute_input_preview(&tc.name, &tc.args);
+        state.send_thread_event(
+            thread_id,
+            ThreadEvent::ToolStart {
+                tool_name: tc.name.clone(),
+                tool_call_id: tc.id.clone(),
+                round,
+                input_preview,
+            },
         );
-
-        // ── Check built-in tool registry first ────────────────────────────────
-        let built_in = state
-            .built_in_tools
-            .iter()
-            .find(|t| t.name() == tc.name.as_str());
-
-        let result_content = if let Some(tool) = built_in {
-            let args: serde_json::Value = match serde_json::from_str(&tc.args) {
-                Ok(v) => v,
-                Err(e) => {
-                    let msg = tool_json_parse_error(&tc.name, &e, &tc.args);
-                    results.push(msg);
-                    continue;
-                }
-            };
-            let context = ToolContext {
-                pool: &state.pool,
-                user_id,
-                persona_id,
-                thread_id,
-            };
-            let output = match tool.run(args, &context).await {
-                Ok(r) => {
-                    info!(thread_id = %thread_id, tool = %tc.name,
-                        result_len = r.len(), "execute_tool_calls: built-in tool returned result");
-                    r
-                }
-                Err(e) => {
-                    warn!(tool = %tc.name, error = %e, "Built-in tool execution failed; returning error to model");
-                    format!("Tool execution failed: {}", e)
-                }
-            };
-
-            // Persist hidden call + result so show_tool_activity can surface them.
-            if let Some(id) = persist_tool_message(
-                &state.pool,
-                thread_id,
-                "assistant",
-                &format!("**Tool call:** `{}`\n```json\n{}\n```", tc.name, tc.args),
-                execution_id,
-            )
-            .await
-            {
-                run_context.hidden_message_ids.push(id);
-            }
-            if let Some(id) = persist_tool_message(
-                &state.pool,
-                thread_id,
-                "tool",
-                &format!("**Tool result** (`{}`):\n{}", tc.name, output),
-                execution_id,
-            )
-            .await
-            {
-                run_context.hidden_message_ids.push(id);
-            }
-
-            output
-        } else {
-            // ── Fall through to MCP routing ────────────────────────────────────
-            let pending = PendingToolCall {
-                id: tc.id.clone(),
-                name: tc.name.clone(),
-                args: tc.args.clone(),
-            };
-            match execute_mcp_tool(
-                state,
-                thread_id,
-                &pending,
-                attached_mcp,
-                cancellation_rx,
-                run_context,
-                execution_id,
-            )
-            .await
-            {
-                Ok(r) => {
-                    info!(thread_id = %thread_id, tool = %tc.name,
-                        result_len = r.len(), "execute_tool_calls: MCP tool returned result");
-                    r
-                }
-                Err(e) => {
-                    warn!(tool = %tc.name, error = %e, "Tool execution failed; returning error to model");
-                    format!("Tool execution failed: {}", e)
-                }
-            }
-        };
-
-        results.push(result_content);
     }
 
-    results
+    // Build one future per tool call; each returns (result_content, hidden_ids).
+    let futures_vec = calls
+        .iter()
+        .map(|tc| {
+            let tool_name = tc.name.clone();
+            let tool_args = tc.args.clone();
+            let tool_id = tc.id.clone();
+            // Resolve the built-in here (before the async block) so we can move
+            // an owned Arc into the future rather than holding a borrow across awaits.
+            let maybe_built_in = state
+                .built_in_tools
+                .iter()
+                .find(|t| t.name() == tc.name.as_str())
+                .cloned();
+
+            async move {
+                if is_cancelled(cancellation_rx) {
+                    info!(
+                        thread_id = %thread_id,
+                        tool = %tool_name,
+                        "execute_tool_calls: cancellation detected, skipping tool"
+                    );
+                    return ("Tool call cancelled by user.".to_string(), vec![]);
+                }
+
+                info!(
+                    thread_id = %thread_id,
+                    tool = %tool_name,
+                    tool_call_id = %tool_id,
+                    args_len = tool_args.len(),
+                    "execute_tool_calls: dispatching tool call"
+                );
+
+                if let Some(tool) = maybe_built_in {
+                    // ── Built-in tool ──────────────────────────────────────────
+                    let args: serde_json::Value = match serde_json::from_str(&tool_args) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            return (tool_json_parse_error(&tool_name, &e, &tool_args), vec![]);
+                        }
+                    };
+                    let context = ToolContext {
+                        pool: &state.pool,
+                        user_id,
+                        persona_id,
+                        thread_id,
+                    };
+                    let output = match tool.run(args, &context).await {
+                        Ok(r) => {
+                            info!(
+                                thread_id = %thread_id,
+                                tool = %tool_name,
+                                result_len = r.len(),
+                                "execute_tool_calls: built-in tool returned result"
+                            );
+                            r
+                        }
+                        Err(e) => {
+                            warn!(
+                                tool = %tool_name,
+                                error = %e,
+                                "Built-in tool execution failed; returning error to model"
+                            );
+                            format!("Tool execution failed: {}", e)
+                        }
+                    };
+
+                    // Persist hidden call + result so show_tool_activity can surface them.
+                    let mut hidden_ids = Vec::new();
+
+                    if let Some(msg) = persist_tool_message(
+                        &state.pool,
+                        thread_id,
+                        "assistant",
+                        &format!(
+                            "**Tool call:** `{}`\n```json\n{}\n```",
+                            tool_name, tool_args
+                        ),
+                        execution_id,
+                        Some(tool_id.as_str()),
+                        Some(round),
+                    )
+                    .await
+                    {
+                        hidden_ids.push(msg.id.clone());
+                        state.send_thread_event(
+                            thread_id,
+                            ThreadEvent::ToolActivity {
+                                id: msg.id.clone(),
+                                role: msg.role.clone(),
+                                content: msg.content.clone(),
+                                created_at: msg.created_at.clone(),
+                                tool_call_id: tool_id.clone(),
+                                round,
+                            },
+                        );
+                    }
+
+                    if let Some(msg) = persist_tool_message(
+                        &state.pool,
+                        thread_id,
+                        "tool",
+                        &format!("**Tool result** (`{}`):\n{}", tool_name, output),
+                        execution_id,
+                        Some(tool_id.as_str()),
+                        Some(round),
+                    )
+                    .await
+                    {
+                        hidden_ids.push(msg.id.clone());
+                        state.send_thread_event(
+                            thread_id,
+                            ThreadEvent::ToolActivity {
+                                id: msg.id.clone(),
+                                role: msg.role.clone(),
+                                content: msg.content.clone(),
+                                created_at: msg.created_at.clone(),
+                                tool_call_id: tool_id.clone(),
+                                round,
+                            },
+                        );
+                    }
+
+                    (output, hidden_ids)
+                } else {
+                    // ── MCP tool ───────────────────────────────────────────────
+                    let pending = PendingToolCall {
+                        id: tool_id.clone(),
+                        name: tool_name.clone(),
+                        args: tool_args.clone(),
+                    };
+                    let (mcp_result, hidden_ids) = execute_mcp_tool(
+                        state,
+                        thread_id,
+                        &pending,
+                        attached_mcp,
+                        cancellation_rx,
+                        execution_id,
+                        round,
+                    )
+                    .await;
+                    let result_str = match mcp_result {
+                        Ok(r) => {
+                            info!(
+                                thread_id = %thread_id,
+                                tool = %tool_name,
+                                result_len = r.len(),
+                                "execute_tool_calls: MCP tool returned result"
+                            );
+                            r
+                        }
+                        Err(e) => {
+                            warn!(
+                                tool = %tool_name,
+                                error = %e,
+                                "Tool execution failed; returning error to model"
+                            );
+                            format!("Tool execution failed: {}", e)
+                        }
+                    };
+                    (result_str, hidden_ids)
+                }
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let all_results = futures::future::join_all(futures_vec).await;
+
+    let mut results = Vec::with_capacity(calls.len());
+    let mut all_hidden_ids = Vec::new();
+    for (result, hidden_ids) in all_results {
+        results.push(result);
+        all_hidden_ids.extend(hidden_ids);
+    }
+    (results, all_hidden_ids)
 }
 
 // ─── Tool execution ────────────────────────────────────────────────────────────
@@ -1575,17 +1733,20 @@ async fn execute_mcp_tool(
     tc: &PendingToolCall,
     attached_mcp: &[AttachedMcpServer],
     cancellation_rx: &tokio::sync::watch::Receiver<bool>,
-    run_context: &mut RunContext,
     execution_id: Option<&str>,
-) -> Result<String> {
+    round: u32,
+) -> (Result<String>, Vec<String>) {
     if !tc.name.contains("__") {
         warn!(tool = %tc.name, "Unknown tool call requested by model");
-        return Ok(format!("Unknown tool '{}'. No action was taken.", tc.name));
+        return (
+            Ok(format!("Unknown tool '{}'. No action was taken.", tc.name)),
+            vec![],
+        );
     }
 
     let (tag, tool_name) = match tc.name.split_once("__") {
         Some(pair) => pair,
-        None => return Ok(format!("Unknown tool '{}'.", tc.name)),
+        None => return (Ok(format!("Unknown tool '{}'.", tc.name)), vec![]),
     };
 
     info!(
@@ -1603,7 +1764,7 @@ async fn execute_mcp_tool(
                 Err(e) => {
                     warn!(tool = %tc.name, error = %e, raw_args = %tc.args,
                         "MCP tool received invalid JSON arguments");
-                    return Ok(tool_json_parse_error(&tc.name, &e, &tc.args));
+                    return (Ok(tool_json_parse_error(&tc.name, &e, &tc.args)), vec![]);
                 }
             };
 
@@ -1616,16 +1777,31 @@ async fn execute_mcp_tool(
                 "execute_mcp_tool: calling mcp.call_tool"
             );
 
-            if let Some(id) = persist_tool_message(
+            let mut hidden_ids = Vec::new();
+
+            if let Some(msg) = persist_tool_message(
                 &state.pool,
                 thread_id,
                 "assistant",
                 &format!("**Tool call:** `{}`\n```json\n{}\n```", tc.name, tc.args),
                 execution_id,
+                Some(tc.id.as_str()),
+                Some(round),
             )
             .await
             {
-                run_context.hidden_message_ids.push(id);
+                hidden_ids.push(msg.id.clone());
+                state.send_thread_event(
+                    thread_id,
+                    ThreadEvent::ToolActivity {
+                        id: msg.id.clone(),
+                        role: msg.role.clone(),
+                        content: msg.content.clone(),
+                        created_at: msg.created_at.clone(),
+                        tool_call_id: tc.id.clone(),
+                        round,
+                    },
+                );
             }
 
             let mut cancellation_watcher = cancellation_rx.clone();
@@ -1647,22 +1823,35 @@ async fn execute_mcp_tool(
                                 result_preview = %text.chars().take(120).collect::<String>(),
                                 "execute_mcp_tool: MCP tool success"
                             );
-                            if let Some(id) = persist_tool_message(
+                            if let Some(msg) = persist_tool_message(
                                 &state.pool,
                                 thread_id,
                                 "tool",
                                 &format!("**Tool result** (`{}`):\n{}", tc.name, text),
                                 execution_id,
+                                Some(tc.id.as_str()),
+                                Some(round),
                             )
                             .await
                             {
-                                run_context.hidden_message_ids.push(id);
+                                hidden_ids.push(msg.id.clone());
+                                state.send_thread_event(
+                                    thread_id,
+                                    ThreadEvent::ToolActivity {
+                                        id: msg.id.clone(),
+                                        role: msg.role.clone(),
+                                        content: msg.content.clone(),
+                                        created_at: msg.created_at.clone(),
+                                        tool_call_id: tc.id.clone(),
+                                        round,
+                                    },
+                                );
                             }
-                            Ok(text)
+                            (Ok(text), hidden_ids)
                         }
                         Err(e) => {
                             warn!(tool = %tc.name, error = %e, "MCP tool call failed");
-                            Ok(format!("MCP tool '{}' error: {}", tc.name, e))
+                            (Ok(format!("MCP tool '{}' error: {}", tc.name, e)), hidden_ids)
                         }
                     }
                 }
@@ -1673,9 +1862,9 @@ async fn execute_mcp_tool(
                             tool = %tc.name,
                             "execute_mcp_tool: MCP call cancelled"
                         );
-                        return Ok("Tool call cancelled by user.".to_string());
+                        return (Ok("Tool call cancelled by user.".to_string()), hidden_ids);
                     }
-                    return Ok(format!("MCP tool '{}' call interrupted.", tc.name));
+                    return (Ok(format!("MCP tool '{}' call interrupted.", tc.name)), hidden_ids);
                 }
             }
         }
@@ -1686,10 +1875,13 @@ async fn execute_mcp_tool(
                 attached = ?attached_mcp.iter().map(|s| s.tag.as_str()).collect::<Vec<_>>(),
                 "execute_mcp_tool: no server matched tag"
             );
-            Ok(format!(
-                "No attached MCP server with tag '{}'. Cannot call tool '{}'.",
-                tag, tc.name
-            ))
+            (
+                Ok(format!(
+                    "No attached MCP server with tag '{}'. Cannot call tool '{}'.",
+                    tag, tc.name
+                )),
+                vec![],
+            )
         }
     }
 }
@@ -1700,15 +1892,17 @@ async fn execute_mcp_tool(
 /// These are stored with `visibility = 'hidden'` and are only surfaced in the
 /// UI when `show_tool_activity` is enabled on the thread.
 ///
-/// Returns `Some(id)` on success so the caller can record the ID for precise
-/// cleanup if the run is later cancelled.
+/// Returns `Some(msg)` on success so the caller can record the ID for precise
+/// cleanup if the run is later cancelled, and emit SSE events with message metadata.
 async fn persist_tool_message(
     pool: &SqlitePool,
     thread_id: &str,
     role: &str,
     content: &str,
     execution_id: Option<&str>,
-) -> Option<String> {
+    tool_call_id: Option<&str>,
+    tool_round: Option<u32>,
+) -> Option<Message> {
     let msg = Message {
         id: uuid::Uuid::new_v4().to_string(),
         thread_id: thread_id.to_string(),
@@ -1727,8 +1921,8 @@ async fn persist_tool_message(
 
     match sqlx::query(
         "INSERT INTO messages (id, thread_id, role, content, source, routine_id, visibility,
-                               execution_id, event_type, stopped, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                               execution_id, event_type, stopped, created_at, tool_call_id, tool_round)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&msg.id)
     .bind(&msg.thread_id)
@@ -1741,10 +1935,12 @@ async fn persist_tool_message(
     .bind(&msg.event_type)
     .bind(msg.stopped)
     .bind(&msg.created_at)
+    .bind(tool_call_id)
+    .bind(tool_round.map(|r| r as i64))
     .execute(pool)
     .await
     {
-        Ok(_) => Some(msg.id),
+        Ok(_) => Some(msg),
         Err(e) => {
             warn!(thread_id = %thread_id, error = %e, "Failed to persist tool message");
             None

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { X } from "lucide-react";
+
 import type { SettingsTab } from "./shared";
 import { SettingsSidebar } from "./SettingsNav";
 import { ProviderSettings } from "./ProviderSettings";
@@ -135,44 +135,6 @@ export function SettingsModal({
               {tab === "archived-threads" && <ArchivedThreadsSettings />}
             </div>
           </div>
-
-          {/* Close × button */}
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close settings"
-            style={{
-              position: "absolute",
-              top: 14,
-              right: 14,
-              width: 28,
-              height: 28,
-              borderRadius: 6,
-              background: "transparent",
-              border: "none",
-              color: "var(--text-tertiary)",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              transition: "background 0.15s, color 0.15s",
-              fontFamily: "inherit",
-            }}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.background =
-                "var(--bg-elevated)";
-              (e.currentTarget as HTMLButtonElement).style.color =
-                "var(--text-primary)";
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.background =
-                "transparent";
-              (e.currentTarget as HTMLButtonElement).style.color =
-                "var(--text-tertiary)";
-            }}
-          >
-            <X size={15} />
-          </button>
         </div>
       </div>
     </>

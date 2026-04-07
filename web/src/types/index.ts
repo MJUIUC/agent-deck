@@ -24,7 +24,6 @@ export interface Thread {
   active_provider: string | null;
   system_prompt_addendum: string | null;
   status: string;
-  show_tool_activity: boolean;
   show_system_events: boolean;
   // Summarization fields (server-managed, read-only from client)
   summary: string | null;
@@ -158,6 +157,38 @@ export interface SseRetryEvent {
   reason: string;
 }
 
+export interface SseToolStartEvent {
+  event: "tool_start";
+  tool_name: string;
+  tool_call_id: string;
+  round: number;
+  input_preview: Record<string, string>;
+}
+
+export interface SseToolActivityEvent {
+  event: "tool_activity";
+  id: string;
+  role: string;
+  content: string;
+  created_at: string;
+  tool_call_id: string;
+  round: number;
+}
+
+export interface SseToolRoundCompleteEvent {
+  event: "tool_round_complete";
+  round: number;
+  tool_count: number;
+}
+
+export interface SseChatSegmentEvent {
+  event: "chat_segment";
+  id: string;
+  thread_id: string;
+  content: string;
+  created_at: string;
+}
+
 export type SseThreadEvent =
   | SseTokenEvent
   | SseMessageCompleteEvent
@@ -165,7 +196,11 @@ export type SseThreadEvent =
   | SseErrorEvent
   | SseSystemEventEvent
   | SseCancelledEvent
-  | SseRetryEvent;
+  | SseRetryEvent
+  | SseToolStartEvent
+  | SseToolActivityEvent
+  | SseToolRoundCompleteEvent
+  | SseChatSegmentEvent;
 
 // Global SSE event from copilot.rs GlobalEvent
 export interface SseThreadUpdatedEvent {
@@ -221,10 +256,31 @@ export interface StreamingMessage {
 
 // ── Thread state machine ──────────────────────────────────────────────────────
 
+export interface ToolCallEntry {
+  tool_call_id: string;
+  tool_name: string;
+  input_preview: Record<string, string>;
+  status: "in_progress" | "completed" | "cancelled";
+  call_message_id: string | null;
+  result_message_id: string | null;
+  result_content: string | null; // tool output from tool_activity SSE
+}
+
+export interface ProcessingRound {
+  round: number;
+  tools: ToolCallEntry[];
+  status: "in_progress" | "completed" | "cancelled";
+  reasoning: string;
+}
+
+export type StreamingEntry =
+  | { type: "text"; content: string }
+  | { type: "processing"; rounds: ProcessingRound[] };
+
 export type ThreadPhase =
   | { status: "idle" }
   | { status: "sending"; optimisticId: string }
-  | { status: "streaming"; content: string }
+  | { status: "streaming"; entries: StreamingEntry[] }
   | { status: "error"; message: string; recoverable: boolean };
 
 export interface ThreadState {
@@ -234,11 +290,14 @@ export interface ThreadState {
   queuedCount?: number;
   // ── Pagination ──────────────────────────────────────────────────────────────
   /** ID of the oldest loaded message — used as `before` cursor for load-more */
-  oldestLoadedId: string | null;
+  oldestLoadedId?: string | null;
   /** Whether older messages exist on the server beyond what's loaded */
-  hasMore: boolean;
+  hasMore?: boolean;
   /** True while a load-more fetch is in progress (prevents double-fetch) */
-  isLoadingMore: boolean;
+  isLoadingMore?: boolean;
+  /** Processing rounds from the most recent streaming turn. Preserved across
+   *  phase transitions so the ProcessingBubble survives finalizeStream/cancel. */
+  lastProcessingRounds?: ProcessingRound[] | null;
 }
 
 export type ThreadMap = Record<string, ThreadState>;

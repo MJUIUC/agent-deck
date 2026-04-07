@@ -1294,7 +1294,7 @@ Acceptance criteria:
 
 ---
 
-**Story 7.3 — PWA service worker and client subscription**
+**Story 7.3 — PWA service worker and client subscription** ✅ Complete
 Branch: `feature/phase7-pwa-push-client`
 
 Implement the service worker push handler and the client-side subscription flow.
@@ -1343,6 +1343,26 @@ Acceptance criteria:
 
 ---
 
+**Story 7.3a — Unified tool-call processing view** ✅ Complete (QoL side-track)
+Branch: `feature/phase7-tool-call-grouping`
+
+All tool activity for an agent response is consolidated into a single expandable `<ProcessingBlock>` instead of individual per-tool spinner indicators and per-message `<ToolActivityBubble>` rows. The final assistant text response appears in a clean, separate bubble below the block once all tool rounds are done. Tools within a round execute in parallel.
+
+Research and design decisions are documented in `docs/PLAN/tool-call-grouping.md`.
+
+Acceptance criteria:
+- All tool calls within an agent response are grouped into a single `<ProcessingBlock>`; no individual "Running tool…" spinners appear
+- The `<ProcessingBlock>` is collapsed by default while running, showing a spinner and "Processing…"
+- Expanding the block during streaming shows each tool as `tool_name · preview` with a per-tool status icon (⟳ in-progress, ✓ completed)
+- Tools within a round execute in parallel; multiple ⟳ rows appear simultaneously in the expanded view
+- Reasoning text generated between rounds appears as a "Reasoning" section inside the expanded block
+- After all tool rounds complete, the final assistant response appears in its own message bubble below the `<ProcessingBlock>`
+- Stopping mid-turn renders the `<ProcessingBlock>` in a cancelled state (dashed border, grey icon)
+- In history, tool messages load as a single grouped `<ProcessingBlock>` per execution, collapsed by default
+- `<ToolActivityBubble>` is removed; the `show_tool_activity` thread toggle is removed
+
+---
+
 ### Phase 8 — MCP Depth
 
 **Goal:** MCP servers are fully first-class. Tool inspector works, local server process management is robust, and the platform is ready for any MCP integration.
@@ -1376,6 +1396,35 @@ Acceptance criteria:
 - Integration test: start a local server, kill its process, verify restart and reconnection
 
 ---
+
+---
+
+### Phase 8.5 — Tailscale Platform Layer + Webhook Integration
+
+**Goal:** Make Tailscale a first-class citizen of agent-deck. Surface live VPN status in the UI and give the agent tools to answer connectivity questions. Add a single universal webhook endpoint that lets any external service (GitHub, Stripe, CI/CD, IoT) trigger the agent by posting to `https://{hostname}/api/webhooks`. Routing is by HMAC secret — one stable URL for all services, forever.
+
+**Design principle:** Tailscale is a hard prerequisite for agent-deck. This phase makes that visible and useful rather than silent. Tailscale Funnel (already implied by the Tailscale requirement) provides the stable public HTTPS URL needed for webhook receipt — no third-party relay, no extra tooling.
+
+**See:** `docs/AD-8.5.md` for the full story specification.
+
+---
+
+**Story 8.5a — Tailscale Status API and UI**
+Branch: `feature/phase8-tailscale-platform`
+
+Implement `services/tailscale.rs` to query the `tailscale` binary for connection state, Funnel status, hostname, and IP address. Cache results in AppState (30s TTL). Add four endpoints: `GET /api/tailscale/status`, `POST /api/tailscale/connect`, `POST /api/tailscale/funnel/enable`, `POST /api/tailscale/funnel/disable`. Add a `tailscale_status` built-in agent tool (returns connection state, hostname, Funnel URL, and active webhook bindings). Surface a live `TailscaleStatusCard` component in General Settings and Mobile Settings. Add a VPN status dot to the desktop sidebar and mobile nav bar.
+
+Acceptance criteria: see `docs/AD-8.5.md` § Story 8.5a Acceptance Criteria
+
+---
+
+**Story 8.5b — Generic Webhook Trigger**
+Branch: `feature/phase8-tailscale-platform` (same branch, sequenced after 8.5a)
+
+Add migration 013 (`webhook_bindings` table). Implement a single public endpoint `POST /api/webhooks` — no auth cookie, security by HMAC-SHA256 secret matching across all enabled bindings. First matching binding determines the source formatter (GitHub, Stripe, generic) and destination thread. The formatted natural-language payload is injected via `notify_internal` → agent run-loop. Refactor `notify_internal` out of the existing `notify` handler. Add auth-protected CRUD at `GET/POST/DELETE/PATCH /api/threads/:id/webhook-bindings`. Surface a Webhooks section in ConfigPane and MobileConfigSheet with one-time secret display on create. Ship `docs/skills/github-webhook.md`.
+
+Acceptance criteria: see `docs/AD-8.5.md` § Story 8.5b Acceptance Criteria
+
 
 ### Phase 9 — Polish and Hardening
 
@@ -1455,3 +1504,15 @@ The v1 memory system uses SQLite FTS5 keyword search. If memory is migrated to a
 
 ### Thread Hard Search
 Full-text search across all threads and messages. Useful as the thread list grows. SQLite FTS5 on the `messages` table would power this.
+
+### Agent Skills — Routine Creation and MCP Configuration
+
+Rather than implementing platform actions as hardcoded Rust tools, certain capabilities should be delivered as **skill files** — Markdown documents that describe the platform's own API contract in a form the agent can reason about. When a persona has a relevant skill attached, the agent can guide the user through or autonomously execute multi-step platform tasks using natural language and the existing REST API.
+
+Initial skills planned:
+
+**`create-routine.md`** — Teaches the agent the `POST /api/threads/:id/routines` contract (`name`, `prompt`, `cron_expr`). The agent can create a routine on the user's behalf from a plain-English request ("Create a morning briefing that runs at 8am every weekday") without any dedicated mobile UI. Solves the current gap where routines can only be created from the desktop Settings pane.
+
+**`configure-mcp.md`** — Teaches the agent the MCP server CRUD API (`POST/PUT/DELETE /api/mcp-servers`). The agent can help the user add, configure, or troubleshoot an MCP server through conversation.
+
+Stub files live at `docs/skills/create-routine.md` and `docs/skills/configure-mcp.md` and describe the API contracts. Infrastructure still needed: a mechanism for attaching skill files to personas (a `personas/<tag>/skills/` directory or a `skills` field on the persona row) and loading the relevant skill content into the agent context at run time.
