@@ -209,21 +209,46 @@ export function ChatView({
     | { type: "tool_group"; executionId: string; rounds: ProcessingRound[] };
 
   const processedItems = useMemo((): ProcessedItem[] => {
-    // First pass: group all tool messages by execution_id.
-    // We pre-collect every tool message into a map keyed by execution_id so
-    // that chat_segment messages inserted between tool rounds (inter-round
-    // reasoning text) do not split a single run's tools into multiple blocks.
+    // First pass: group tool messages into runs, then add date dividers.
+    //
+    // Messages WITH execution_id are pre-collected by that id so that
+    // chat_segment entries between rounds don't split the group.
+    //
+    // Messages WITHOUT execution_id (runs from before the execution_id
+    // backend fix) are assigned a synthetic slot key: a contiguous run of
+    // source:"tool" messages, possibly separated only by chat_segment entries,
+    // all share one slot key and collapse into a single ProcessingBlock.
     type RawItem =
       | { type: "message"; message: Message }
       | { type: "tool_group"; executionId: string; rounds: ProcessingRound[] };
 
     const toolMsgsByExecId = new Map<string, Message[]>();
+    const nullSlotKeys = new Map<string, string>(); // msg.id → slot key
+    let slotCounter = 0;
+    let openSlotKey: string | null = null;
+
     for (const m of visibleMessages) {
       if (m.source === "tool") {
-        const eid = m.execution_id ?? m.id;
-        const arr = toolMsgsByExecId.get(eid);
+        let key: string;
+        if (m.execution_id) {
+          key = m.execution_id;
+          openSlotKey = null; // execution_id run doesn't share a null slot
+        } else {
+          if (openSlotKey === null) {
+            openSlotKey = `__slot_${slotCounter++}`;
+          }
+          key = openSlotKey;
+          nullSlotKeys.set(m.id, key);
+        }
+        const arr = toolMsgsByExecId.get(key);
         if (arr) arr.push(m);
-        else toolMsgsByExecId.set(eid, [m]);
+        else toolMsgsByExecId.set(key, [m]);
+      } else if (m.event_type === "chat_segment") {
+        // Inter-round reasoning segment: keep the current null slot open so
+        // the following round's tool messages join the same block.
+      } else {
+        // User message or final assistant text: close the current null slot.
+        openSlotKey = null;
       }
     }
 
@@ -232,11 +257,11 @@ export function ChatView({
 
     for (const msg of visibleMessages) {
       if (msg.source === "tool") {
-        const executionId = msg.execution_id ?? msg.id;
-        if (emittedExecIds.has(executionId)) continue;
-        emittedExecIds.add(executionId);
+        const key = msg.execution_id ?? nullSlotKeys.get(msg.id) ?? msg.id;
+        if (emittedExecIds.has(key)) continue;
+        emittedExecIds.add(key);
 
-        const group = toolMsgsByExecId.get(executionId) ?? [];
+        const group = toolMsgsByExecId.get(key) ?? [];
         const calls = group.filter((m) => m.role === "assistant");
         const results = group.filter((m) => (m.role as string) === "tool");
         const roundEntries = calls.map((call, idx): ToolCallEntry => {
@@ -264,7 +289,7 @@ export function ChatView({
                 },
               ]
             : [];
-        rawItems.push({ type: "tool_group", executionId, rounds });
+        rawItems.push({ type: "tool_group", executionId: key, rounds });
       } else {
         rawItems.push({ type: "message", message: msg });
       }
