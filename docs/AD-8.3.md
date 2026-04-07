@@ -258,51 +258,84 @@ Tasks 1–4 all write to `MobileSettings.tsx` and must be done sequentially to a
 
 ## Acceptance Criteria
 
-- [ ] Per-thread MCP section renders in `MobileConfigSheet` below the Routines section
-- [ ] Per-thread MCP: lists currently attached servers with status dot and server name
-- [ ] Per-thread MCP: status dots update in near-real-time via `lastMcpStatusChange` SSE events
-- [ ] Per-thread MCP: tapping × detaches the server, calls `DELETE /api/threads/:id/mcp-servers/:mcpServerId`, and removes the row
-- [ ] Per-thread MCP: "+ Attach Server" opens a picker showing only unattached servers
-- [ ] Per-thread MCP: selecting a server from the picker attaches it, calls `POST /api/threads/:id/mcp-servers`, and adds the row
-- [ ] Per-thread MCP: picker shows an empty state when all available servers are already attached
-- [ ] Providers section renders in `MobileSettings` below the existing "Install as App" and "Notifications" sections
-- [ ] Providers: list shows all configured providers with name, base URL, and enabled toggle
-- [ ] Providers: toggling enabled calls `PUT /api/providers/:id` and the UI reflects the updated state
-- [ ] Providers: "+ Add Provider" button opens a slide-up full-screen drawer
-- [ ] Providers: add form collects name (required), kind (segmented control), base URL, and API key
-- [ ] Providers: successful create refreshes the list and closes the drawer
-- [ ] Providers: delete with inline confirmation calls `DELETE /api/providers/:id`
-- [ ] Credentials section renders below the Providers section
-- [ ] Credentials: list shows key, display_name, and service for each credential — no secret values shown
-- [ ] Credentials: "+ Add Credential" button opens a slide-up drawer
-- [ ] Credentials: add form collects key (required), display_name (required), service (optional), credential_type (dropdown), and secret (password field)
-- [ ] Credentials: successful create refreshes the list and closes the drawer
-- [ ] Credentials: delete with inline confirmation calls `DELETE /api/credentials/:key`
-- [ ] MCP Servers section renders below the Credentials section
-- [ ] MCP Servers: list shows name, type badge (local/remote), status dot, and enabled toggle per server
-- [ ] MCP Servers: status dots update in near-real-time via `lastMcpStatusChange` SSE events without a full page refresh
-- [ ] MCP Servers: toggling enabled calls `PUT /api/mcp-servers/:id`
-- [ ] MCP Servers: "+ Add Server" button opens a slide-up drawer
-- [ ] MCP Servers: add form shows executable + args fields when type is "local"; URL + credential_key fields when type is "remote"
-- [ ] MCP Servers: successful create refreshes the list and closes the drawer
-- [ ] MCP Servers: delete with inline confirmation calls `DELETE /api/mcp-servers/:id`
-- [ ] Personas section renders below the MCP Servers section
-- [ ] Personas: list shows emoji and name per persona; tapping a row opens the edit drawer pre-filled
-- [ ] Personas: edit drawer allows updating name, emoji, and system_prompt; save calls `PUT /api/personas/:id`
-- [ ] Personas: "+ Add Persona" button opens the same drawer in create mode with empty fields
-- [ ] Personas: successful create/update refreshes the list and closes the drawer
-- [ ] Personas: delete is disabled (button greyed out) for the default persona
-- [ ] Personas: delete with inline confirmation calls `DELETE /api/personas/:id` for non-default personas
-- [ ] All drawers are full-screen slide-up overlays consistent with the existing `MobileConfigSheet` visual style
-- [ ] All drawers include a sticky header with title and close button, a scrollable body, and a sticky footer with the primary action
-- [ ] No desktop-only features are included: no env-var editor, no tool inspector, no Copilot device-auth flow
-- [ ] Per-thread MCP attach/detach calls `threadsApi.notify` for both attach and detach events (silently degrades on failure)
+- [x] Per-thread MCP section renders in `MobileConfigSheet` below the Routines section
+- [x] Per-thread MCP: lists currently attached servers with status dot and server name
+- [x] Per-thread MCP: status dots update in near-real-time via `lastMcpStatusChange` SSE events
+- [x] Per-thread MCP: tapping × detaches the server, calls `DELETE /api/threads/:id/mcp-servers/:mcpServerId`, and removes the row
+- [x] Per-thread MCP: "+ Attach Server" opens a picker showing only unattached servers
+- [x] Per-thread MCP: selecting a server from the picker attaches it, calls `POST /api/threads/:id/mcp-servers`, and adds the row
+- [x] Per-thread MCP: picker shows an empty state when all available servers are already attached
+- [x] Providers section renders in `MobileSettings` below the existing "Install as App" and "Notifications" sections
+- [x] Providers: list shows all configured providers with name, base URL, and enabled toggle
+- [x] Providers: toggling enabled calls `PUT /api/providers/:id` and the UI reflects the updated state
+- [x] Providers: "+ Add Provider" button opens a slide-up full-screen drawer
+- [x] Providers: add form collects name (required), kind (segmented control), base URL, and API key
+- [x] Providers: successful create refreshes the list and closes the drawer
+- [x] Providers: delete with inline confirmation calls `DELETE /api/providers/:id`
+- [x] Credentials section renders below the Providers section
+- [x] Credentials: list shows key, display_name, and service for each credential — no secret values shown
+- [x] Credentials: "+ Add Credential" button opens a slide-up drawer
+- [x] Credentials: add form collects key (required), display_name (required), service (optional), credential_type (dropdown), and secret (password field)
+- [x] Credentials: successful create refreshes the list and closes the drawer
+- [x] Credentials: delete with inline confirmation calls `DELETE /api/credentials/:key`
+- [x] MCP Servers section renders below the Credentials section
+- [x] MCP Servers: list shows name, type badge (local/remote), status dot, and enabled toggle per server
+- [x] MCP Servers: status dots update in near-real-time via `lastMcpStatusChange` SSE events without a full page refresh
+- [x] MCP Servers: toggling enabled calls `PUT /api/mcp-servers/:id`
+- [x] MCP Servers: "+ Add Server" button opens a slide-up drawer
+- [x] MCP Servers: add form shows executable + args fields when type is "local"; URL + credential_key fields when type is "remote"
+- [x] MCP Servers: successful create refreshes the list and closes the drawer
+- [x] MCP Servers: delete with inline confirmation calls `DELETE /api/mcp-servers/:id`
+- [x] Personas section renders below the MCP Servers section
+- [x] Personas: list shows emoji and name per persona; tapping a row opens the edit drawer pre-filled
+- [x] Personas: edit drawer allows updating name, emoji, and system_prompt; save calls `PUT /api/personas/:id`
+- [x] Personas: "+ Add Persona" button opens the same drawer in create mode with empty fields
+- [x] Personas: successful create/update refreshes the list and closes the drawer
+- [x] Personas: delete is disabled (button greyed out) for the default persona
+- [x] Personas: delete with inline confirmation calls `DELETE /api/personas/:id` for non-default personas
+- [x] All drawers are full-screen slide-up overlays consistent with the existing `MobileConfigSheet` visual style
+- [x] All drawers include a sticky header with title and close button, a scrollable body, and a sticky footer with the primary action
+- [x] No desktop-only features are included: no env-var editor, no tool inspector, no Copilot device-auth flow
+- [x] Per-thread MCP attach/detach calls `threadsApi.notify` for both attach and detach events (silently degrades on failure)
 
 ---
 
 ## Human Review Instructions
 
-To be filled in after implementation.
+**Prerequisites:** Server running on port 7474. At least one provider, credential, MCP server, and persona already configured via desktop, OR be prepared to create them fresh on mobile.
+
+**Steps:**
+
+1. Open agent-deck on a mobile device (or narrow the browser to mobile width). Navigate to **Settings** tab. → **Expected:** Settings screen shows four new sections below "Install as App" and "Notifications": Providers, Credentials, MCP Servers, Personas. / **Failure:** Sections missing or layout broken.
+
+2. **Providers** — Tap the enabled toggle on an existing provider. → **Expected:** Toggle flips, `PUT /api/providers/:id` fires, state updates without page reload. / **Failure:** Toggle has no effect or page reloads.
+
+3. **Providers** — Tap "+ Add Provider", fill in Name and API Key, tap Save. → **Expected:** Drawer slides up, form accepts input, drawer closes on save, new provider appears in list. / **Failure:** Drawer doesn't open, Save does nothing, or provider doesn't appear.
+
+4. **Providers** — Tap ✕ on a provider, confirm delete. → **Expected:** Inline "Delete?" row appears, confirming calls `DELETE /api/providers/:id` and removes the row. / **Failure:** Confirm row doesn't appear or row persists after delete.
+
+5. **Credentials** — Tap "+ Add Credential", fill in all fields (Key, Display Name, Type, Secret), tap Save. → **Expected:** Credential appears in list showing display_name and key — no secret value shown. / **Failure:** Secret is visible in the list, or create fails.
+
+6. **MCP Servers** — Observe the status dot colour on an existing connected server. → **Expected:** Dot is green. While watching, if a server reconnects the dot updates without manual refresh. / **Failure:** Dot is wrong colour or never updates.
+
+7. **MCP Servers** — Tap "+ Add Server", choose "Remote" type, fill URL, tap Save. → **Expected:** Server fields switch between Executable/Args (local) and URL/Credential Key (remote) based on the segmented control. New server appears in list. / **Failure:** Fields don't switch, or server isn't created.
+
+8. **Personas** — Tap an existing persona row. → **Expected:** Edit drawer opens pre-filled with the persona's name, emoji, and system prompt. Editing and saving calls `PUT /api/personas/:id`. / **Failure:** Drawer opens empty, or save does nothing.
+
+9. **Personas** — Attempt to delete the default persona. → **Expected:** Delete button (✕) is greyed out and non-interactive. / **Failure:** Delete button is active for the default persona.
+
+10. **Per-thread MCP** — Open a thread, tap the config (⚙) button to open `MobileConfigSheet`. Scroll to the **Tools** section below Routines. → **Expected:** "Tools" section visible with any currently attached servers listed, each with a status dot and ✕ button. "+ Attach Server" button at the bottom. / **Failure:** Tools section missing.
+
+11. **Per-thread MCP** — Tap "+ Attach Server". → **Expected:** Picker overlay slides in listing only servers NOT already attached. Tapping one attaches it (calls `POST /api/threads/:id/mcp-servers`) and adds the row. / **Failure:** Already-attached servers appear in picker, or attach call fails.
+
+12. **Per-thread MCP** — Tap ✕ on an attached server. → **Expected:** Row disappears, `DELETE /api/threads/:id/mcp-servers/:mcpServerId` fires. / **Failure:** Row persists or API call not made.
+
+13. **Per-thread MCP empty state** — Attach all available servers, then tap "+ Attach Server" again. → **Expected:** Picker shows "All available servers are attached." / **Failure:** Picker shows servers or is empty without the message.
+
+**Optional server log check:**
+```
+grep "mcp_server_attached\|mcp_server_detached" ~/.agent-deck/server.log
+```
 
 ---
 
