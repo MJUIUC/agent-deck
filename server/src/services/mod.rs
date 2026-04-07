@@ -11,6 +11,7 @@ pub mod provider;
 pub mod push;
 pub mod scheduler;
 pub mod summarization;
+pub mod terminal_mcp_install;
 pub mod title;
 pub mod tools;
 pub mod vapid;

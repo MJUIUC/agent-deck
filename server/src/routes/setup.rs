@@ -3,6 +3,7 @@ use std::sync::Arc;
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use tracing::warn;
 
 use crate::{
     error::{AppError, AppResult},
@@ -110,6 +111,17 @@ pub async fn complete(
     .bind(&now)
     .execute(&state.pool)
     .await?;
+
+    // Ensure the terminal MCP server is registered for this new user.
+    // The binary build (if needed) happens asynchronously in the background.
+    if let Err(e) = crate::services::terminal_mcp_install::ensure_terminal_mcp(
+        &state.config.mcp_dir,
+        &state.pool,
+    )
+    .await
+    {
+        warn!("setup: terminal MCP registration failed: {}", e);
+    }
 
     Ok((
         StatusCode::OK,
