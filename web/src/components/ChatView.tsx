@@ -535,6 +535,7 @@ export function ChatView({
                         rounds={entry.rounds}
                         personaEmoji={personaEmoji}
                         personaName={personaName}
+                        streaming={isStreaming}
                       />
                     );
                   }

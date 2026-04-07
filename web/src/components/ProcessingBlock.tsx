@@ -1,6 +1,5 @@
 import { useState } from "react";
 import {
-  Settings,
   InProgress,
   CheckmarkFilled,
   CloseFilled,
@@ -14,16 +13,23 @@ import styles from "./ProcessingBlock.module.css";
 
 interface ProcessingBlockProps {
   rounds: ProcessingRound[];
+  streaming?: boolean;
 }
 
-export function ProcessingBlock({ rounds }: ProcessingBlockProps) {
+export function ProcessingBlock({
+  rounds,
+  streaming = false,
+}: ProcessingBlockProps) {
   const [expanded, setExpanded] = useState(false);
 
-  const anyInProgress = rounds.some((r) => r.status === "in_progress");
+  const anyRoundInProgress = rounds.some((r) => r.status === "in_progress");
+  // Keep the spinner active while the parent streaming phase is still live
+  // (e.g. all tool rounds finished but the final text message hasn't arrived yet).
+  const isActive = streaming || anyRoundInProgress;
   const allCancelled =
     rounds.every((r) => r.status === "cancelled") && rounds.length > 0;
   let label: string;
-  if (anyInProgress) {
+  if (isActive) {
     label = "Processing…";
   } else if (allCancelled) {
     label = "Stopped";
@@ -39,8 +45,8 @@ export function ProcessingBlock({ rounds }: ProcessingBlockProps) {
         aria-expanded={expanded}
       >
         <span className={styles.statusIcon}>
-          {anyInProgress ? (
-            <Settings size={14} className={styles.spinning} />
+          {isActive ? (
+            <span className={styles.cogSpinner} />
           ) : allCancelled ? (
             <CloseFilled size={14} />
           ) : (
@@ -146,19 +152,21 @@ interface ProcessingBubbleProps {
   rounds: ProcessingRound[];
   personaEmoji: string;
   personaName?: string;
+  streaming?: boolean;
 }
 
 export function ProcessingBubble({
   rounds,
   personaEmoji,
   personaName,
+  streaming = false,
 }: ProcessingBubbleProps) {
   return (
     <div className={styles.row}>
       <div className={styles.avatar}>{personaEmoji}</div>
       <div className={styles.col}>
         <div className={styles.bubble}>
-          <ProcessingBlock rounds={rounds} />
+          <ProcessingBlock rounds={rounds} streaming={streaming} />
         </div>
         <div className={styles.bubbleMeta}>{personaName ?? "Agent"}</div>
       </div>
