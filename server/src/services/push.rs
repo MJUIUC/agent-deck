@@ -1,9 +1,9 @@
 //! Web Push notification dispatch.
 //!
-//! Called after a routine agent run completes.  Sends a push notification to
-//! every registered subscription for the user, **unless** an SSE client is
-//! currently connected to the thread (in which case the notification is
-//! suppressed — the client is already live and will receive the update via SSE).
+//! Called after any agent run completes (routine or regular chat).  Sends a
+//! push notification to every registered subscription for the user.  Foreground
+//! suppression (i.e. skipping the notification when the app is open) is handled
+//! client-side by the service worker, so the server always attempts delivery.
 
 use anyhow::anyhow;
 use sqlx::SqlitePool;
@@ -13,23 +13,16 @@ use web_push::{ContentEncoding, SubscriptionInfo, VapidSignatureBuilder, WebPush
 use crate::models::push_subscription::PushSubscription;
 use crate::routes::AppState;
 
-/// Send a Web Push notification to every registered subscription for `user_id`,
-/// suppressing the notification if an SSE client is already connected to `thread_id`.
+/// Send a Web Push notification to every registered subscription for `user_id`.
 ///
-/// All errors are logged and swallowed — a push failure must never abort a routine run.
-pub async fn send_routine_push_notifications(
+/// All errors are logged and swallowed — a push failure must never abort an agent run.
+pub async fn send_push_notification(
     state: &AppState,
     thread_id: &str,
     user_id: &str,
     title: &str,
     body_text: &str,
 ) {
-    // ── Guard: SSE client is already watching — no push needed ────────────────
-    if state.has_thread_subscriber(thread_id) {
-        debug!(thread_id = %thread_id, "push: SSE client connected — skipping notification");
-        return;
-    }
-
     // ── Load subscriptions ────────────────────────────────────────────────────
     let subs: Vec<PushSubscription> = match sqlx::query_as(
         "SELECT id, user_id, endpoint, p256dh, auth, user_agent, created_at, updated_at
@@ -91,15 +84,6 @@ pub async fn send_routine_push_notifications(
             }
         }
     }
-}
-
-/// Returns `true` when a push notification should be sent for the given thread.
-/// A notification is warranted when no SSE client is currently connected.
-///
-/// This thin wrapper exists so the decision logic can be unit-tested without
-/// spinning up a full server.
-pub fn should_notify(has_sse_subscriber: bool) -> bool {
-    !has_sse_subscriber
 }
 
 // ── Private helpers ────────────────────────────────────────────────────────────
@@ -193,22 +177,4 @@ async fn send_one(
 // ── Unit tests ─────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn should_notify_when_no_sse_subscriber() {
-        assert!(
-            should_notify(false),
-            "must notify when no SSE client is connected"
-        );
-    }
-
-    #[test]
-    fn should_not_notify_when_sse_subscriber_present() {
-        assert!(
-            !should_notify(true),
-            "must NOT notify when SSE client is connected"
-        );
-    }
-}
+mod tests {}

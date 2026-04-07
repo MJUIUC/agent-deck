@@ -744,7 +744,7 @@ async fn run_inner(
         // Send a push notification if no SSE client is watching this thread.
         let push_title = format!("{} {}", persona.emoji, persona.name);
         let push_body = format!("Finished executing: {}", routine_name);
-        crate::services::push::send_routine_push_notifications(
+        crate::services::push::send_push_notification(
             state,
             thread_id,
             user_id,
@@ -765,6 +765,23 @@ async fn run_inner(
                 "RoutineFired global broadcast had no receivers"
             );
         }
+    }
+
+    // ── Web Push for regular chat replies ─────────────────────────────────────
+    // For routine runs the notification is sent inside the block above.
+    // For regular chat replies we send one here so the user is notified when
+    // a reply arrives while the app is backgrounded on mobile.
+    if routine_id_opt.is_none() {
+        let push_title = format!("{} {}", persona.emoji, persona.name);
+        let push_body: String = assistant_content.chars().take(120).collect();
+        crate::services::push::send_push_notification(
+            state,
+            thread_id,
+            user_id,
+            &push_title,
+            &push_body,
+        )
+        .await;
     }
 
     // ── 7. Emit ThreadUpdated SSE event ────────────────────────────────────────
