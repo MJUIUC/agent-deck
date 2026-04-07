@@ -30,6 +30,7 @@ use crate::services::tools::{self as tools_service, AgentTool};
 pub mod auth;
 pub mod config;
 pub mod credentials;
+pub mod fs;
 pub mod health;
 pub mod memory;
 pub mod messages;
@@ -398,6 +399,10 @@ pub async fn build_router(
             "/api/profile",
             get(profile::get_profile).put(profile::update_profile),
         )
+        // Filesystem explorer
+        .route("/api/fs/list", get(fs::list_directory))
+        .route("/api/fs/read", get(fs::read_file))
+        .route("/api/fs/workspace", get(fs::get_workspace))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,

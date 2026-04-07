@@ -496,6 +496,28 @@ async fn run_inner(
         }
     }
 
+    // Resolve the thread's workspace directory. Created if it doesn't exist.
+    // Skipped for routine runs — routines don't need file-sharing instructions.
+    let workspace_path: Option<String> = if !is_routine {
+        match dirs::home_dir() {
+            Some(home) => {
+                let workspace_dir = home.join("agent-deck-workspaces").join(thread_id);
+                if let Err(e) = tokio::fs::create_dir_all(&workspace_dir).await {
+                    warn!(thread_id = %thread_id, error = %e, "Failed to create workspace dir; continuing without it");
+                    None
+                } else {
+                    Some(workspace_dir.to_string_lossy().into_owned())
+                }
+            }
+            None => {
+                warn!(thread_id = %thread_id, "Could not determine home directory; workspace path skipped");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let mut assembled = context::assemble(AssemblyInput {
         persona_emoji: Some(persona.emoji.clone()),
         persona_system_prompt: persona.system_prompt.clone(),
@@ -526,6 +548,7 @@ async fn run_inner(
                 .collect()
         },
         mcp_tools: mcp_tool_defs.clone(),
+        workspace_path: workspace_path.clone(),
     });
 
     // ── 5. Generation loop — with reactive summarization on context-length error ──
@@ -633,6 +656,7 @@ async fn run_inner(
                             .collect()
                     },
                     mcp_tools: mcp_tool_defs.clone(),
+                    workspace_path: workspace_path.clone(),
                 });
                 continue;
             }
