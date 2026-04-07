@@ -74,7 +74,7 @@ export function ProcessingBlock({
 
       {expanded && (
         <div className={styles.body}>
-          {rounds.map((round, roundIdx) => (
+          {rounds.map((round) => (
             <div key={round.round} className={styles.round}>
               {rounds.length > 1 && (
                 <div className={styles.roundHeader}>
@@ -87,7 +87,7 @@ export function ProcessingBlock({
               {round.tools.map((tool) => (
                 <ToolRow key={tool.tool_call_id} tool={tool} />
               ))}
-              {round.reasoning && roundIdx < rounds.length - 1 && (
+              {round.reasoning && (
                 <div className={styles.reasoning}>
                   <div className={styles.reasoningLabel}>Reasoning</div>
                   <div className={styles.reasoningText}>{round.reasoning}</div>
