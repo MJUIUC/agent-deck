@@ -1343,7 +1343,7 @@ Acceptance criteria:
 
 ---
 
-**Story 7.3a — Unified tool-call processing view** (QoL side-track)
+**Story 7.3a — Unified tool-call processing view** ✅ Complete (QoL side-track)
 Branch: `feature/phase7-tool-call-grouping`
 
 All tool activity for an agent response is consolidated into a single expandable `<ProcessingBlock>` instead of individual per-tool spinner indicators and per-message `<ToolActivityBubble>` rows. The final assistant text response appears in a clean, separate bubble below the block once all tool rounds are done. Tools within a round execute in parallel.
@@ -1396,6 +1396,35 @@ Acceptance criteria:
 - Integration test: start a local server, kill its process, verify restart and reconnection
 
 ---
+
+---
+
+### Phase 8.5 — Tailscale Platform Layer + Webhook Integration
+
+**Goal:** Make Tailscale a first-class citizen of agent-deck. Surface live VPN status in the UI and give the agent tools to answer connectivity questions. Add a single universal webhook endpoint that lets any external service (GitHub, Stripe, CI/CD, IoT) trigger the agent by posting to `https://{hostname}/api/webhooks`. Routing is by HMAC secret — one stable URL for all services, forever.
+
+**Design principle:** Tailscale is a hard prerequisite for agent-deck. This phase makes that visible and useful rather than silent. Tailscale Funnel (already implied by the Tailscale requirement) provides the stable public HTTPS URL needed for webhook receipt — no third-party relay, no extra tooling.
+
+**See:** `docs/AD-8.5.md` for the full story specification.
+
+---
+
+**Story 8.5a — Tailscale Status API and UI**
+Branch: `feature/phase8-tailscale-platform`
+
+Implement `services/tailscale.rs` to query the `tailscale` binary for connection state, Funnel status, hostname, and IP address. Cache results in AppState (30s TTL). Add four endpoints: `GET /api/tailscale/status`, `POST /api/tailscale/connect`, `POST /api/tailscale/funnel/enable`, `POST /api/tailscale/funnel/disable`. Add a `tailscale_status` built-in agent tool (returns connection state, hostname, Funnel URL, and active webhook bindings). Surface a live `TailscaleStatusCard` component in General Settings and Mobile Settings. Add a VPN status dot to the desktop sidebar and mobile nav bar.
+
+Acceptance criteria: see `docs/AD-8.5.md` § Story 8.5a Acceptance Criteria
+
+---
+
+**Story 8.5b — Generic Webhook Trigger**
+Branch: `feature/phase8-tailscale-platform` (same branch, sequenced after 8.5a)
+
+Add migration 013 (`webhook_bindings` table). Implement a single public endpoint `POST /api/webhooks` — no auth cookie, security by HMAC-SHA256 secret matching across all enabled bindings. First matching binding determines the source formatter (GitHub, Stripe, generic) and destination thread. The formatted natural-language payload is injected via `notify_internal` → agent run-loop. Refactor `notify_internal` out of the existing `notify` handler. Add auth-protected CRUD at `GET/POST/DELETE/PATCH /api/threads/:id/webhook-bindings`. Surface a Webhooks section in ConfigPane and MobileConfigSheet with one-time secret display on create. Ship `docs/skills/github-webhook.md`.
+
+Acceptance criteria: see `docs/AD-8.5.md` § Story 8.5b Acceptance Criteria
+
 
 ### Phase 9 — Polish and Hardening
 
