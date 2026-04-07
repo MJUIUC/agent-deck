@@ -304,6 +304,14 @@ impl McpConnectionManager {
             warn!("mcp: startup_sync failed: {}", e);
         }
 
+        // Ensure the terminal MCP server is registered (idempotent; no-op if already present).
+        if let Err(e) =
+            crate::services::terminal_mcp_install::ensure_terminal_mcp(&self.mcp_dir, &self.pool)
+                .await
+        {
+            warn!("mcp: terminal MCP registration failed: {}", e);
+        }
+
         let rows: Vec<McpServerRow> = match sqlx::query_as(
             "SELECT id, tag, server_type, config, enabled FROM mcp_servers WHERE enabled = 1",
         )
