@@ -1,6 +1,5 @@
 import { useState } from "react";
 import {
-  InProgress,
   CheckmarkFilled,
   CloseFilled,
   ChevronRight,
@@ -118,7 +117,7 @@ function ToolRow({ tool }: { tool: ToolCallEntry }) {
       <div className={styles.toolRow}>
         <span className={styles.toolStatus}>
           {tool.status === "in_progress" ? (
-            <InProgress size={12} className={styles.spinning} />
+            <span className={styles.toolSpinner} />
           ) : tool.status === "cancelled" ? (
             <CloseFilled size={12} className={styles.mutedIcon} />
           ) : (
