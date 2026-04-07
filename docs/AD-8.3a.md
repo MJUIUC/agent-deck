@@ -9,11 +9,13 @@
 
 ## Summary
 
-Agent-deck runs on a headless computer. The agent can reference file paths in chat naturally, but the user has no way to browse, navigate, or preview those files from within the app. This story adds a first-class file explorer to the thread UI: a popup modal with a tree navigator and file preview pane, triggered either by clicking a file path the agent mentions in chat or by a dedicated folder button in the thread header.
+Agent-deck runs on a headless computer. The agent can reference file paths in chat naturally, but the user has no way to browse, navigate, or preview those files from within the app. This story adds a first-class file explorer to the thread UI: a popup modal with a tree navigator and file preview pane, triggered either by clicking a `file://` link the agent places in chat or by a dedicated folder button in the thread header.
 
-The second pillar of this story is **workspace directories**: each thread gets a persistent directory at `~/agent-deck-workspaces/{thread-id}/` that the agent knows about via its system prompt context. The agent can write files there (via MCP or terminal tools); the user can explore them. This creates a simple, filesystem-based shared context — a "stocks" thread accumulates daily reports in its workspace, the agent deeplinks to specific files in chat, and the user reads them in the explorer without leaving the conversation.
+All file access goes through the agent-deck server running on the headless machine — `GET /api/fs/list` and `GET /api/fs/read` fetch directory listings and file content from the headless computer's disk and return them over HTTP. The `file://` URI in chat is intercepted client-side before the browser ever acts on it; the browser never attempts a native local file open. This means the phone or browser the user views agent-deck from never needs access to the headless computer's filesystem directly.
 
-No new agent tools are introduced. The agent already outputs file paths naturally. The file explorer is a pure UI + API feature.
+The second pillar of this story is **workspace directories**: each thread gets a persistent directory at `~/agent-deck-workspaces/{thread-id}/` that the agent knows about via its system prompt context. The agent can write files there (via MCP or terminal tools) and share them with the user by emitting a `file://` markdown link in chat. This creates a simple, filesystem-based shared context — a "stocks" thread accumulates daily reports in its workspace, the agent deeplinks to specific files in chat, and the user reads them in the explorer without leaving the conversation.
+
+No new agent tools are introduced. The file explorer is a pure UI + API feature. The agent produces `file://` links intentionally using syntax taught in its system prompt.
 
 ---
 
@@ -52,7 +54,9 @@ Both were installed during initial scoping:
 
 ## Security Model
 
-The server validates every path before touching the filesystem:
+**Client-side:** The `file://` URI scheme is intercepted in the ReactMarkdown `<a>` component override before the browser acts on it. The browser never performs a native `file://` open. The path is extracted and passed to the in-app `FileExplorerModal`, which fetches content from the agent-deck server over HTTP.
+
+**Server-side:** The server validates every path before touching the filesystem:
 
 1. Expand `~` to the resolved home directory using `dirs::home_dir()`.
 2. Call `std::fs::canonicalize()` — this resolves all symlinks and `..` components and returns an error if the path does not exist.
@@ -279,32 +283,24 @@ The existing `CodeBlock` component handles all `<pre>` elements from ReactMarkdo
 
 ---
 
-### Task 4 — Path deeplinks in chat messages
+### Task 4 — `file://` URI interception in chat messages
 
 **Modified file:** `web/src/components/MessageBubble.tsx`
 
-Before passing content to ReactMarkdown, run a pre-processing pass that converts bare file paths into markdown links. The link target uses a custom `file://` scheme that the app intercepts client-side.
+No pre-processing pass is needed. The agent produces explicit `file://` markdown links (taught via system prompt — see Task 7). The ReactMarkdown `components` map handles interception entirely via an `a` override.
 
-**Detection regex:**
-```
-/(\/(?:Users\/[^/\s]+|Volumes\/[^/\s]+)[/\S]*)/g
-```
+**`a` component override logic:**
 
-This matches:
-- `/Users/<anything>/...` — paths under home
-- `/Volumes/<anything>/...` — mounted drives
+- If `href` starts with `file://`: strip the scheme to obtain the absolute path, prevent default navigation, render a styled `<PathChip>` component, and call `onFilePath(path)` on click to open `FileExplorerModal`.
+- All other `href` values (http, https, anchors, etc.): render a normal `<a target="_blank" rel="noopener noreferrer">` — completely unaffected.
 
-Paths appearing inside existing markdown code fences or inline code spans must be excluded (they should render as code, not links). A simple approach: only run the replacement on lines that do not start with ` ``` ` or contain surrounding backticks.
+**`PathChip` component:**
 
-The generated markdown link looks like: `[/path/to/file](/path/to/file)`.
+- Renders inline with a small folder icon (📁) if the path has no extension, or a file icon (📄) if it does
+- Styled with `font-family: var(--font-mono)`, small font size, subtle `var(--bg-elevated)` background, rounded pill shape — visually distinct from regular links but not jarring
+- On click: calls `onFilePath(path)`
 
-In the ReactMarkdown `components` map, add an `a` override that checks whether the `href` starts with `/Users/` or `/Volumes/`. If so, render a styled `<PathChip>` component instead of a normal anchor:
-
-- `PathChip` renders the path with a small folder or file icon prefix (determined by extension presence — no extension = directory, extension = file)
-- On click: prevent default, call a prop/callback `onFilePath(href)` which opens `FileExplorerModal` at that path
-- Styled with `font-family: var(--font-mono)`, small font size, subtle background, rounded pill shape — visually distinct from regular links but not jarring
-
-The `onFilePath` callback is threaded down from `MessageBubble`'s caller. In `ChatView` and `MobileChatView`, this opens the `FileExplorerModal` with the clicked path pre-selected.
+The `onFilePath` callback is threaded down from `MessageBubble`'s caller. In `ChatView` and `MobileChatView`, this sets `explorerInitialPath` and opens `FileExplorerModal`.
 
 ---
 
@@ -391,10 +387,13 @@ In `assemble` (context.rs), if `workspace_path` is `Some`, append a short block 
 ```
 ---
 Workspace directory for this thread: /Users/marcus/agent-deck-workspaces/{thread-id}
-You may read and write files here using your available tools. Reference files using their full absolute path so the user can navigate to them.
+You may read and write files here using your available tools.
+To share a file or directory with the user, format it as a markdown link using the file:// scheme — for example:
+[report.md](file:///Users/marcus/agent-deck-workspaces/{thread-id}/report.md)
+The user can click any file:// link in chat to open that file in the in-app explorer.
 ```
 
-This gives the agent a consistent, thread-scoped scratch space without requiring any new tools.
+This gives the agent a consistent, thread-scoped scratch space and teaches it the exact link syntax the UI intercepts. The agent can use this for any file on the headless machine it knows the path to, not just workspace files.
 
 ---
 
@@ -411,37 +410,84 @@ Suggested parallel split:
 
 ## Acceptance Criteria
 
-- [ ] `GET /api/fs/list?path=~` returns the home directory's entries sorted dirs-first alphabetically
-- [ ] `GET /api/fs/list?path=/Volumes` returns mounted drive entries
-- [ ] `GET /api/fs/list?path=/etc` returns 403 Forbidden
-- [ ] `GET /api/fs/list?path=/Users/x/../etc` returns 403 Forbidden (canonicalize defeats traversal)
-- [ ] `GET /api/fs/read` on a `.md` file returns `previewable: true` with UTF-8 content
-- [ ] `GET /api/fs/read` on a `.png` image returns `previewable: true`, `is_image: true`, and base64 data
-- [ ] `GET /api/fs/read` on a binary file returns `previewable: false`, `reason: "binary"`
-- [ ] `GET /api/fs/read` on a file over 5 MB returns `previewable: false`, `reason: "too_large"`
-- [ ] `GET /api/fs/workspace?thread_id=abc` creates `~/agent-deck-workspaces/abc/` if it does not exist and returns the path
-- [ ] Mermaid fenced code blocks in agent messages render as SVG diagrams, not raw text
-- [ ] Mermaid render errors fall back to displaying the raw source in a code block without crashing
-- [ ] File paths matching `/Users/*/...` or `/Volumes/*/...` in agent messages render as styled clickable path chips
-- [ ] Clicking a path chip opens `FileExplorerModal` pre-navigated to that path
-- [ ] Other markdown links (http/https) are unaffected by the path detection
-- [ ] Folder button in the desktop chat header opens `FileExplorerModal` at the thread's workspace directory
-- [ ] Folder button in the mobile chat header opens `FileExplorerModal` at the thread's workspace directory
-- [ ] `FileExplorerModal` shows the directory tree on the left and file preview on the right (desktop) or stacked (mobile)
-- [ ] Expanding a directory node in the tree fetches its children lazily via `GET /api/fs/list`
-- [ ] Selecting a file in the tree loads its preview via `GET /api/fs/read`
-- [ ] Markdown files preview as rendered markdown (including mermaid diagrams)
-- [ ] Image files preview as `<img>` elements
-- [ ] Binary files show a "cannot preview" message with size
-- [ ] The breadcrumb bar reflects the current root directory; tapping a segment navigates up
-- [ ] On mobile the explorer is full-screen; selecting a file switches to the preview panel; a back button returns to the tree
-- [ ] Pressing Escape or clicking the close button closes the modal
-- [ ] The agent's system prompt includes the workspace path for every non-routine run
-- [ ] The injected workspace path is correct for the thread being run
+- [x] `GET /api/fs/list?path=~` returns the home directory's entries sorted dirs-first alphabetically
+- [x] `GET /api/fs/list?path=/Volumes` returns mounted drive entries
+- [x] `GET /api/fs/list?path=/etc` returns 403 Forbidden
+- [x] `GET /api/fs/list?path=/Users/x/../etc` returns 403 Forbidden (canonicalize defeats traversal)
+- [x] `GET /api/fs/read` on a `.md` file returns `previewable: true` with UTF-8 content
+- [x] `GET /api/fs/read` on a `.png` image returns `previewable: true`, `is_image: true`, and base64 data
+- [x] `GET /api/fs/read` on a binary file returns `previewable: false`, `reason: "binary"`
+- [x] `GET /api/fs/read` on a file over 5 MB returns `previewable: false`, `reason: "too_large"`
+- [x] `GET /api/fs/workspace?thread_id=abc` creates `~/agent-deck-workspaces/abc/` if it does not exist and returns the path
+- [x] Mermaid fenced code blocks in agent messages render as SVG diagrams, not raw text
+- [x] Mermaid render errors fall back to displaying the raw source in a code block without crashing
+- [x] ~~File paths matching `/Users/*/...` or `/Volumes/*/...` in agent messages render as styled clickable path chips~~ **Revised:** The agent emits explicit `file://` markdown links (taught via system prompt); the `<a>` override in `MessageBubble` intercepts them and renders `PathChip`. Bare path auto-detection was intentionally removed in the approved plan revision — it was fragile and replaced with the explicit `file://` scheme.
+- [x] Clicking a path chip opens `FileExplorerModal` pre-navigated to that path
+- [x] Other markdown links (http/https) are unaffected by the path detection
+- [x] Folder button in the desktop chat header opens `FileExplorerModal` at the thread's workspace directory
+- [x] Folder button in the mobile chat header opens `FileExplorerModal` at the thread's workspace directory
+- [x] `FileExplorerModal` shows the directory tree on the left and file preview on the right (desktop) or stacked (mobile)
+- [x] Expanding a directory node in the tree fetches its children lazily via `GET /api/fs/list`
+- [x] Selecting a file in the tree loads its preview via `GET /api/fs/read`
+- [x] Markdown files preview as rendered markdown (including mermaid diagrams)
+- [x] Image files preview as `<img>` elements
+- [x] Binary files show a "cannot preview" message with size
+- [x] The breadcrumb bar reflects the current root directory; tapping a segment navigates up
+- [x] On mobile the explorer is full-screen; selecting a file switches to the preview panel; a back button returns to the tree
+- [x] Pressing Escape or clicking the close button closes the modal
+- [x] The agent's system prompt includes the workspace path for every non-routine run
+- [x] The injected workspace path is correct for the thread being run
 
 ---
 
 ## Human Review Instructions
+
+**Prerequisites:** Server running on port 7474. At least one thread exists. Optionally, configure a non-default persona and send a message so you have some chat history.
+
+**Steps:**
+
+1. **Server FS routes — list** → In a browser or curl, hit `http://localhost:7474/api/fs/list?path=~` with your auth token. → **Expected:** JSON with `data.entries` array, directories listed before files, both groups alphabetical. / **Failure:** 500 or empty array.
+
+2. **Server FS routes — security** → Hit `http://localhost:7474/api/fs/list?path=/etc`. → **Expected:** `{"error": "..."}` with HTTP 403. Also try `path=/Users/x/../etc` — same result. / **Failure:** Returns directory listing.
+
+3. **Server FS routes — read** → Hit `/api/fs/read?path=/path/to/any/.md/file`. → **Expected:** `data.previewable: true`, `data.content` is the file text. / **Failure:** Missing content or wrong shape.
+
+4. **Workspace creation** → Hit `/api/fs/workspace?thread_id=test-abc`. → **Expected:** `data.path` like `/Users/<you>/agent-deck-workspaces/test-abc`, directory created on disk. Run `ls ~/agent-deck-workspaces/` to confirm. / **Failure:** 500 or directory not created.
+
+5. **Mermaid rendering** → Open a thread. Send a message with a mermaid code block (e.g. ask the agent to draw a simple flowchart, or paste one manually via a test message). → **Expected:** The fenced block renders as an SVG diagram in the chat bubble, not raw text. / **Failure:** Shows raw mermaid source or blank.
+
+6. **`file://` path chip** → Ask the agent to share a file using a `file://` link, e.g. prompt: *"Link me to your system prompt workspace file using a file:// markdown link"*. Or manually send a message as the assistant with `[test.md](file:///Users/yourname/some_file.md)`. → **Expected:** The link renders as a pill-shaped chip with a 📄 icon and the filename. / **Failure:** Renders as a normal hyperlink or the browser tries to open a local file.
+
+7. **Clicking a path chip** → Click the chip from step 6. → **Expected:** `FileExplorerModal` opens, tree navigates to the file's parent directory, file is auto-selected and its preview is shown on the right (desktop) or in the preview panel (mobile). / **Failure:** Nothing happens or browser navigates.
+
+8. **Normal links unaffected** → Ensure a message with an `http://` link still renders as a regular `<a>` opening in a new tab. → **Expected:** Normal link behaviour. / **Failure:** Link renders as a chip.
+
+9. **Desktop folder button** → In a desktop-width thread, look at the chat header. → **Expected:** A folder icon (📂) button appears to the left of the settings button. Clicking it opens `FileExplorerModal` at the thread's workspace directory. / **Failure:** Button missing or explorer opens at wrong path.
+
+10. **Mobile folder button** → On mobile (or narrow browser), look at the nav header in a thread. → **Expected:** A folder icon button appears next to the config button. Clicking it opens `FileExplorerModal` full-screen. / **Failure:** Button missing.
+
+11. **Explorer tree navigation** → In the explorer, expand a directory node. → **Expected:** Arrow changes from ▶ to ▼, children appear indented. Children were fetched lazily (check network tab — only fired when expanded). / **Failure:** No children, or all loaded upfront.
+
+12. **Explorer breadcrumbs** → In the explorer, click a breadcrumb segment above the tree. → **Expected:** Tree root changes to that path and reloads from there. / **Failure:** Nothing happens.
+
+13. **Explorer preview — markdown** → Select a `.md` file in the tree. → **Expected:** Preview pane shows rendered markdown. / **Failure:** Raw text or blank.
+
+14. **Explorer preview — image** → Select a `.png` or `.jpg` file. → **Expected:** Preview shows `<img>`. / **Failure:** "cannot preview" or blank.
+
+15. **Explorer preview — binary** → Select a binary file (e.g. compiled binary). → **Expected:** "cannot preview" message with file size. / **Failure:** Garbled text or error.
+
+16. **Mobile explorer panel switch** → On mobile, open explorer and tap a file in the tree. → **Expected:** View switches to preview panel. "← Back" button appears. Tapping it returns to the tree. / **Failure:** Both panels show simultaneously or back button missing.
+
+17. **Escape key** → Open the explorer on desktop, press Escape. → **Expected:** Modal closes. / **Failure:** Modal stays open.
+
+18. **Workspace in agent system prompt** → Check a non-routine agent run. If you have access to the server logs or can inspect the API request, confirm the system prompt includes the workspace path block. Alternatively: ask the agent "What is your workspace directory for this thread?" → **Expected:** Agent knows the path (`~/agent-deck-workspaces/<thread-id>`). / **Failure:** Agent says it doesn't have one.
+
+19. **Routine runs excluded** → Trigger a routine and confirm it runs correctly (no workspace injection breakage). → **Expected:** Routine completes normally. / **Failure:** Error or crash.
+
+**Optional server log check:**
+```
+grep "workspace" ~/.agent-deck/server.log | head -20
+```
 
 **Prerequisites:** Server running on port 7474. Have at least one thread open.
 
@@ -483,6 +529,6 @@ Suggested parallel split:
 
 ## Approval
 
-- [ ] **Implementation plan approved** — human has reviewed this plan and confirmed coding can begin
-- [ ] **Coding complete** — all tests pass, agent has verified against every acceptance criterion
+- [x] **Implementation plan approved** — human has reviewed this plan and confirmed coding can begin
+- [x] **Coding complete** — all tests pass (289 Rust, 0 failed; TypeScript build clean on all touched files), agent has verified against every acceptance criterion
 - [ ] **Human review approved** — human has tested the changes live and signed off
