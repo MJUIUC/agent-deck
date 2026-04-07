@@ -19,6 +19,8 @@ import { ProcessingBubble } from "./ProcessingBlock";
 import { MessageInput } from "./MessageInput";
 import { ChatHeader } from "./ChatHeader";
 import { ConfigPane } from "./ConfigPane";
+import { FileExplorerModal } from "./FileExplorerModal";
+import { fsApi } from "@/api/client";
 
 import styles from "./ChatView.module.css";
 
@@ -129,6 +131,8 @@ export function ChatView({
 }: ChatViewProps) {
   const isDraft = thread.id === "pending";
   const [configOpen, setConfigOpen] = useState(false);
+  const [explorerOpen, setExplorerOpen] = useState(false);
+  const [explorerPath, setExplorerPath] = useState("");
 
   // Keep the thread id in a ref so selector closures don't go stale when the
   // prop changes between renders but before the effect re-runs.
@@ -285,6 +289,23 @@ export function ChatView({
     [isDraft, onFirstSend, thread.id, sendMessage],
   );
 
+  const handleOpenExplorer = useCallback(async () => {
+    try {
+      const res = await fsApi.workspace(thread.id);
+      setExplorerPath(res.data.path);
+      setExplorerOpen(true);
+    } catch {
+      // If workspace fetch fails, open explorer at home
+      setExplorerPath("~");
+      setExplorerOpen(true);
+    }
+  }, [thread.id]);
+
+  const handleFilePath = useCallback((path: string) => {
+    setExplorerPath(path);
+    setExplorerOpen(true);
+  }, []);
+
   const handleLoadMore = useCallback(async () => {
     if (!hasMore || isLoadingMore || isDraft) return;
     const el = containerRef.current;
@@ -325,6 +346,7 @@ export function ChatView({
         thread={thread}
         onToggleConfig={isDraft ? undefined : () => setConfigOpen((o) => !o)}
         onMobileMenuOpen={onMobileMenuOpen}
+        onOpenExplorer={handleOpenExplorer}
       />
 
       {/* ── Messages area ── */}
@@ -391,6 +413,7 @@ export function ChatView({
                         message={item.message}
                         personaEmoji={personaEmoji}
                         personaName={personaName}
+                        onFilePath={handleFilePath}
                       />
                     </Fragment>
                   );
@@ -412,6 +435,7 @@ export function ChatView({
                   personaEmoji={personaEmoji}
                   personaName={personaName}
                   content=""
+                  onFilePath={handleFilePath}
                 />
               )}
 
@@ -428,6 +452,7 @@ export function ChatView({
                         personaName={personaName}
                         content={entry.content}
                         streaming={isLast}
+                        onFilePath={handleFilePath}
                       />
                     );
                   }
@@ -480,6 +505,12 @@ export function ChatView({
           onArchiveThread={archiveThread}
         />
       )}
+
+      <FileExplorerModal
+        isOpen={explorerOpen}
+        initialPath={explorerPath}
+        onClose={() => setExplorerOpen(false)}
+      />
     </div>
   );
 }
