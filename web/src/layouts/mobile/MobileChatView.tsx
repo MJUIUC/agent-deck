@@ -327,16 +327,6 @@ export function MobileChatView({
     }
   }, [inputValue, isStreaming, threadId, onFirstSend, sendMessage]);
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        void handleSend();
-      }
-    },
-    [handleSend],
-  );
-
   const handleInputChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       setInputValue(e.target.value);
@@ -541,7 +531,6 @@ export function MobileChatView({
               placeholder="Message…"
               value={inputValue}
               onChange={handleInputChange}
-              onKeyDown={handleKeyDown}
               rows={1}
               aria-label="Message input"
               aria-multiline="true"
