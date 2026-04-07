@@ -156,6 +156,22 @@ function CodeBlock({
   );
 }
 
+function extractFsPath(href: string): string | null {
+  try {
+    // Match /api/fs/read?path=... and /api/fs/list?path=...
+    const url = new URL(href, window.location.origin);
+    if (
+      (url.pathname === "/api/fs/read" || url.pathname === "/api/fs/list") &&
+      url.searchParams.has("path")
+    ) {
+      return url.searchParams.get("path");
+    }
+  } catch {
+    // href was not a parseable URL — not a file link
+  }
+  return null;
+}
+
 function markdownComponents(onFilePath?: (path: string) => void) {
   return {
     pre: CodeBlock,
@@ -172,8 +188,8 @@ function markdownComponents(onFilePath?: (path: string) => void) {
       );
     },
     a({ href, children }: React.AnchorHTMLAttributes<HTMLAnchorElement>) {
-      if (href?.startsWith("file://")) {
-        const filePath = href.slice("file://".length);
+      const filePath = href ? extractFsPath(href) : null;
+      if (filePath) {
         return (
           <PathChip path={filePath} onClick={() => onFilePath?.(filePath)} />
         );

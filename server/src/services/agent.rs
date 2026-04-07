@@ -238,6 +238,56 @@ pub async fn run(
 
 // ─── Inner implementation ─────────────────────────────────────────────────────
 
+fn strip_markdown_for_notification(text: &str, max_chars: usize) -> String {
+    // Replace [label](url) with just the label so raw markdown syntax doesn't
+    // appear in push notification bodies.
+    let mut result = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '[' {
+            // Collect the label until ']'
+            let mut label = String::new();
+            let mut found_close_bracket = false;
+            for inner in chars.by_ref() {
+                if inner == ']' {
+                    found_close_bracket = true;
+                    break;
+                }
+                label.push(inner);
+            }
+            if found_close_bracket && chars.peek() == Some(&'(') {
+                // Consume the '('
+                chars.next();
+                // Skip everything until the matching ')'
+                for inner in chars.by_ref() {
+                    if inner == ')' {
+                        break;
+                    }
+                }
+                // Emit just the label text
+                result.push_str(&label);
+            } else {
+                // Not a link — emit the bracket and label as-is
+                result.push('[');
+                result.push_str(&label);
+                if found_close_bracket {
+                    result.push(']');
+                }
+            }
+        } else {
+            result.push(ch);
+        }
+    }
+    // Also collapse newlines to spaces for a cleaner single-line preview
+    let result: String = result
+        .split('\n')
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    result.chars().take(max_chars).collect()
+}
+
 async fn run_inner(
     state: &AppState,
     thread_id: &str,
@@ -797,7 +847,7 @@ async fn run_inner(
     // a reply arrives while the app is backgrounded on mobile.
     if routine_id_opt.is_none() {
         let push_title = format!("{} {}", persona.emoji, persona.name);
-        let push_body: String = assistant_content.chars().take(120).collect();
+        let push_body: String = strip_markdown_for_notification(&assistant_content, 120);
         crate::services::push::send_push_notification(
             state,
             thread_id,
