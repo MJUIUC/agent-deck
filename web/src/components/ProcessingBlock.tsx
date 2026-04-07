@@ -19,12 +19,15 @@ export function ProcessingBlock({
   rounds,
   streaming = false,
 }: ProcessingBlockProps) {
-  const [expanded, setExpanded] = useState(true);
-
   const anyRoundInProgress = rounds.some((r) => r.status === "in_progress");
   // Keep the spinner active while the parent streaming phase is still live
   // (e.g. all tool rounds finished but the final text message hasn't arrived yet).
   const isActive = streaming || anyRoundInProgress;
+
+  // null means the user hasn't manually toggled yet — follow isActive automatically.
+  // Once the user clicks, their choice is stored and takes precedence.
+  const [manualExpanded, setManualExpanded] = useState<boolean | null>(null);
+  const expanded = manualExpanded !== null ? manualExpanded : isActive;
   const allCancelled =
     rounds.every((r) => r.status === "cancelled") && rounds.length > 0;
   let label: string;
@@ -53,7 +56,7 @@ export function ProcessingBlock({
     <div className={`${styles.block} ${allCancelled ? styles.cancelled : ""}`}>
       <button
         className={styles.header}
-        onClick={() => setExpanded((v) => !v)}
+        onClick={() => setManualExpanded((v) => (v !== null ? !v : !expanded))}
         aria-expanded={expanded}
       >
         <span className={styles.statusIcon}>
