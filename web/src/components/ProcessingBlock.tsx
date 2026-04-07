@@ -30,7 +30,20 @@ export function ProcessingBlock({
     rounds.every((r) => r.status === "cancelled") && rounds.length > 0;
   let label: string;
   if (isActive) {
-    label = "Processing…";
+    const activeRound = [...rounds]
+      .reverse()
+      .find((r) => r.status === "in_progress");
+    const currentRound = activeRound ?? rounds[rounds.length - 1];
+    const toolNames = currentRound?.tools.map((t) => t.tool_name) ?? [];
+    const toolLabel =
+      toolNames.length === 0
+        ? "Processing…"
+        : toolNames.length === 1
+          ? toolNames[0]
+          : `${toolNames[0]} +${toolNames.length - 1}`;
+    const roundLabel =
+      rounds.length > 1 ? ` · Round ${currentRound?.round ?? 1}` : "";
+    label = `${toolLabel}${roundLabel}`;
   } else if (allCancelled) {
     label = "Stopped";
   } else {
