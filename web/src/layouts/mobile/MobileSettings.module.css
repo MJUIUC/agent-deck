@@ -525,3 +525,86 @@
     opacity: 0.45;
     cursor: not-allowed;
 }
+
+/* ── Theme section ───────────────────────────────────────────────────────── */
+
+.paletteGrid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.paletteSwatch {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 2px;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.paletteSwatchDot {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    background: var(--swatch-color);
+    transition: box-shadow 0.15s;
+    display: block;
+}
+
+.paletteSwatchActive .paletteSwatchDot {
+    box-shadow:
+        0 0 0 2px var(--bg-primary),
+        0 0 0 4px var(--swatch-color);
+}
+
+.paletteSwatchLabel {
+    font-size: 10px;
+    color: var(--text-tertiary);
+    transition: color 0.15s;
+    white-space: nowrap;
+}
+
+.paletteSwatchActive .paletteSwatchLabel {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+.modeSegmented {
+    display: flex;
+    margin-top: 10px;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--border-default);
+    align-self: flex-start;
+}
+
+.modeBtn {
+    flex: 1;
+    padding: 8px 18px;
+    font-size: 13px;
+    font-weight: 500;
+    border: none;
+    border-right: 1px solid var(--border-default);
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition:
+        background 0.15s,
+        color 0.15s;
+    font-family: inherit;
+}
+
+.modeBtn:last-child {
+    border-right: none;
+}
+
+.modeBtnActive {
+    background: var(--accent-primary);
+    color: var(--text-inverse, #fff);
+    font-weight: 600;
+}

@@ -1,4 +1,9 @@
 import { useEffect, useState, type ReactNode } from "react";
+import {
+  useThemeStore,
+  type Palette,
+  type Mode,
+} from "../../stores/useThemeStore";
 
 import {
   pushApi,
@@ -130,12 +135,32 @@ const ANDROID_STEPS: ReactNode[] = [
   </>,
 ];
 
+// ─── Theme palettes ───────────────────────────────────────────────────────────
+
+const PALETTES: { id: Palette; label: string; accent: string }[] = [
+  { id: "olive", label: "Olive", accent: "#7c8c5a" },
+  { id: "slate", label: "Slate", accent: "#58a6ff" },
+  { id: "midnight", label: "Midnight", accent: "#8b7fd4" },
+  { id: "rose", label: "Rose", accent: "#c47a8a" },
+  { id: "forest", label: "Forest", accent: "#4caf72" },
+  { id: "ember", label: "Ember", accent: "#d4853a" },
+  { id: "ocean", label: "Ocean", accent: "#2ab8d0" },
+  { id: "copper", label: "Copper", accent: "#c07840" },
+  { id: "sakura", label: "Sakura", accent: "#e8709a" },
+  { id: "noir", label: "Noir", accent: "#e0e0e0" },
+];
+
 // ─── MobileSettings ───────────────────────────────────────────────────────────
 
 export function MobileSettings() {
   const platform = usePlatform();
   const { state: notifState, recheck } = useNotificationStatus();
   const [notifLoading, setNotifLoading] = useState(false);
+
+  const palette = useThemeStore((s) => s.palette);
+  const mode = useThemeStore((s) => s.mode);
+  const setPalette = useThemeStore((s) => s.setPalette);
+  const setMode = useThemeStore((s) => s.setMode);
 
   // ── Providers ────────────────────────────────────────────────────────────────
   const [providers, setProviders] = useState<Provider[]>([]);
@@ -570,6 +595,63 @@ export function MobileSettings() {
 
       {/* ── Scrollable body ── */}
       <div className={`${styles.body} scrollbar-thin`}>
+        {/* ── Theme ── */}
+        <section className={styles.section}>
+          <div className={styles.sectionLabel}>Theme</div>
+          <div className={styles.sectionCard}>
+            {/* Palette swatches row */}
+            <div className={styles.row}>
+              <div className={styles.rowTitle}>Palette</div>
+              <div className={styles.paletteGrid}>
+                {PALETTES.map((p) => {
+                  const selected = palette === p.id;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      className={[
+                        styles.paletteSwatch,
+                        selected ? styles.paletteSwatchActive : "",
+                      ].join(" ")}
+                      style={
+                        { "--swatch-color": p.accent } as React.CSSProperties
+                      }
+                      onClick={() => setPalette(p.id)}
+                      aria-label={p.label}
+                      aria-pressed={selected}
+                      title={p.label}
+                    >
+                      <span className={styles.paletteSwatchDot} />
+                      <span className={styles.paletteSwatchLabel}>
+                        {p.label}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            {/* Appearance mode */}
+            <div className={styles.row}>
+              <div className={styles.rowTitle}>Appearance</div>
+              <div className={styles.modeSegmented}>
+                {(["system", "light", "dark"] as Mode[]).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    className={[
+                      styles.modeBtn,
+                      mode === m ? styles.modeBtnActive : "",
+                    ].join(" ")}
+                    onClick={() => setMode(m)}
+                  >
+                    {m.charAt(0).toUpperCase() + m.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+
         {/* ── Install as App ── */}
         <section className={styles.section}>
           <div className={styles.sectionLabel}>Install as App</div>
