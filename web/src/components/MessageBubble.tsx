@@ -1,4 +1,4 @@
-import { useState, useRef, type ReactNode } from "react";
+import { useState, useRef, useId, useEffect, type ReactNode } from "react";
 import remarkBreaks from "remark-breaks";
 import { MagicWandFilled } from "@carbon/icons-react";
 import ReactMarkdown from "react-markdown";
@@ -12,6 +12,7 @@ interface MessageBubbleProps {
   message: Message;
   personaEmoji?: string;
   personaName?: string;
+  onFilePath?: (path: string) => void;
 }
 
 function UserAvatar() {
@@ -44,6 +45,65 @@ function ScrollableTable({
     <div className={styles.tableWrapper}>
       <table {...props}>{children as ReactNode}</table>
     </div>
+  );
+}
+
+function MermaidBlock({ source }: { source: string }) {
+  const id = useId().replace(/:/g, "mermaid-");
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const mermaid = (await import("mermaid")).default;
+        mermaid.initialize({ startOnLoad: false, theme: "neutral" });
+        const { svg } = await mermaid.render(id, source);
+        if (!cancelled && containerRef.current) {
+          containerRef.current.innerHTML = svg;
+        }
+      } catch {
+        if (!cancelled) setError(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [id, source]);
+
+  if (error) {
+    return <pre>{source}</pre>;
+  }
+  return <div ref={containerRef} />;
+}
+
+function PathChip({ path, onClick }: { path: string; onClick: () => void }) {
+  const hasExtension = path.includes(".") && !path.endsWith("/");
+  const icon = hasExtension ? "📄" : "📁";
+  const label = path.split("/").pop() ?? path;
+  return (
+    <button
+      onClick={onClick}
+      title={path}
+      style={{
+        fontFamily: "var(--font-mono)",
+        fontSize: "0.8em",
+        background: "var(--bg-elevated)",
+        border: "1px solid var(--border-subtle)",
+        borderRadius: "999px",
+        padding: "1px 8px",
+        cursor: "pointer",
+        color: "var(--text-primary)",
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "4px",
+        lineHeight: 1.5,
+        verticalAlign: "middle",
+      }}
+    >
+      {icon} {label}
+    </button>
   );
 }
 
@@ -96,10 +156,42 @@ function CodeBlock({
   );
 }
 
+function markdownComponents(onFilePath?: (path: string) => void) {
+  return {
+    pre: CodeBlock,
+    table: ScrollableTable,
+    code({ className, children, ...props }: React.HTMLAttributes<HTMLElement>) {
+      const language = /language-(\w+)/.exec(className ?? "")?.[1];
+      if (language === "mermaid") {
+        return <MermaidBlock source={String(children).replace(/\n$/, "")} />;
+      }
+      return (
+        <code className={className} {...props}>
+          {children}
+        </code>
+      );
+    },
+    a({ href, children }: React.AnchorHTMLAttributes<HTMLAnchorElement>) {
+      if (href?.startsWith("file://")) {
+        const filePath = href.slice("file://".length);
+        return (
+          <PathChip path={filePath} onClick={() => onFilePath?.(filePath)} />
+        );
+      }
+      return (
+        <a href={href} target="_blank" rel="noopener noreferrer">
+          {children}
+        </a>
+      );
+    },
+  };
+}
+
 export function MessageBubble({
   message,
   personaEmoji = "🤖",
   personaName = "Agent",
+  onFilePath,
 }: MessageBubbleProps) {
   const isUser = message.role === "user";
   const isRoutine = message.source === "routine";
@@ -143,7 +235,7 @@ export function MessageBubble({
             <div className={styles.markdown}>
               <ReactMarkdown
                 remarkPlugins={[remarkGfm, remarkBreaks]}
-                components={{ pre: CodeBlock, table: ScrollableTable }}
+                components={markdownComponents(onFilePath)}
               >
                 {message.content}
               </ReactMarkdown>
@@ -164,6 +256,7 @@ interface StreamingBubbleProps {
   personaName?: string;
   content: string;
   streaming?: boolean;
+  onFilePath?: (path: string) => void;
 }
 
 export function StreamingBubble({
@@ -171,6 +264,7 @@ export function StreamingBubble({
   personaName = "Agent",
   content,
   streaming = true,
+  onFilePath,
 }: StreamingBubbleProps) {
   return (
     <div className={`${styles.row} ${styles.rowAgent}`}>
@@ -181,7 +275,7 @@ export function StreamingBubble({
             <div className={styles.markdown}>
               <ReactMarkdown
                 remarkPlugins={[remarkGfm, remarkBreaks]}
-                components={{ pre: CodeBlock, table: ScrollableTable }}
+                components={markdownComponents(onFilePath)}
               >
                 {content}
               </ReactMarkdown>

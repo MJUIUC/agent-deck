@@ -12,6 +12,8 @@ import type {
   SlashCommandResponse,
   MemoryListResponse,
   UserProfile,
+  FsEntry,
+  FsFileContent,
 } from "@/types";
 
 // ── Credential types ──────────────────────────────────────────────────────────
@@ -697,5 +699,22 @@ export const pushApi = {
       method: "DELETE",
       body: JSON.stringify({ endpoint }),
     });
+  },
+};
+
+export const fsApi = {
+  /** List the direct children of a directory on the headless machine. */
+  list(path: string): Promise<{ data: { path: string; entries: FsEntry[] } }> {
+    return apiFetch(`/api/fs/list?path=${encodeURIComponent(path)}`);
+  },
+  /** Fetch the content of a file on the headless machine for preview. */
+  read(path: string): Promise<{ data: FsFileContent }> {
+    return apiFetch(`/api/fs/read?path=${encodeURIComponent(path)}`);
+  },
+  /** Get (and create if absent) the workspace directory path for a thread. */
+  workspace(threadId: string): Promise<{ data: { path: string } }> {
+    return apiFetch(
+      `/api/fs/workspace?thread_id=${encodeURIComponent(threadId)}`,
+    );
   },
 };
