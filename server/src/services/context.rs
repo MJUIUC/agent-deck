@@ -197,13 +197,31 @@ pub fn assemble(input: AssemblyInput) -> AssembledContext {
     // ── 2.3. System message: workspace directory (non-routine runs only) ─────────
     if let Some(ref workspace_path) = input.workspace_path {
         let block = format!(
-            "---\n\
-             Workspace directory for this thread: {path}\n\
-             You may read and write files here using your available tools.\n\
-             To share a file or directory with the user, format it as a markdown link \
-             using the file:// scheme — for example:\n\
+            "## Workspace Directory\n\
+             \n\
+             Your workspace directory for this thread is: {path}\n\
+             \n\
+             You may read and write files here using your available tools (e.g. a terminal or filesystem MCP tool).\n\
+             \n\
+             ## Sharing Files With the User\n\
+             \n\
+             agent-deck has a built-in file explorer. To make a file clickable in chat, \
+             write a standard markdown link where the URL starts with `file://` followed \
+             by the absolute path. This is a custom in-app scheme — agent-deck intercepts \
+             it and opens the file in the built-in explorer. It is NOT the browser's \
+             local-file protocol and does NOT open a browser tab.\n\
+             \n\
+             Format: [display label](file:///absolute/path/to/file)\n\
+             \n\
+             Example using your workspace:\n\
              [report.md](file://{path}/report.md)\n\
-             The user can click any file:// link in chat to open that file in the in-app explorer.",
+             \n\
+             Rules:\n\
+             - Always start with `file://` then the full absolute path (e.g. /Users/...).\n\
+             - Do NOT use `http://`, `https://`, or any relative path for file links.\n\
+             - Do NOT invent URLs like `http://localhost/...` — that will not open the file.\n\
+             - Any file at an absolute path on this machine can be linked this way, \
+             not just workspace files.",
             path = workspace_path
         );
         messages.push(
