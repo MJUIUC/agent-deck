@@ -291,7 +291,7 @@ export function ChatView({
 
   const handleOpenExplorer = useCallback(async () => {
     try {
-      const res = await fsApi.workspace(thread.id);
+      const res = await fsApi.workspace(thread.id, thread.title);
       setExplorerPath(res.data.path);
       setExplorerOpen(true);
     } catch {
@@ -299,7 +299,7 @@ export function ChatView({
       setExplorerPath("~");
       setExplorerOpen(true);
     }
-  }, [thread.id]);
+  }, [thread.id, thread.title]);
 
   const handleFilePath = useCallback((path: string) => {
     setExplorerPath(path);

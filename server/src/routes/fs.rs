@@ -18,6 +18,7 @@ pub struct PathParams {
 #[derive(Deserialize)]
 pub struct WorkspaceParams {
     thread_id: String,
+    thread_title: Option<String>,
 }
 
 fn validate_path(raw: &str) -> anyhow::Result<std::path::PathBuf> {
@@ -224,6 +225,38 @@ pub async fn read_file(
     }
 }
 
+pub(crate) async fn update_workspace_meta(
+    workspaces_root: &std::path::Path,
+    thread_id: &str,
+    thread_title: &str,
+) {
+    let meta_path = workspaces_root.join("meta.json");
+    let mut meta: serde_json::Value = if let Ok(bytes) = tokio::fs::read(&meta_path).await {
+        serde_json::from_slice(&bytes).unwrap_or_else(|_| serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+    let safe_title: String = thread_title
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == ' ' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .trim()
+        .replace(' ', "_");
+    let readable = format!("{}_workspace", safe_title);
+    meta[thread_id] = serde_json::Value::String(readable);
+    if let Ok(json_str) = serde_json::to_string_pretty(&meta) {
+        if let Err(e) = tokio::fs::write(&meta_path, json_str).await {
+            tracing::warn!("Failed to write workspace meta.json: {}", e);
+        }
+    }
+}
+
 pub async fn get_workspace(
     State(_state): State<Arc<AppState>>,
     Query(params): Query<WorkspaceParams>,
@@ -231,7 +264,8 @@ pub async fn get_workspace(
     let home = dirs::home_dir()
         .ok_or_else(|| AppError::Internal(anyhow::anyhow!("Could not determine home directory")))?;
 
-    let workspace_path = home.join("agent-deck-workspaces").join(&params.thread_id);
+    let workspaces_root = home.join("agent-deck-workspaces");
+    let workspace_path = workspaces_root.join(&params.thread_id);
 
     tokio::fs::create_dir_all(&workspace_path)
         .await
@@ -241,6 +275,10 @@ pub async fn get_workspace(
                 e
             ))
         })?;
+
+    if let Some(ref title) = params.thread_title {
+        update_workspace_meta(&workspaces_root, &params.thread_id, title).await;
+    }
 
     Ok(Json(json!({
         "data": {

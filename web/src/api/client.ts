@@ -712,9 +712,12 @@ export const fsApi = {
     return apiFetch(`/api/fs/read?path=${encodeURIComponent(path)}`);
   },
   /** Get (and create if absent) the workspace directory path for a thread. */
-  workspace(threadId: string): Promise<{ data: { path: string } }> {
-    return apiFetch(
-      `/api/fs/workspace?thread_id=${encodeURIComponent(threadId)}`,
-    );
+  workspace(
+    threadId: string,
+    title?: string,
+  ): Promise<{ data: { path: string } }> {
+    const params = new URLSearchParams({ thread_id: threadId });
+    if (title) params.set("thread_title", title);
+    return apiFetch(`/api/fs/workspace?${params.toString()}`);
   },
 };

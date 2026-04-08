@@ -408,6 +408,60 @@ Suggested parallel split:
 
 ---
 
+## Additional Implementations (post-approval)
+
+### Workspace meta.json index
+
+`~/agent-deck-workspaces/meta.json` is created/updated whenever a workspace is accessed. It maps each thread UUID to a human-readable name derived from the thread title:
+
+```json
+{
+  "eacd8217-64bf-4e34-9fd6-45661b45029c": "Architecture_Discussion_workspace",
+  "a1b2c3d4-...": "Stocks_Daily_Brief_workspace"
+}
+```
+
+- **`server/src/routes/fs.rs`** — `WorkspaceParams` gains `thread_title: Option<String>`. New `pub(crate) async fn update_workspace_meta` reads the existing file, merges the new entry (sanitizing the title: alphanumeric + `-` + space kept, rest replaced with `_`, spaces converted to `_`), and writes back with `to_string_pretty`. Called from `get_workspace` when `thread_title` is present.
+- **`server/src/services/agent.rs`** — Calls `crate::routes::fs::update_workspace_meta` after workspace dir creation, passing `thread.title` (already fetched at the top of `run_inner`). This ensures the index is kept up-to-date on every agent run, even if the route was never called.
+- **`web/src/api/client.ts`** — `fsApi.workspace(threadId, title?)` gains an optional `title` param, appended as `thread_title` in the query string when present.
+- **`web/src/components/ChatView.tsx`** and **`web/src/layouts/mobile/MobileChatView.tsx`** — Pass `thread.title` to `fsApi.workspace(...)` so the index is updated when the user opens the explorer from the folder button.
+
+### Workspace-first agent default
+
+The workspace system prompt block now explicitly instructs the agent to treat the workspace as its default working directory:
+
+> Treat this as your default working directory for all file operations in this thread. When creating, reading, or referencing files, prefer this directory unless the user specifies otherwise.
+
+### File link scheme changed to `/api/fs/read?path=`
+
+`file://` URIs were being intercepted by the browser/webview at the OS level before React's `a` override could fire. Switched to a relative API URL pattern:
+
+- Agent is now taught to produce links like `[report.md](/api/fs/read?path=/absolute/path)`.
+- `MessageBubble.tsx` `a` override uses `extractFsPath()`: parses the href with `URL`, matches `/api/fs/read` or `/api/fs/list` pathnames with a `path` query param, and routes to `PathChip` / `onFilePath`. All other links fall through to normal `<a target="_blank">` behaviour.
+- The `context.rs` workspace block provides a concrete URL-encoded example using the actual workspace path.
+
+### Mermaid rendering in file preview
+
+`FileExplorerModal`'s `PreviewPane` now renders mermaid fenced blocks as SVG diagrams (same as in chat). `MermaidBlock` is exported from `MessageBubble.tsx` and imported into `FileExplorerModal.tsx`. A `code` component override is added to the `ReactMarkdown` call in `PreviewPane`.
+
+### Preview panel CSS improvements
+
+`FileExplorerModal.module.css` now scopes heading sizes inside `.previewMarkdown` (`h1` → 1.35rem, `h2` → 1.1rem, `h3` → 0.95rem) with appropriate margins, and scopes `pre`, `code`, `table`, `blockquote`, `ul`, `ol` styles so they render cleanly inside the preview pane without inheriting full browser defaults. Preview panel padding increased to `20px 24px` with `background: var(--bg-primary)`.
+
+### Mobile touch bleed fix
+
+On mobile, tapping a file in the tree caused the panel to switch to preview, and the subsequent touch-up event bled through to the `.overlay` element, calling `onClose()`. Fixed by suppressing the overlay click-to-close handler when `isMobile` is true (the dialog fills the full screen on mobile so there is no outside area to dismiss).
+
+### Mobile Files tab in bottom nav
+
+`MobileLayout.tsx` gains a "Files" tab in the bottom nav bar that opens `FileExplorerModal` at `~`, giving users a full filesystem browser independent of any thread.
+
+### Push notification body
+
+`strip_markdown_for_notification()` replaces `[label](url)` markdown links with just the label text before truncating to 120 chars. Prevents raw markdown syntax (e.g. `[ARCHITECTURE.md](`) from appearing in notification bodies.
+
+---
+
 ## Acceptance Criteria
 
 - [x] `GET /api/fs/list?path=~` returns the home directory's entries sorted dirs-first alphabetically

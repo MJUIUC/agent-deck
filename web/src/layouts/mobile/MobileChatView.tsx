@@ -343,14 +343,14 @@ export function MobileChatView({
   const handleOpenExplorer = useCallback(async () => {
     if (!threadId) return;
     try {
-      const res = await fsApi.workspace(threadId);
+      const res = await fsApi.workspace(threadId, thread?.title ?? undefined);
       setExplorerPath(res.data.path);
       setExplorerOpen(true);
     } catch {
       setExplorerPath("~");
       setExplorerOpen(true);
     }
-  }, [threadId]);
+  }, [threadId, thread?.title]);
 
   const handleFilePath = useCallback((path: string) => {
     setExplorerPath(path);

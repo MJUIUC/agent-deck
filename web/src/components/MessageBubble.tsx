@@ -48,7 +48,7 @@ function ScrollableTable({
   );
 }
 
-function MermaidBlock({ source }: { source: string }) {
+export function MermaidBlock({ source }: { source: string }) {
   const id = useId().replace(/:/g, "mermaid-");
   const containerRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState(false);

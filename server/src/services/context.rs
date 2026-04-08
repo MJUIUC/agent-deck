@@ -217,6 +217,8 @@ pub fn assemble(input: AssemblyInput) -> AssembledContext {
              \n\
              You may read and write files here using your available tools (e.g. a terminal or filesystem MCP tool).\n\
              \n\
+             Treat this as your default working directory for all file operations in this thread. When creating, reading, or referencing files, prefer this directory unless the user specifies otherwise.\n\
+             \n\
              ## Sharing Files With the User\n\
              \n\
              agent-deck has a built-in file explorer. To make a file clickable in chat, \

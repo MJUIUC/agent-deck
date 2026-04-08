@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
 import { fsApi } from "@/api/client";
+import { MermaidBlock } from "./MessageBubble";
 import type { FsFileContent } from "@/types";
 import styles from "./FileExplorerModal.module.css";
 
@@ -180,7 +181,28 @@ function PreviewPane({ data, loading, error, onRetry }: PreviewPaneProps) {
   if (ext === "md" && data.content) {
     return (
       <div className={styles.previewMarkdown}>
-        <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm, remarkBreaks]}
+          components={{
+            code({
+              className,
+              children,
+              ...props
+            }: React.HTMLAttributes<HTMLElement>) {
+              const language = /language-(\w+)/.exec(className ?? "")?.[1];
+              if (language === "mermaid") {
+                return (
+                  <MermaidBlock source={String(children).replace(/\n$/, "")} />
+                );
+              }
+              return (
+                <code className={className} {...props}>
+                  {children}
+                </code>
+              );
+            },
+          }}
+        >
           {data.content}
         </ReactMarkdown>
       </div>

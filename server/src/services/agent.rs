@@ -556,6 +556,14 @@ async fn run_inner(
                     warn!(thread_id = %thread_id, error = %e, "Failed to create workspace dir; continuing without it");
                     None
                 } else {
+                    // Update workspace meta.json with the thread's human-readable title
+                    let workspaces_root = home.join("agent-deck-workspaces");
+                    crate::routes::fs::update_workspace_meta(
+                        &workspaces_root,
+                        thread_id,
+                        &thread.title,
+                    )
+                    .await;
                     Some(workspace_dir.to_string_lossy().into_owned())
                 }
             }
