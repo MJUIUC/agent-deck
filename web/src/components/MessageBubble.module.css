@@ -56,7 +56,7 @@
 /* ── Bubble ── */
 .bubble {
     max-width: 68%;
-    min-width: 0;
+    min-width: 140px;
     padding: 9px 13px;
     font-size: 0.875rem;
     line-height: 1.55;
