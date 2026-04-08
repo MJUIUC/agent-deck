@@ -408,6 +408,21 @@ Suggested parallel split:
 
 ---
 
+## Noticed but Deferred
+
+### Shared workspaces (future product direction)
+
+Currently each thread has its own isolated workspace directory keyed by UUID. A future iteration should give users more agency over workspaces as a first-class product concept:
+
+- **Named workspaces** — user-defined workspaces with friendly names (e.g. "Stocks Research", "Home Automation") that can be attached to multiple threads, similar to how providers and personas are configured.
+- **Shared workspaces** — multiple threads writing to and reading from the same directory, useful when related threads should have access to a common set of files (e.g. a planning thread and an execution thread sharing the same project folder).
+- **Workspace picker** — UI in thread config to detach the auto-generated workspace and attach a named workspace instead.
+- **Cross-device considerations** — on a headless machine, workspaces are always server-side; the question is whether the user can browse and manage them independently of a thread context (the Files tab in the mobile nav is a first step toward this).
+
+This is a non-trivial product decision (naming, ownership, sharing model) and is deferred until the core file explorer is validated in use.
+
+---
+
 ## Additional Implementations (post-approval)
 
 ### Workspace meta.json index

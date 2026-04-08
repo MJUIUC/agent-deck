@@ -228,7 +228,7 @@ export function FileExplorerModal({
   const [rootEntries, setRootEntries] = useState<string[]>([]);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [previewData, setPreviewData] = useState<FsFileContent | null>(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewFading, setPreviewFading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [mobilePanel, setMobilePanel] = useState<"tree" | "preview">("tree");
   const [isMobile, setIsMobile] = useState(
@@ -284,17 +284,19 @@ export function FileExplorerModal({
 
   const handleSelectFile = useCallback(async (path: string) => {
     setSelectedPath(path);
-    setPreviewLoading(true);
+    setPreviewFading(true);
     setPreviewError(null);
-    setPreviewData(null);
     setMobilePanel("preview");
+    // Keep old previewData visible during load — cleared only on error or
+    // when no previous content exists, to avoid a jarring blank flash.
     try {
       const res = await fsApi.read(path);
       setPreviewData(res.data);
     } catch {
+      setPreviewData(null);
       setPreviewError("Failed to load file.");
     } finally {
-      setPreviewLoading(false);
+      setPreviewFading(false);
     }
   }, []);
 
@@ -461,14 +463,22 @@ export function FileExplorerModal({
           {/* Preview panel */}
           {(!isMobile || mobilePanel === "preview") && (
             <div className={styles.previewPanel}>
-              <PreviewPane
-                data={previewData}
-                loading={previewLoading}
-                error={previewError}
-                onRetry={() =>
-                  selectedPath && void handleSelectFile(selectedPath)
+              <div
+                className={
+                  previewFading && previewData
+                    ? styles.previewContentFading
+                    : styles.previewContent
                 }
-              />
+              >
+                <PreviewPane
+                  data={previewData}
+                  loading={previewFading && !previewData}
+                  error={previewError}
+                  onRetry={() =>
+                    selectedPath && void handleSelectFile(selectedPath)
+                  }
+                />
+              </div>
             </div>
           )}
         </div>
