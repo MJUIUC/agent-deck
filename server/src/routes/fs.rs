@@ -264,7 +264,7 @@ pub async fn get_workspace(
     let home = dirs::home_dir()
         .ok_or_else(|| AppError::Internal(anyhow::anyhow!("Could not determine home directory")))?;
 
-    let workspaces_root = home.join("agent-deck-workspaces");
+    let workspaces_root = home.join(".agent-deck").join("workspaces");
     let workspace_path = workspaces_root.join(&params.thread_id);
 
     tokio::fs::create_dir_all(&workspace_path)
