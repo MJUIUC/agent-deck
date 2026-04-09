@@ -26,6 +26,8 @@ Open `docs/PLAN/PLAN_3.md`. Find the first story **not** marked ✅. Read its sp
 - Whether it is in-progress or new
 - Which feature branch you are on
 
+> **`docs/todo/`** is the staging area for upcoming AD docs. Do not touch files there unless you are explicitly moving one to active (Step 3). Do not auto-promote a queued story — always wait for the human to instruct you.
+
 ---
 
 ## Step 2 — Branch (new stories only)
@@ -56,9 +58,10 @@ If the branch already exists, check it out and read existing commits before cont
 
 Check whether `docs/AD-xxx.md` exists for this story.
 
-- **Exists, first box checked** → plan is approved, go to Step 4.
-- **Exists, first box unchecked** → present it to the human, wait for approval, do not write code.
-- **Does not exist** → write it using the template below, then stop and present it to the human.
+- **Exists at `docs/AD-xxx.md`** (active) and first box checked → plan is approved, go to Step 4.
+- **Exists at `docs/AD-xxx.md`** (active) and first box unchecked → present it to the human, wait for approval, do not write code.
+- **Exists at `docs/todo/AD-xxx.md`** (queued) → move it to `docs/AD-xxx.md`, present it to the human, wait for approval.
+- **Does not exist anywhere** → write it using the template below, save it to `docs/AD-xxx.md`, then stop and present it to the human.
 
 Read every relevant source file before writing the plan. Use `grep` for symbols, `find_path` for files. Check `mockups/` for UI stories. Never guess a path.
 
@@ -209,7 +212,11 @@ git add docs/deprecated/AD-xxx.md docs/AD-xxx.md docs/PLAN/PLAN_3.md
 git commit -m "docs: close Story X.Y — archive plan, mark complete in PLAN_3"
 ```
 
-**7b — Open PR to `dev`**
+**7b — Check `docs/todo/` for the next queued story**
+
+After archiving, list `docs/todo/`. If a queued AD doc is present, tell the human what's available — do **not** auto-promote. Wait for the human to instruct you before moving any file from `docs/todo/` to `docs/`.
+
+**7c — Open PR to `dev`**
 
 ```bash
 git push origin feature/phaseN-slug
@@ -264,7 +271,8 @@ agent-deck/
 │   ├── AGENT_WORKFLOW.md
 │   ├── ARCHITECTURE.md
 │   ├── AD-xxx.md         # Active plan (present during a story)
-│   ├── deprecated/
+│   ├── todo/             # Queued AD docs — approved but not yet started
+│   ├── deprecated/       # Completed stories — archived after close
 │   └── PLAN/
 │       ├── PLAN_1.md     # Architecture, data model
 │       ├── PLAN_2.md     # API contract, feature specs
