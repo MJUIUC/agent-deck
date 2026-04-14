@@ -61,35 +61,6 @@ export function NavItem({
 
 // ─── BackLink ─────────────────────────────────────────────────────────────────
 
-export function BackLink({ onClick }: { onClick: () => void }) {
-  const [hovered, setHovered] = useState(false);
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 7,
-        padding: "7px 16px",
-        margin: "0 8px 12px",
-        borderRadius: 6,
-        fontSize: 13,
-        color: hovered ? "var(--text-primary)" : "var(--text-secondary)",
-        cursor: "pointer",
-        background: hovered ? "var(--bg-tertiary)" : "none",
-        border: "none",
-        transition: "background 0.15s, color 0.15s",
-        fontFamily: "inherit",
-      }}
-    >
-      ← Back to Chats
-    </button>
-  );
-}
-
 // ─── SettingsSidebar ──────────────────────────────────────────────────────────
 
 /**
@@ -99,11 +70,9 @@ export function BackLink({ onClick }: { onClick: () => void }) {
 export function SettingsSidebar({
   tab,
   onTabChange,
-  onClose,
 }: {
   tab: SettingsTab;
   onTabChange: (t: SettingsTab) => void;
-  onClose: () => void;
 }) {
   return (
     <aside
@@ -140,8 +109,6 @@ export function SettingsSidebar({
           agent-deck
         </span>
       </div>
-
-      <BackLink onClick={onClose} />
 
       <div
         style={{
