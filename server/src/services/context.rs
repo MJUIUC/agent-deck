@@ -108,6 +108,10 @@ pub struct AssemblyInput {
     /// and the message history. Present when the thread has been summarized at
     /// least once and `auto_summarize` is enabled.
     pub conversation_summary: Option<String>,
+    /// Absolute path to the thread's workspace directory on the headless machine.
+    /// When present (non-routine runs only), a system message is injected teaching
+    /// the agent where to write files and how to share file:// links in chat.
+    pub workspace_path: Option<String>,
 }
 
 // ─── Output type ──────────────────────────────────────────────────────────────
@@ -188,6 +192,62 @@ pub fn assemble(input: AssemblyInput) -> AssembledContext {
                     .into(),
             );
         }
+    }
+
+    // ── 2.3. System message: workspace directory (non-routine runs only) ─────────
+    if let Some(ref workspace_path) = input.workspace_path {
+        let encoded_example = {
+            let example_path = format!("{}/report.md", workspace_path);
+            let mut encoded = String::new();
+            for byte in example_path.bytes() {
+                match byte {
+                    b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'/' => {
+                        encoded.push(byte as char);
+                    }
+                    b' ' => encoded.push_str("%20"),
+                    other => encoded.push_str(&format!("%{:02X}", other)),
+                }
+            }
+            encoded
+        };
+        let block = format!(
+            "## Workspace Directory\n\
+             \n\
+             Your workspace directory for this thread is: {path}\n\
+             \n\
+             You may read and write files here using your available tools (e.g. a terminal or filesystem MCP tool).\n\
+             \n\
+             Treat this as your default working directory for all file operations in this thread. When creating, reading, or referencing files, prefer this directory unless the user specifies otherwise.\n\
+             \n\
+             ## Sharing Files With the User\n\
+             \n\
+             agent-deck has a built-in file explorer. To make a file clickable in chat, \
+             write a standard markdown link using this exact URL pattern:\n\
+             \n\
+             /api/fs/read?path=<url-encoded-absolute-path>\n\
+             \n\
+             When the user clicks the link, agent-deck intercepts it, opens the built-in \
+             file explorer, and loads the file via the API. Do NOT use file://, http://, \
+             or any other scheme — only the /api/fs/read?path= pattern works.\n\
+             \n\
+             Example using your workspace:\n\
+             [report.md](/api/fs/read?path={encoded_example})\n\
+             \n\
+             Rules:\n\
+             - The path must be URL-encoded (spaces → %20, etc.).\n\
+             - The path must be absolute (starts with /).\n\
+             - Any file at an absolute path on this machine can be linked, not just workspace files.\n\
+             - Directories can also be linked using /api/fs/list?path=<encoded-path>.",
+            path = workspace_path,
+            encoded_example = encoded_example,
+        );
+        messages.push(
+            ChatCompletionRequestSystemMessageArgs::default()
+                .content(block)
+                .build()
+                .expect("workspace message build")
+                .into(),
+        );
     }
 
     // ── 2.5. System message: conversation summary (optional) ──────────────────
@@ -471,6 +531,7 @@ mod tests {
             built_in_tool_defs: built_in_tool_defs_for_test(),
             mcp_tools: vec![],
             conversation_summary: None,
+            workspace_path: None,
         }
     }
 
@@ -894,6 +955,7 @@ mod tests {
             built_in_tool_defs: built_in_tool_defs_for_test(),
             mcp_tools: vec![],
             conversation_summary: None,
+            workspace_path: None,
         };
 
         let ctx = assemble(input);
@@ -941,6 +1003,7 @@ mod tests {
             built_in_tool_defs: built_in_tool_defs_for_test(),
             mcp_tools: vec![],
             conversation_summary: None,
+            workspace_path: None,
         };
         let ctx = assemble(input);
         // System message must not contain memory instructions
@@ -992,6 +1055,7 @@ mod tests {
             built_in_tool_defs: built_in_tool_defs_for_test(),
             mcp_tools: vec![mcp_tool],
             conversation_summary: None,
+            workspace_path: None,
         };
         let ctx = assemble(input);
         assert_eq!(
@@ -1195,7 +1259,10 @@ mod tests {
             })
             .expect("should have a Conversation Context system message");
 
-        assert!(summary_msg.contains("Your Persona"), "should include persona section");
+        assert!(
+            summary_msg.contains("Your Persona"),
+            "should include persona section"
+        );
         assert!(
             summary_msg.contains("You are Aldous"),
             "should include persona system prompt"
@@ -1231,7 +1298,10 @@ mod tests {
             })
             .expect("should have a Conversation Context system message");
 
-        assert!(summary_msg.contains("About the User"), "should include user profile");
+        assert!(
+            summary_msg.contains("About the User"),
+            "should include user profile"
+        );
         assert!(summary_msg.contains("Marcus"), "should include user name");
     }
 
@@ -1286,7 +1356,10 @@ mod tests {
         );
         let emoji_pos = content.find("🧙🏿").unwrap();
         let prompt_pos = content.find("You are Aldous.").unwrap();
-        assert!(prompt_pos > emoji_pos, "persona prompt must come after the emoji");
+        assert!(
+            prompt_pos > emoji_pos,
+            "persona prompt must come after the emoji"
+        );
     }
 
     #[test]
@@ -1318,6 +1391,4 @@ mod tests {
             "whitespace-only emoji must be ignored"
         );
     }
-
-
 }

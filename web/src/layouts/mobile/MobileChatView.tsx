@@ -10,13 +10,16 @@ import {
   useRef,
   useCallback,
 } from "react";
+import { FolderOpen } from "lucide-react";
 import type { Thread } from "@/types";
 import { useMessageStore } from "@/stores/useMessageStore";
 import { useSseStore } from "@/stores/useSseStore";
+import { fsApi } from "@/api/client";
 import { resolveDisplayNames } from "@/components/ChatHeader";
 import { MessageBubble, StreamingBubble } from "@/components/MessageBubble";
 import { ProcessingBubble } from "@/components/ProcessingBlock";
 import { useProcessedMessages } from "@/hooks/useProcessedMessages";
+import { FileExplorerModal } from "@/components/FileExplorerModal";
 import { MobileConfigSheet } from "./MobileConfigSheet";
 import styles from "./MobileChatView.module.css";
 
@@ -122,6 +125,8 @@ export function MobileChatView({
   const [inputValue, setInputValue] = useState("");
   const [configSheetOpen, setConfigSheetOpen] = useState(false);
   const [keyboardOffset, setKeyboardOffset] = useState(0);
+  const [explorerOpen, setExplorerOpen] = useState(false);
+  const [explorerPath, setExplorerPath] = useState("");
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -335,6 +340,23 @@ export function MobileChatView({
     [growTextarea],
   );
 
+  const handleOpenExplorer = useCallback(async () => {
+    if (!threadId) return;
+    try {
+      const res = await fsApi.workspace(threadId, thread?.title ?? undefined);
+      setExplorerPath(res.data.path);
+      setExplorerOpen(true);
+    } catch {
+      setExplorerPath("~");
+      setExplorerOpen(true);
+    }
+  }, [threadId, thread?.title]);
+
+  const handleFilePath = useCallback((path: string) => {
+    setExplorerPath(path);
+    setExplorerOpen(true);
+  }, []);
+
   // ── No thread selected — full-screen empty state ─────────────────────────────
 
   if (!thread) {
@@ -384,6 +406,15 @@ export function MobileChatView({
 
         {/* Nav actions (right) */}
         <div className={styles.navActions}>
+          <button
+            className={styles.navActionBtn}
+            type="button"
+            aria-label="File explorer"
+            title="File explorer"
+            onClick={() => void handleOpenExplorer()}
+          >
+            <FolderOpen size={18} />
+          </button>
           <button
             className={styles.navActionBtn}
             type="button"
@@ -455,6 +486,7 @@ export function MobileChatView({
                     message={item.message}
                     personaEmoji={personaEmoji}
                     personaName={personaName}
+                    onFilePath={handleFilePath}
                   />
                 );
               });
@@ -465,6 +497,7 @@ export function MobileChatView({
                 personaEmoji={personaEmoji}
                 personaName={personaName}
                 content=""
+                onFilePath={handleFilePath}
               />
             )}
 
@@ -481,6 +514,7 @@ export function MobileChatView({
                       personaName={personaName}
                       content={entry.content}
                       streaming={isLast}
+                      onFilePath={handleFilePath}
                     />
                   );
                 }
@@ -566,6 +600,12 @@ export function MobileChatView({
         thread={thread}
         isOpen={configSheetOpen}
         onClose={() => setConfigSheetOpen(false)}
+      />
+
+      <FileExplorerModal
+        isOpen={explorerOpen}
+        initialPath={explorerPath}
+        onClose={() => setExplorerOpen(false)}
       />
     </div>
   );

@@ -238,6 +238,56 @@ pub async fn run(
 
 // ─── Inner implementation ─────────────────────────────────────────────────────
 
+fn strip_markdown_for_notification(text: &str, max_chars: usize) -> String {
+    // Replace [label](url) with just the label so raw markdown syntax doesn't
+    // appear in push notification bodies.
+    let mut result = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '[' {
+            // Collect the label until ']'
+            let mut label = String::new();
+            let mut found_close_bracket = false;
+            for inner in chars.by_ref() {
+                if inner == ']' {
+                    found_close_bracket = true;
+                    break;
+                }
+                label.push(inner);
+            }
+            if found_close_bracket && chars.peek() == Some(&'(') {
+                // Consume the '('
+                chars.next();
+                // Skip everything until the matching ')'
+                for inner in chars.by_ref() {
+                    if inner == ')' {
+                        break;
+                    }
+                }
+                // Emit just the label text
+                result.push_str(&label);
+            } else {
+                // Not a link — emit the bracket and label as-is
+                result.push('[');
+                result.push_str(&label);
+                if found_close_bracket {
+                    result.push(']');
+                }
+            }
+        } else {
+            result.push(ch);
+        }
+    }
+    // Also collapse newlines to spaces for a cleaner single-line preview
+    let result: String = result
+        .split('\n')
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    result.chars().take(max_chars).collect()
+}
+
 async fn run_inner(
     state: &AppState,
     thread_id: &str,
@@ -496,6 +546,36 @@ async fn run_inner(
         }
     }
 
+    // Resolve the thread's workspace directory. Created if it doesn't exist.
+    // Skipped for routine runs — routines don't need file-sharing instructions.
+    let workspace_path: Option<String> = if !is_routine {
+        match dirs::home_dir() {
+            Some(home) => {
+                let workspace_dir = home.join("agent-deck-workspaces").join(thread_id);
+                if let Err(e) = tokio::fs::create_dir_all(&workspace_dir).await {
+                    warn!(thread_id = %thread_id, error = %e, "Failed to create workspace dir; continuing without it");
+                    None
+                } else {
+                    // Update workspace meta.json with the thread's human-readable title
+                    let workspaces_root = home.join("agent-deck-workspaces");
+                    crate::routes::fs::update_workspace_meta(
+                        &workspaces_root,
+                        thread_id,
+                        &thread.title,
+                    )
+                    .await;
+                    Some(workspace_dir.to_string_lossy().into_owned())
+                }
+            }
+            None => {
+                warn!(thread_id = %thread_id, "Could not determine home directory; workspace path skipped");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let mut assembled = context::assemble(AssemblyInput {
         persona_emoji: Some(persona.emoji.clone()),
         persona_system_prompt: persona.system_prompt.clone(),
@@ -526,6 +606,7 @@ async fn run_inner(
                 .collect()
         },
         mcp_tools: mcp_tool_defs.clone(),
+        workspace_path: workspace_path.clone(),
     });
 
     // ── 5. Generation loop — with reactive summarization on context-length error ──
@@ -633,6 +714,7 @@ async fn run_inner(
                             .collect()
                     },
                     mcp_tools: mcp_tool_defs.clone(),
+                    workspace_path: workspace_path.clone(),
                 });
                 continue;
             }
@@ -773,7 +855,7 @@ async fn run_inner(
     // a reply arrives while the app is backgrounded on mobile.
     if routine_id_opt.is_none() {
         let push_title = format!("{} {}", persona.emoji, persona.name);
-        let push_body: String = assistant_content.chars().take(120).collect();
+        let push_body: String = strip_markdown_for_notification(&assistant_content, 120);
         crate::services::push::send_push_notification(
             state,
             thread_id,

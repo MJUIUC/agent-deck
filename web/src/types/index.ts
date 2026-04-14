@@ -103,6 +103,31 @@ export interface Routine {
   updated_at: string;
 }
 
+// ── File system types ─────────────────────────────────────────────────────────
+
+export interface FsEntry {
+  name: string;
+  path: string;
+  kind: "file" | "dir";
+  size: number | null;
+  modified: string | null;
+  extension: string | null;
+}
+
+export interface FsFileContent {
+  path: string;
+  previewable: boolean;
+  // present when previewable === true and is_image !== true
+  content?: string;
+  // present when previewable === true and is_image === true
+  is_image?: boolean;
+  image_data?: string;
+  extension?: string | null;
+  size: number;
+  // present when previewable === false
+  reason?: "binary" | "too_large";
+}
+
 // ── SSE event payloads ────────────────────────────────────────────────────────
 
 export interface SseTokenEvent {

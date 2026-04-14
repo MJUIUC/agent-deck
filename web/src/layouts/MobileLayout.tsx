@@ -12,11 +12,12 @@ import { PersonaPickerModal } from "@/components/PersonaPickerModal";
 import { MobileThreadList } from "./mobile/MobileThreadList";
 import { MobileChatView } from "./mobile/MobileChatView";
 import { MobileSettings } from "./mobile/MobileSettings";
+import { FileExplorerModal } from "@/components/FileExplorerModal";
 import styles from "./MobileLayout.module.css";
 
 // ─── Tab type ────────────────────────────────────────────────────────────────
 
-type ActiveTab = "threads" | "settings";
+type ActiveTab = "threads" | "settings" | "files";
 
 // ─── Icon sub-components ──────────────────────────────────────────────────────
 
@@ -36,6 +37,24 @@ function ThreadsIcon() {
       <line x1="3" y1="6" x2="21" y2="6" />
       <line x1="3" y1="12" x2="21" y2="12" />
       <line x1="3" y1="18" x2="21" y2="18" />
+    </svg>
+  );
+}
+
+function FilesIcon() {
+  return (
+    <svg
+      width="22"
+      height="22"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
     </svg>
   );
 }
@@ -69,6 +88,7 @@ export function MobileLayout() {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [_isCheckingProviders, setIsCheckingProviders] = useState(true);
   const [personaPickerOpen, setPersonaPickerOpen] = useState(false);
+  const [explorerOpen, setExplorerOpen] = useState(false);
 
   // ── Thread store ─────────────────────────────────────────────────────────────
   const threads = useThreadStore((s) => s.threads);
@@ -260,6 +280,17 @@ export function MobileLayout() {
           )}
         </button>
 
+        {/* Files tab */}
+        <button
+          className={styles.tabItem}
+          type="button"
+          aria-label="File explorer"
+          onClick={() => setExplorerOpen(true)}
+        >
+          <FilesIcon />
+          <span className={styles.tabLabel}>Files</span>
+        </button>
+
         {/* Settings tab */}
         <button
           className={tabClass("settings")}
@@ -277,6 +308,12 @@ export function MobileLayout() {
       </nav>
 
       {/* ── Persona picker modal ── */}
+      <FileExplorerModal
+        isOpen={explorerOpen}
+        initialPath="~"
+        onClose={() => setExplorerOpen(false)}
+      />
+
       <PersonaPickerModal
         isOpen={personaPickerOpen}
         personas={personas}
