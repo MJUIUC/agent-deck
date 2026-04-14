@@ -164,4 +164,4 @@ grep "api/fs/download" ~/.agent-deck/server.log | head -10
 
 - [x] **Implementation plan approved**
 - [x] **Coding complete** — `cargo build` clean (no new errors), TypeScript diagnostics clean on all touched files, all acceptance criteria verified
-- [ ] **Human review approved**
+- [x] **Human review approved**
