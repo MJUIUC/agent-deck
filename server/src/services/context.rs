@@ -237,7 +237,11 @@ pub fn assemble(input: AssemblyInput) -> AssembledContext {
              - The path must be URL-encoded (spaces → %20, etc.).\n\
              - The path must be absolute (starts with /).\n\
              - Any file at an absolute path on this machine can be linked, not just workspace files.\n\
-             - Directories can also be linked using /api/fs/list?path=<encoded-path>.",
+             - Directories can also be linked using /api/fs/list?path=<encoded-path>.\n\
+             \n\
+             To share a file the user should save to their device (rather than preview), use the download pattern instead:\n\
+             [filename.pdf](/api/fs/download?path=<url-encoded-absolute-path>)\n\
+             Use /api/fs/read?path= for in-app preview, /api/fs/download?path= for saving to device.",
             path = workspace_path,
             encoded_example = encoded_example,
         );
