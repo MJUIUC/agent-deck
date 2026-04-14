@@ -12,7 +12,7 @@ use sqlx::SqlitePool;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex, RwLock};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, RwLock as TokioRwLock};
 use tokio::task::JoinHandle;
 
 use tower_http::{services::ServeDir, trace::TraceLayer};
@@ -44,6 +44,7 @@ pub mod routines;
 pub mod setup;
 
 pub mod sse;
+pub mod tailscale;
 pub mod threads;
 pub mod tokens;
 
@@ -141,6 +142,17 @@ pub struct AppState {
     /// PKCS8 PEM-encoded VAPID private key. Loaded from app_config at startup.
     /// Used by the push dispatch service. Never logged or returned by any endpoint.
     pub vapid_private_pem: String,
+    /// Tailscale status cache. Invalidated on connect/funnel toggle.
+    pub tailscale_status_cache: Arc<
+        TokioRwLock<
+            Option<(
+                crate::services::tailscale::TailscaleStatus,
+                std::time::Instant,
+            )>,
+        >,
+    >,
+    /// The port this server is listening on. Needed by Tailscale Funnel commands.
+    pub server_port: u16,
 }
 
 impl AppState {
@@ -211,6 +223,8 @@ pub async fn build_router(
         scheduler_tx,
         vapid_public_key,
         vapid_private_pem,
+        tailscale_status_cache: Arc::new(TokioRwLock::new(None)),
+        server_port: config.port,
     });
 
     // Start copilot-api supervision in the background.
@@ -218,6 +232,16 @@ pub async fn build_router(
 
     // Connect all enabled MCP servers.
     mcp.start().await;
+
+    // Warm up the Tailscale status cache in the background — non-blocking.
+    {
+        let state = state.clone();
+        tokio::spawn(async move {
+            let status = crate::services::tailscale::get_status(state.server_port).await;
+            let mut cache = state.tailscale_status_cache.write().await;
+            *cache = Some((status, std::time::Instant::now()));
+        });
+    }
 
     // Start the routine scheduler in the background.
     let scheduler =
@@ -404,6 +428,20 @@ pub async fn build_router(
         .route("/api/fs/read", get(fs::read_file))
         .route("/api/fs/download", get(fs::download_file))
         .route("/api/fs/workspace", get(fs::get_workspace))
+        // Tailscale
+        .route("/api/tailscale/status", get(tailscale::get_status))
+        .route(
+            "/api/tailscale/connect",
+            axum::routing::post(tailscale::connect),
+        )
+        .route(
+            "/api/tailscale/funnel/enable",
+            axum::routing::post(tailscale::enable_funnel),
+        )
+        .route(
+            "/api/tailscale/funnel/disable",
+            axum::routing::post(tailscale::disable_funnel),
+        )
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,
@@ -733,6 +771,8 @@ mod tests {
             scheduler_tx: tokio::sync::mpsc::channel(1).0,
             vapid_public_key: String::new(),
             vapid_private_pem: String::new(),
+            tailscale_status_cache: Arc::new(TokioRwLock::new(None)),
+            server_port: 7474,
         };
 
         let rs1 = app_state.get_run_state("thread-abc");
@@ -783,6 +823,8 @@ mod tests {
             scheduler_tx: tokio::sync::mpsc::channel(1).0,
             vapid_public_key: String::new(),
             vapid_private_pem: String::new(),
+            tailscale_status_cache: Arc::new(TokioRwLock::new(None)),
+            server_port: 7474,
         };
 
         let rs_a = app_state.get_run_state("thread-aaa");
@@ -844,6 +886,8 @@ mod tests {
             scheduler_tx: tokio::sync::mpsc::channel(1).0,
             vapid_public_key: String::new(),
             vapid_private_pem: String::new(),
+            tailscale_status_cache: Arc::new(TokioRwLock::new(None)),
+            server_port: 7474,
         });
 
         // Simulate two requests receiving their own clone of the Arc —

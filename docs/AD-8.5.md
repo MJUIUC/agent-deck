@@ -730,6 +730,6 @@ Release body template includes SHA256 checksums and the one-liner install comman
 
 ## Approval
 
-- [ ] **Implementation plan approved**
+- [x] **Implementation plan approved**
 - [ ] **Coding complete**
 - [ ] **Human review approved**

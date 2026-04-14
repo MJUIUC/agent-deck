@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import type { Thread, AgentPersona } from "@/types";
+import { tailscaleApi } from "@/api/client";
 import { ThreadItem } from "./ThreadItem";
 import { PersonaPickerModal } from "./PersonaPickerModal";
 import { Plus, Settings } from "lucide-react";
@@ -52,6 +53,8 @@ export function Sidebar({
 }: SidebarProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [vpnConnected, setVpnConnected] = useState(false);
+  const [vpnHostname, setVpnHostname] = useState<string | null>(null);
   const [showNoPersonasNote, setShowNoPersonasNote] = useState(false);
   const noPersonasNoteTimer = useRef<ReturnType<typeof setTimeout> | null>(
     null,
@@ -62,6 +65,30 @@ export function Sidebar({
     const handler = () => setIsModalOpen(true);
     window.addEventListener("agent-deck:new-chat", handler);
     return () => window.removeEventListener("agent-deck:new-chat", handler);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchVpnStatus = async () => {
+      try {
+        const result = await tailscaleApi.getStatus();
+        if (!cancelled) {
+          setVpnConnected(result.data.connected);
+          setVpnHostname(result.data.hostname);
+        }
+      } catch {
+        // leave previous state in place on error
+      }
+    };
+
+    fetchVpnStatus();
+    const intervalId = setInterval(fetchVpnStatus, 60_000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+    };
   }, []);
 
   const filteredThreads = useMemo(() => {
@@ -131,6 +158,24 @@ export function Sidebar({
                 <Ai size={20} />
               </span>
               <span className={styles.brandName}>agent-deck</span>
+              {/* VPN status dot */}
+              <span
+                title={
+                  vpnConnected
+                    ? `Tailscale connected${vpnHostname ? ` — ${vpnHostname}` : ""}`
+                    : "Tailscale not connected"
+                }
+                style={{
+                  display: "inline-block",
+                  width: 8,
+                  height: 8,
+                  borderRadius: "50%",
+                  background: vpnConnected ? "#4caf7d" : "#f5a623",
+                  marginLeft: 6,
+                  flexShrink: 0,
+                  alignSelf: "center",
+                }}
+              />
             </div>
             {/* Mobile close button */}
             {onMobileClose && (

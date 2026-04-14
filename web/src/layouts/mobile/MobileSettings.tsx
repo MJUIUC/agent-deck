@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { TailscaleStatusCard } from "../../components/settings/TailscaleStatusCard";
 import {
   useThemeStore,
   type Palette,
@@ -595,6 +596,11 @@ export function MobileSettings() {
 
       {/* ── Scrollable body ── */}
       <div className={`${styles.body} scrollbar-thin`}>
+        {/* ── Tailscale card ── */}
+        <section className={styles.section}>
+          <TailscaleStatusCard />
+        </section>
+
         {/* ── Install as App ── */}
         <section className={styles.section}>
           <div className={styles.sectionLabel}>Install as App</div>

@@ -31,6 +31,10 @@ function makeThread(id: string, updatedAt: string): Thread {
     system_prompt_addendum: null,
     status: "active",
     show_system_events: false,
+    summary: null,
+    summary_updated_at: null,
+    summary_message_count: 0,
+    auto_summarize: false,
     created_at: "2024-01-01T00:00:00.000Z",
     updated_at: updatedAt,
   };

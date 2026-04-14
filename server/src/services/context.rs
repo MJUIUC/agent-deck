@@ -865,8 +865,8 @@ mod tests {
         let defs = built_in_tool_defs_for_test();
         assert_eq!(
             defs.len(),
-            4,
-            "expected exactly save_memory, recall_memory, delete_memory, and recall_conversation in the built-in registry"
+            5,
+            "expected exactly save_memory, recall_memory, delete_memory, recall_conversation, and tailscale_status in the built-in registry"
         );
     }
 
@@ -988,7 +988,7 @@ mod tests {
         );
 
         // Tools
-        assert_eq!(ctx.tools.len(), 4);
+        assert_eq!(ctx.tools.len(), 5);
     }
 
     #[test]

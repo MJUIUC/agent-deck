@@ -14,6 +14,7 @@ import type {
   UserProfile,
   FsEntry,
   FsFileContent,
+  TailscaleStatus,
 } from "@/types";
 
 // ── Credential types ──────────────────────────────────────────────────────────
@@ -724,4 +725,15 @@ export const fsApi = {
   downloadUrl(path: string): string {
     return `/api/fs/download?path=${encodeURIComponent(path)}`;
   },
+};
+
+export const tailscaleApi = {
+  getStatus: (): Promise<{ data: TailscaleStatus }> =>
+    apiFetch("/api/tailscale/status"),
+  connect: (): Promise<{ data: TailscaleStatus }> =>
+    apiFetch("/api/tailscale/connect", { method: "POST" }),
+  enableFunnel: (): Promise<{ data: TailscaleStatus }> =>
+    apiFetch("/api/tailscale/funnel/enable", { method: "POST" }),
+  disableFunnel: (): Promise<{ data: TailscaleStatus }> =>
+    apiFetch("/api/tailscale/funnel/disable", { method: "POST" }),
 };

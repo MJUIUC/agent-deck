@@ -409,6 +409,72 @@ impl AgentTool for RecallConversationTool {
     }
 }
 
+// ─── TailscaleStatusTool ──────────────────────────────────────────────────────
+
+pub struct TailscaleStatusTool;
+
+#[async_trait]
+impl AgentTool for TailscaleStatusTool {
+    fn name(&self) -> &str {
+        "tailscale_status"
+    }
+
+    fn description(&self) -> &str {
+        "Check the current Tailscale VPN and Funnel status for this agent-deck server. \
+         Returns whether Tailscale is installed, connected, the device hostname, IP address, \
+         version, and whether Funnel (public HTTPS access) is enabled. Use this when the user \
+         asks about remote access, webhook configuration, or Tailscale connectivity."
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {},
+            "required": []
+        })
+    }
+
+    async fn run(&self, _args: Value, _context: &ToolContext<'_>) -> Result<String> {
+        let status = crate::services::tailscale::get_status(7474).await;
+
+        let installed_str = if status.installed { "yes" } else { "no" };
+        let connected_str = if status.connected { "yes" } else { "no" };
+        let hostname_str = status.hostname.as_deref().unwrap_or("unknown");
+        let ip_str = status.ip_address.as_deref().unwrap_or("unknown");
+        let version_str = status.version.as_deref().unwrap_or("unknown");
+
+        let funnel_str = if status.funnel_enabled {
+            format!(
+                "enabled — {}",
+                status.funnel_url.as_deref().unwrap_or("URL unknown")
+            )
+        } else {
+            "not enabled".to_string()
+        };
+
+        let mut lines = vec![
+            "Tailscale status:".to_string(),
+            format!("- Installed: {}", installed_str),
+            format!("- Connected: {}", connected_str),
+            format!("- Hostname: {}", hostname_str),
+            format!("- IP: {}", ip_str),
+            format!("- Version: {}", version_str),
+            format!("- Funnel: {}", funnel_str),
+        ];
+
+        if status.funnel_enabled {
+            if let Some(ref hostname) = status.hostname {
+                lines.push(format!(
+                    "- Webhook address: https://{}/api/webhooks",
+                    hostname
+                ));
+            }
+        }
+
+        Ok(lines.join("\n"))
+    }
+}
+
 // ─── Registry factory ─────────────────────────────────────────────────────────
 
 /// Construct the list of all statically-registered built-in tools.
@@ -421,6 +487,7 @@ pub fn built_in_tools() -> Vec<Arc<dyn AgentTool>> {
         Arc::new(RecallMemoryTool),
         Arc::new(DeleteMemoryTool),
         Arc::new(RecallConversationTool),
+        Arc::new(TailscaleStatusTool),
     ]
 }
 
@@ -455,7 +522,10 @@ mod tests {
         assert!(found.is_some(), "delete_memory must be in the registry");
 
         let found = tools.iter().find(|t| t.name() == "recall_conversation");
-        assert!(found.is_some(), "recall_conversation must be in the registry");
+        assert!(
+            found.is_some(),
+            "recall_conversation must be in the registry"
+        );
 
         let not_found = tools.iter().find(|t| t.name() == "nonexistent_tool");
         assert!(not_found.is_none());

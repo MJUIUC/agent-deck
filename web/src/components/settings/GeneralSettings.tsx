@@ -7,6 +7,7 @@ import React, {
 } from "react";
 import QRCode from "qrcode";
 import { authApi, profileApi } from "@/api/client";
+import { TailscaleStatusCard } from "./TailscaleStatusCard";
 import type { UserProfile } from "@/types";
 import {
   Btn,
@@ -1001,6 +1002,9 @@ export function GeneralSettings() {
           </div>
         </SectionCard>
       )}
+
+      {/* ── Tailscale card ── */}
+      <TailscaleStatusCard />
 
       {/* ── Open on Phone card ── */}
       <SectionCard

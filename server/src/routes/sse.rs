@@ -376,6 +376,8 @@ mod tests {
             scheduler_tx: tokio::sync::mpsc::channel(1).0,
             vapid_public_key: String::new(),
             vapid_private_pem: String::new(),
+            tailscale_status_cache: Arc::new(tokio::sync::RwLock::new(None)),
+            server_port: 7474,
         }
     }
 

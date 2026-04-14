@@ -354,3 +354,16 @@ export interface UserProfile {
   about: string | null;
   profile_updated_at: string | null;
 }
+
+// ── Tailscale ─────────────────────────────────────────────────────────────────
+
+export interface TailscaleStatus {
+  installed: boolean;
+  connected: boolean;
+  hostname: string | null;
+  funnel_enabled: boolean;
+  funnel_url: string | null;
+  auth_url: string | null;
+  version: string | null;
+  ip_address: string | null;
+}
