@@ -600,4 +600,4 @@ grep "workspace" ~/.agent-deck/server.log | head -20
 
 - [x] **Implementation plan approved** — human has reviewed this plan and confirmed coding can begin
 - [x] **Coding complete** — all tests pass (289 Rust, 0 failed; TypeScript build clean on all touched files), agent has verified against every acceptance criterion
-- [ ] **Human review approved** — human has tested the changes live and signed off
+- [x] **Human review approved** — human has tested the changes live and signed off
