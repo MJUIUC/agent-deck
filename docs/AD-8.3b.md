@@ -131,12 +131,37 @@ Task 1 (server) and Tasks 2+3 (frontend) are fully independent and can be built 
 
 ## Human Review Instructions
 
-*To be filled in after coding is complete (Step 5 of AGENT_WORKFLOW).*
+**Prerequisites:** Server running on port 7474. At least one thread exists with a workspace directory. Have a mix of file types available (text, image, binary).
+
+**Steps:**
+
+1. **Download endpoint — file** → `curl -o /tmp/test-download.md "http://localhost:7474/api/fs/download?path=<absolute-path-to-any-.md-file>"` (with auth header/cookie). → **Expected:** File saved to `/tmp/test-download.md` with correct content. Check response headers include `Content-Disposition: attachment; filename="..."`. / **Failure:** 500 or empty file.
+
+2. **Download endpoint — directory rejected** → `curl "http://localhost:7474/api/fs/download?path=~"` → **Expected:** `{"error":"..."}` with HTTP 400. / **Failure:** Returns a listing or streams data.
+
+3. **Download endpoint — security boundary** → `curl "http://localhost:7474/api/fs/download?path=/etc/passwd"` → **Expected:** HTTP 403. Also try `path=/Users/x/../etc/passwd` — same result. / **Failure:** File contents returned.
+
+4. **Download button — previewable file** → Open the File Explorer modal (folder button in thread header), navigate to and select a `.md` or `.txt` file. → **Expected:** A `⬇` button appears in the preview pane header bar to the right of the filename. Preview renders normally below. / **Failure:** No button, or button appears in wrong location.
+
+5. **Download button — binary/too-large file** → Select a binary file or one over 5 MB in the explorer. → **Expected:** Preview shows "cannot preview" message AND the `⬇` download button is still present in the header. / **Failure:** Button absent for non-previewable files.
+
+6. **Click download button** → Click the `⬇` button from step 4. → **Expected:** Browser's native file download dialog appears (or file saves automatically to Downloads), filename matches the original filename. / **Failure:** Nothing happens, or filename is generic "download".
+
+7. **Image download** → Select a `.png` or `.jpg` in the explorer, click `⬇`. → **Expected:** Image file downloads with correct name and is a valid image when opened. / **Failure:** Corrupted file or wrong name.
+
+8. **Agent download link** → In a thread, ask the agent: *"Create a file called hello.txt in your workspace with the content 'Hello world', then share a download link for it."* → **Expected:** Agent creates the file and emits a markdown link using `/api/fs/download?path=...`. Clicking the link in chat downloads the file. / **Failure:** Agent uses `/api/fs/read` pattern or a `file://` link instead.
+
+9. **Preview link vs download link** → Confirm the agent still uses `/api/fs/read?path=` for in-app preview links (ask it to share a file for viewing). → **Expected:** In-app file explorer opens. / **Failure:** Agent only uses download links for everything.
+
+**Optional server log check:**
+```
+grep "api/fs/download" ~/.agent-deck/server.log | head -10
+```
 
 ---
 
 ## Approval
 
-- [ ] **Implementation plan approved**
-- [ ] **Coding complete**
+- [x] **Implementation plan approved**
+- [x] **Coding complete** — `cargo build` clean (no new errors), TypeScript diagnostics clean on all touched files, all acceptance criteria verified
 - [ ] **Human review approved**
