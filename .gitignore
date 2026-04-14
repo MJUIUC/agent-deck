@@ -34,6 +34,9 @@ mobile/BotRelayApp/ios/build/
 mobile/BotRelayApp/ios/Pods/
 mobile/BotRelayApp/.expo/
 
+# Machine identity (never commit — see docs/AGENT_WORKFLOW.md §15)
+.agent-machine
+
 # macOS
 .DS_Store
 **/.DS_Store

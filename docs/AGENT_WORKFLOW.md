@@ -434,3 +434,76 @@ Never use `machine_secret` for credential encryption. Never return encrypted byt
 - `McpConnectionManager` is `Arc`-backed and cheaply cloneable
 - Fallback working dir for local servers: `mcp_dir/<tag>/`
 - Any `SELECT` feeding `connect_local` must include `tag` in `McpServerRow`
+
+---
+
+## §15 — Dev Docker Builds (Mobile Sessions)
+
+### When to use this section
+
+When development commands arrive **from a mobile device** (i.e. via the agent-deck mobile UI), the agent must **never run `cargo run`, `npm run dev`, or any command that modifies the live server process**. Instead, all build-and-test work goes through the isolated Docker dev instance.
+
+### Machine guard
+
+Before running any build command, check for the machine identity file:
+
+```bash
+cat .agent-machine
+```
+
+- If the file **does not exist** → stop. Do not run build commands. Tell the human this machine is not configured for dev Docker builds and point them to §15 setup.
+- If the file contains anything **other than** `mac-mini-primary` → stop. Same message.
+- If the file contains `mac-mini-primary` → proceed.
+
+This file is gitignored and must be created manually on each authorised machine. It is **never committed**.
+
+### Setup (one-time, per machine)
+
+```bash
+echo 'mac-mini-primary' > .agent-machine
+```
+
+Requires Colima + Docker CLI installed (`brew install colima docker`).
+
+### The `agent-dev.sh` script
+
+All dev Docker operations go through `scripts/agent-dev.sh`:
+
+| Command | Effect |
+|---|---|
+| `./scripts/agent-dev.sh` | Stop old container → build image → start fresh (default) |
+| `./scripts/agent-dev.sh build` | Build image only |
+| `./scripts/agent-dev.sh start` | Start existing image |
+| `./scripts/agent-dev.sh stop` | Stop and remove container |
+| `./scripts/agent-dev.sh logs` | Tail container logs |
+| `./scripts/agent-dev.sh status` | Check if container is running |
+| `./scripts/agent-dev.sh clean` | Remove container + image |
+
+The script **self-guards** — it reads `.agent-machine` and exits with an error if not on the primary Mac mini.
+
+### Dev instance details
+
+| Property | Value |
+|---|---|
+| Port | **7475** |
+| Data dir | `~/.agent-deck-dev/` |
+| Container name | `agent-deck-dev` |
+| Live instance | Port **7474** — never touched |
+
+### Typical mobile dev loop
+
+1. Make code changes on the feature branch (via filesystem/terminal MCP).
+2. Verify `.agent-machine` is present.
+3. Run `./scripts/agent-dev.sh` — builds and starts the dev container.
+4. Tell the human: *"Dev instance rebuilt and running at http://localhost:7475. Live instance on 7474 is untouched."*
+5. Human tests on `localhost:7475`.
+6. Iterate: repeat from step 1 as needed.
+7. When approved, follow Steps 5–7 of the normal workflow to commit and open a PR.
+
+### Rules
+
+- **Never** restart or kill the process on port 7474.
+- **Never** run `cargo run` or `cargo watch` during a mobile session.
+- **Never** run `npm run dev` against the live web directory during a mobile session.
+- Always run `./scripts/agent-dev.sh status` before building to avoid orphaned containers.
+- If Colima is not running, the script will attempt `colima start` automatically.

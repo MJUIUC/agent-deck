@@ -1,0 +1,33 @@
+# Rust build artifacts
+target/
+
+# Node modules
+web/node_modules/
+vendor/copilot-api/node_modules/
+
+# Git
+.git/
+.gitmodules
+
+# Dev dist (vite dev server output — not used in Docker build)
+web/dev-dist/
+
+# Vendor build artifacts
+vendor/copilot-api/dist/
+
+# Docs, mockups, scripts (not needed at runtime)
+docs/
+mockups/
+scripts/
+
+# Local env files
+.env
+server/.env
+**/.env.local
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
