@@ -108,7 +108,7 @@ mkdir -p "$AGENT_DECK_HOME/bin"
 if [ "$SOURCE_MODE" = true ]; then
   cp "$SCRIPT_DIR/target/release/server" "$AGENT_DECK_HOME/bin/agent-deck"
   rm -rf "$AGENT_DECK_HOME/public"
-  cp -r "$SCRIPT_DIR/web/dist" "$AGENT_DECK_HOME/public"
+  cp -r "$SCRIPT_DIR/server/public" "$AGENT_DECK_HOME/public"
 else
   cp "$SCRIPT_DIR/server" "$AGENT_DECK_HOME/bin/agent-deck"
   rm -rf "$AGENT_DECK_HOME/public"
