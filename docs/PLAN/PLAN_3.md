@@ -1449,6 +1449,30 @@ Acceptance criteria:
 
 ---
 
+**Story 8.3a — File Explorer + Workspace Directories** ✅ Complete  
+Branch: `feature/phase8-file-explorer`
+
+Adds three server endpoints (`GET /api/fs/list`, `GET /api/fs/read`, `GET /api/fs/workspace`) with a `canonicalize()`-based path-validation security layer (home dir + `/Volumes` allow-list). Each thread gets a workspace directory at `~/.agent-deck/workspaces/{thread-id}/` injected into the agent's system prompt. The UI gains a `FileExplorerModal` with a lazy virtualized tree (react-arborist) and file preview pane. Mermaid code blocks in chat render as SVG diagrams. Agent-emitted `file://` markdown links are intercepted and rendered as styled path chips that open the explorer.
+
+Acceptance criteria: see `docs/deprecated/AD-8.3a.md`
+
+---
+
+### As-built notes (Story 8.3a)
+
+- **Server routes (`server/src/routes/fs.rs`):** Three endpoints — `GET /api/fs/list`, `GET /api/fs/read`, `GET /api/fs/workspace`. Security: `canonicalize()` + home/`/Volumes` allow-list; 403 on anything outside. Files >5 MB or non-UTF-8 non-image return `previewable: false`.
+- **Workspace directory:** Created at `~/.agent-deck/workspaces/{thread_id}/` on first `GET /api/fs/workspace` call. Path injected into system prompt for every non-routine agent run via `services/context.rs`.
+- **`fsApi` in `web/src/api/client.ts`:** `list()`, `read()`, `workspace()` helpers added.
+- **Types in `web/src/types/index.ts`:** `FsEntry` and `FsFileContent` interfaces added.
+- **`FileExplorerModal.tsx`:** Lazy tree via react-arborist, breadcrumb bar, file preview pane with rendered markdown / image / binary fallback. Full-screen on mobile with tree↔preview panel switch.
+- **Mermaid rendering:** Fenced `mermaid` blocks in `MessageBubble.tsx` render as SVG via `mermaid.render()`; errors fall back to raw code block without crashing.
+- **`file://` link interception:** `<a>` override in `MessageBubble.tsx` catches `file://` links and renders a `PathChip` that opens `FileExplorerModal` pre-navigated to the target. Bare path auto-detection was removed in favour of explicit agent-emitted links.
+- **Explorer triggers:** Folder button added to desktop `ChatView.tsx` header and mobile `MobileChatView.tsx` nav; both resolve the workspace path via `GET /api/fs/workspace` before opening.
+- **Post-approval fixes:** Workspace root moved from `~/agent-deck-workspaces/` to `~/.agent-deck/workspaces/`; `meta.json` index; file links switched to `/api/fs/read?path=` scheme; mermaid in file preview panel; mobile touch-bleed fix; Files tab in mobile bottom nav; push notification body strips markdown.
+- **Branch:** `feature/phase8-file-explorer` — PR open to `dev`.
+
+---
+
 ### Phase 8.5 — Tailscale Platform Layer + Webhook Integration
 
 **Goal:** Make Tailscale a first-class citizen of agent-deck. Surface live VPN status in the UI and give the agent tools to answer connectivity questions. Add a single universal webhook endpoint that lets any external service (GitHub, Stripe, CI/CD, IoT) trigger the agent by posting to `https://{hostname}/api/webhooks`. Routing is by HMAC secret — one stable URL for all services, forever.
