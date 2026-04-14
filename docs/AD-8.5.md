@@ -622,6 +622,8 @@ Steps:
 
 Canonical script for running agent-deck in production. `agent-deck start` delegates to this.
 
+The Rust binary serves the compiled React frontend as static files from `~/.agent-deck/public/` — no separate web process is needed. Starting the binary starts both the API and the web application.
+
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
@@ -630,6 +632,7 @@ AGENT_DECK_HOME="${AGENT_DECK_HOME:-$HOME/.agent-deck}"
 LOG_FILE="$AGENT_DECK_HOME/server.log"
 PID_FILE="$AGENT_DECK_HOME/agent-deck.pid"
 BINARY="$AGENT_DECK_HOME/bin/agent-deck"
+PORT="${AGENT_DECK_PORT:-7474}"
 
 mkdir -p "$AGENT_DECK_HOME"
 
@@ -638,8 +641,24 @@ nohup "$BINARY" \
   >> "$LOG_FILE" 2>&1 &
 
 echo $! > "$PID_FILE"
-echo "agent-deck started (PID $(cat "$PID_FILE"))"
-echo "Logs: $LOG_FILE"
+
+echo ""
+echo "  agent-deck is running (PID $(cat "$PID_FILE"))"
+echo ""
+echo "  Open:  http://localhost:$PORT"
+
+# Print Tailscale URL if connected
+if command -v tailscale &>/dev/null; then
+  TS_HOST=$(tailscale status --json 2>/dev/null | grep -o '"DNSName":"[^"]*"' | head -1 | cut -d'"' -f4 | sed 's/\.$//')
+  if [ -n "$TS_HOST" ]; then
+    echo "         http://$TS_HOST:$PORT"
+  fi
+fi
+
+echo ""
+echo "  Logs:  $LOG_FILE"
+echo "         (run 'agent-deck logs' to tail)"
+echo ""
 ```
 
 ---
