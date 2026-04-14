@@ -239,12 +239,24 @@ Tasks 1 and 2 are sequential (Task 2 depends on the field added in Task 1). Task
 
 ## Human Review Instructions
 
-*To be filled in after coding is complete (Step 5 of AGENT_WORKFLOW).*
+**Prerequisites:** Server must be running with at least one local MCP server configured and enabled (e.g. iris).
+
+**Steps:**
+1. Start the agent-deck server and open a thread with a local MCP server attached → **Expected:** Server log shows the server connects normally; no keepalive logs yet (first tick is 45 s away)
+2. Wait 45–50 seconds with the thread open → **Expected:** `TRACE`-level log line `mcp keepalive: ping ok` for the local server (requires `RUST_LOG=trace` or equivalent)
+3. Wait another 45 seconds → **Expected:** Another `ping ok` trace; the MCP server process is still running (`ps aux | grep <server-name>`)
+4. Disconnect the MCP server or disable it → **Expected:** Log shows `mcp keepalive: shutdown signal received`; no further ping logs
+5. Start a tool call at the same moment a keepalive tick would fire → **Expected:** No interleaving — one completes before the other; no garbled responses (the `request_lock` serialises them)
+
+**Optional server log check:**
+```
+grep "mcp keepalive" ~/.agent-deck/server.log
+```
 
 ---
 
 ## Approval
 
 - [x] **Implementation plan approved**
-- [ ] **Coding complete**
+- [x] **Coding complete** — all tests pass, agent has verified against every acceptance criterion
 - [ ] **Human review approved**
