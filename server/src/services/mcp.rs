@@ -175,6 +175,7 @@ struct McpConnection {
     #[allow(dead_code)]
     server_id: String,
     inner: Mutex<McpConnectionInner>,
+    request_lock: tokio::sync::Mutex<()>,
     /// Current connection status (mirrored here for fast in-memory reads).
     #[allow(dead_code)]
     status: RwLock<McpStatus>,
@@ -787,6 +788,8 @@ impl McpConnectionManager {
         );
 
         if is_local {
+            let _request_guard = conn.request_lock.lock().await;
+
             // ── Stdio transport ───────────────────────────────────────────────
             // Write the request to stdin, then read the response from the shared
             // stdout reader.  We lock stdin briefly for the write, then release
@@ -970,6 +973,17 @@ impl McpConnectionManager {
                 Ok(conn) => {
                     let conn = Arc::new(conn);
                     self.connections.insert(server_id.to_string(), conn.clone());
+
+                    // Spawn keepalive for local connections only.
+                    {
+                        let is_local = conn.inner.lock().await.child.is_some();
+                        if is_local {
+                            let conn_for_keepalive = conn.clone();
+                            tokio::spawn(async move {
+                                Self::run_keepalive_local(conn_for_keepalive).await;
+                            });
+                        }
+                    }
 
                     // Record when we connected so we can reset backoff after
                     // a sustained stable period.
@@ -1180,6 +1194,7 @@ impl McpConnectionManager {
         let mcp_conn = McpConnection {
             server_id: row.id.clone(),
             inner: Mutex::new(conn),
+            request_lock: tokio::sync::Mutex::new(()),
             status: RwLock::new(McpStatus::Connected),
             tools: RwLock::new(tools),
             stdout_reader: Some(Arc::clone(&stdout_reader)),
@@ -1314,6 +1329,7 @@ impl McpConnectionManager {
         Ok(McpConnection {
             server_id: row.id.clone(),
             inner: Mutex::new(inner),
+            request_lock: tokio::sync::Mutex::new(()),
             status: RwLock::new(McpStatus::Connected),
             tools: RwLock::new(tools),
             stdout_reader: None,
@@ -1503,6 +1519,70 @@ impl McpConnectionManager {
             if let Err(e) = ping_result {
                 warn!("mcp: remote server {} ping failed: {}", server_id, e);
                 return; // signal reconnect
+            }
+        }
+    }
+
+    async fn run_keepalive_local(conn: Arc<McpConnection>) {
+        const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(45);
+        let mut ticker = tokio::time::interval(KEEPALIVE_INTERVAL);
+        ticker.tick().await; // consume the immediate first tick
+
+        let mut shutdown_rx = conn.shutdown_rx.clone();
+
+        loop {
+            tokio::select! {
+                _ = ticker.tick() => {
+                    match conn.request_lock.try_lock() {
+                        Err(_) => {
+                            tracing::trace!(
+                                server_id = %conn.server_id,
+                                "mcp keepalive: skipping tick, request_lock held"
+                            );
+                        }
+                        Ok(_guard) => {
+                            let ping_result: anyhow::Result<()> = async {
+                                {
+                                    let mut inner = conn.inner.lock().await;
+                                    let id = inner.next_id();
+                                    let req = JsonRpcRequest::request(id, "tools/list", None);
+                                    write_line_to_stdin(inner.stdin.as_mut().unwrap(), &req).await?;
+                                }
+                                let stdout_reader = conn.stdout_reader.as_ref()
+                                    .ok_or_else(|| anyhow::anyhow!("no stdout reader"))?;
+                                let mut reader = stdout_reader.lock().await;
+                                let resp = read_json_rpc_response(&mut *reader).await?;
+                                if let Some(err) = resp.error {
+                                    return Err(anyhow::anyhow!("tools/list error: {}", err));
+                                }
+                                Ok(())
+                            }.await;
+
+                            match ping_result {
+                                Ok(()) => tracing::trace!(
+                                    server_id = %conn.server_id,
+                                    "mcp keepalive: ping ok"
+                                ),
+                                Err(e) => {
+                                    tracing::warn!(
+                                        server_id = %conn.server_id,
+                                        error = %e,
+                                        "mcp keepalive: ping failed, stopping"
+                                    );
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+                result = shutdown_rx.changed() => {
+                    tracing::debug!(
+                        server_id = %conn.server_id,
+                        "mcp keepalive: shutdown signal received"
+                    );
+                    let _ = result;
+                    return;
+                }
             }
         }
     }

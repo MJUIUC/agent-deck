@@ -1,153 +1,239 @@
 # AD-8.4 — MCP Keepalive Ping
 
-**Story:** 8.4 — MCP Keepalive Ping  
-**Branch:** `feature/phase8-mcp-keepalive`  
-**Phase doc reference:** `docs/PLAN/PLAN_3.md` §Phase 8  
-**Related stories:** `docs/AD-8.2.md` (local MCP process management), `docs/AD-8.3.md` (per-thread MCP)
+**Story:** 8.4 — MCP Keepalive Ping
+**Branch:** `feature/phase8-mcp-keepalive`
+**Phase doc reference:** `docs/PLAN/PLAN_3.md` §Phase 8
 
 ---
 
 ## Summary
 
-MCP servers are spawned as child processes and may exit after a period of inactivity. This causes a cold-start penalty on the next tool call — the process must be re-spawned, the MCP handshake re-run, and only then can the tool execute. This latency is noticeable to the user and undermines the responsiveness of tool-heavy threads.
-
-This story adds a background keepalive mechanism: while a thread is active and has MCP servers enabled, agent-deck sends a lightweight periodic ping to each connected MCP server. This keeps the process warm so that all tool calls are fast.
+Local MCP servers (spawned as child processes) may exit after a period of inactivity due to their own internal idle timers. This causes a cold-start penalty on the next tool call — the process must be re-spawned, the MCP handshake re-run, and only then can the tool execute. This story adds a background keepalive for **local (stdio) servers only**: a `tools/list` ping sent every 45 seconds while the server is connected. Remote (HTTP) servers are excluded — they are stateless request/response and are already monitored by the existing `monitor_remote` health-check loop.
 
 ---
 
 ## Current State
 
-### What already exists
-
-- `server/src/mcp/` — MCP client management, process spawning, tool call dispatch
-- Per-thread MCP enable/disable (AD-8.3) — MCP servers are scoped to threads
-- `AppState` — holds active MCP connections keyed by thread or globally
-- No keepalive mechanism exists — MCP processes are spawned on demand and may idle-exit
-
-### What does not exist yet
-
-- Background keepalive task per active MCP server
-- Ping/noop call logic (using `tools/list` or MCP `ping` if supported)
-- Lifecycle tie-in: start keepalive when MCP enabled for thread, stop when disabled or thread closed
+- All MCP connection logic lives in `server/src/services/mcp.rs`
+- `McpConnection` holds `inner: Mutex<McpConnectionInner>` (contains `child`, `stdin`) and `stdout_reader: Option<Arc<Mutex<BufReader<ChildStdout>>>>`
+- `call_tool` (local path) acquires `inner` briefly to write a request to stdin, releases it, then acquires `stdout_reader` to read the response — these are two separate lock acquisitions with a gap between them
+- The gap means a concurrent writer could interleave on stdin and steal the response from stdout
+- `supervise` manages the connect → monitor → backoff loop; `monitor_connection` blocks until the connection is considered dead
+- `shutdown_tx`/`shutdown_rx` (`watch::channel`) on `McpConnection` signal intentional teardown; dropping the `Arc<McpConnection>` closes `shutdown_tx` causing `shutdown_rx.changed()` to return `Err`
+- No keepalive mechanism exists
 
 ---
 
 ## Design
 
-### Ping mechanism
+### Why a `request_lock` is required
 
-The MCP protocol does not define a dedicated `ping` method in all implementations. The safest universal noop is **`tools/list`** — it is always supported, returns a known response, and produces no side effects. The response can be discarded.
+The local stdio transport is a single sequential pipe. `call_tool` writes a request to stdin and reads the matching response from stdout. If a keepalive fires between the write and the read, two requests are queued on stdin, and the responses arrive interleaved on stdout — the wrong reader consumes the wrong response. A `Mutex<()>` named `request_lock` added to `McpConnection` serializes the full write-then-read cycle, making concurrent writers impossible.
 
-If a future MCP spec formalizes a `ping` method, the implementation can be swapped without changing the keepalive lifecycle logic.
+### `Mutex<()>` vs `Semaphore`
 
-### Keepalive interval
+A `Semaphore(1)` and `Mutex<()>` are equivalent for mutual exclusion. The semaphore's distinguishing features (`add_permits`, `close`) are not needed here. `Mutex<()>` communicates the intent (mutual exclusion) more clearly and prevents accidentally widening the invariant.
 
-**45 seconds.** This is:
-- Short enough to prevent most MCP server idle timeouts (typically 60–120s)
-- Long enough to be negligible overhead
-- Configurable via a compile-time constant initially; can be promoted to a config field later
+### Keepalive uses `try_lock()`, not `.lock().await`
 
-### Lifecycle
+The agent run loop's `RunState::semaphore` uses `.acquire().await` because queuing messages is the correct behavior — no message should be silently dropped. The keepalive has the opposite requirement: a ping that queues behind a 3-minute tool call and fires immediately after it finishes provides no keepalive benefit. `try_lock()` returns `Err` instantly if the lock is held; the keepalive simply skips that tick and waits for the next 45-second interval.
 
-| Event | Keepalive action |
-|---|---|
-| Thread opened, MCP server connected | Spawn keepalive task for that server |
-| Thread closed | Cancel keepalive task |
-| MCP server disabled for thread | Cancel keepalive task |
-| MCP server re-enabled | Spawn new keepalive task |
-| MCP server errors on ping | Log warning, cancel task (server is gone) |
+### Scope: local servers only
 
-Each keepalive task is a `tokio::task` holding a `tokio::time::interval`. It is cancelled via a `CancellationToken` or by dropping the task handle when the thread/server scope ends.
+Remote servers communicate over HTTP — each request is an independent POST with no shared pipe state. They do not have the idle-exit problem (no child process) and are already monitored by `monitor_remote`. No keepalive is spawned for remote connections.
 
-### Error handling
+### Cancellation
 
-- If a ping fails, log a `WARN` and stop the keepalive for that server — don't loop-crash
-- Do not attempt to restart the MCP server from within the keepalive task; that responsibility belongs to the MCP connection manager
-- Ping errors are silent to the user — no UI impact
+The keepalive task selects on `shutdown_rx.changed()`. When `disconnect_server` calls `shutdown_tx.send(true)`, or when the `Arc<McpConnection>` is dropped from the pool (closing `shutdown_tx`), the keepalive exits cleanly without needing a separate `CancellationToken`.
 
 ---
 
 ## Implementation Plan
 
-### Task 1 — Ping helper function
+### Task 1 — Add `request_lock` to `McpConnection`
 
-**Modified file:** `server/src/mcp/client.rs` (or equivalent MCP client module)
+**File:** `server/src/services/mcp.rs`
 
-Add a `ping_server(server_id: &str) -> Result<()>` function that calls `tools/list` on the given MCP server and discards the response. This function will be reused by the keepalive task and can also be used for connection health checks in the future.
+Add one field to `McpConnection`:
 
 ```rust
-pub async fn ping_server(client: &McpClient) -> anyhow::Result<()> {
-    let _ = client.list_tools().await?;
-    Ok(())
+struct McpConnection {
+    server_id: String,
+    inner: Mutex<McpConnectionInner>,
+    request_lock: tokio::sync::Mutex<()>,   // ← new
+    status: RwLock<McpStatus>,
+    tools: RwLock<Vec<McpTool>>,
+    stdout_reader: Option<Arc<Mutex<BufReader<tokio::process::ChildStdout>>>>,
+    shutdown_tx: watch::Sender<bool>,
+    shutdown_rx: watch::Receiver<bool>,
 }
 ```
 
-### Task 2 — Keepalive task
-
-**New file:** `server/src/mcp/keepalive.rs`
+Initialise it in both `connect_local` and `connect_remote` struct literals:
 
 ```rust
-use tokio::time::{interval, Duration};
-use tokio_util::sync::CancellationToken;
+request_lock: tokio::sync::Mutex::new(()),
+```
 
-const KEEPALIVE_INTERVAL_SECS: u64 = 45;
+### Task 2 — Hold `request_lock` across the full stdio round-trip in `call_tool`
 
-pub async fn run_keepalive(client: McpClientHandle, cancel: CancellationToken) {
-    let mut ticker = interval(Duration::from_secs(KEEPALIVE_INTERVAL_SECS));
-    ticker.tick().await; // consume immediate first tick
+**File:** `server/src/services/mcp.rs`, `call_tool`, local branch only
+
+Wrap the existing stdin-write + stdout-read sequence with a `request_lock` guard:
+
+```rust
+if is_local {
+    let _request_guard = conn.request_lock.lock().await;
+
+    // existing: write req to stdin via inner lock
+    {
+        let mut inner = conn.inner.lock().await;
+        write_line_to_stdin(inner.stdin.as_mut().unwrap(), &req).await?;
+    }
+
+    // existing: read response from stdout_reader
+    let stdout_reader = conn.stdout_reader.as_ref()
+        .ok_or_else(|| anyhow!("MCP server '{}' has no stdout reader", server_id))?;
+    let resp = {
+        let mut reader = stdout_reader.lock().await;
+        read_json_rpc_response(&mut *reader).await?
+    };
+
+    // _request_guard drops here, releasing the lock
+    // ... rest of response handling unchanged
+}
+```
+
+The `_request_guard` must remain in scope (not prefixed with `_` alone — use a named binding to make the intent clear and prevent an accidental immediate drop).
+
+### Task 3 — Keepalive function and lifecycle integration
+
+**File:** `server/src/services/mcp.rs`
+
+Add a private async function:
+
+```rust
+async fn run_keepalive_local(conn: Arc<McpConnection>) {
+    const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(45);
+    let mut ticker = tokio::time::interval(KEEPALIVE_INTERVAL);
+    ticker.tick().await; // consume the immediate first tick
+
+    let mut shutdown_rx = conn.shutdown_rx.clone();
 
     loop {
         tokio::select! {
             _ = ticker.tick() => {
-                if let Err(e) = ping_server(&client).await {
-                    tracing::warn!("MCP keepalive ping failed for {}: {}", client.id(), e);
-                    break;
+                match conn.request_lock.try_lock() {
+                    Err(_) => {
+                        // A tool call is in flight; skip this tick.
+                        tracing::trace!(
+                            server_id = %conn.server_id,
+                            "mcp keepalive: skipping tick, request_lock held"
+                        );
+                    }
+                    Ok(_guard) => {
+                        // Send tools/list and read the response while holding the lock.
+                        let ping_result = async {
+                            let id = {
+                                let mut inner = conn.inner.lock().await;
+                                let id = inner.next_id();
+                                let req = JsonRpcRequest::request(id, "tools/list", None);
+                                write_line_to_stdin(inner.stdin.as_mut().unwrap(), &req).await?;
+                                id
+                            };
+                            let stdout_reader = conn.stdout_reader.as_ref()
+                                .ok_or_else(|| anyhow!("no stdout reader"))?;
+                            let mut reader = stdout_reader.lock().await;
+                            let resp = read_json_rpc_response(&mut *reader).await?;
+                            if let Some(err) = resp.error {
+                                return Err(anyhow!("tools/list error: {}", err));
+                            }
+                            let _ = id; // suppress unused warning
+                            Ok(())
+                        }.await;
+
+                        match ping_result {
+                            Ok(()) => tracing::trace!(
+                                server_id = %conn.server_id,
+                                "mcp keepalive: ping ok"
+                            ),
+                            Err(e) => {
+                                tracing::warn!(
+                                    server_id = %conn.server_id,
+                                    error = %e,
+                                    "mcp keepalive: ping failed, stopping"
+                                );
+                                return;
+                            }
+                        }
+                    }
                 }
-                tracing::trace!("MCP keepalive ping ok: {}", client.id());
             }
-            _ = cancel.cancelled() => {
-                tracing::debug!("MCP keepalive cancelled for {}", client.id());
-                break;
+            result = shutdown_rx.changed() => {
+                // shutdown_tx sent true (disconnect_server) or was dropped (connection removed).
+                tracing::debug!(
+                    server_id = %conn.server_id,
+                    "mcp keepalive: shutdown signal received"
+                );
+                let _ = result;
+                return;
             }
         }
     }
 }
 ```
 
-### Task 3 — Lifecycle integration
+Spawn it inside `supervise`, in the `Ok(conn)` arm, immediately after the connection is inserted into the pool:
 
-**Modified file:** `server/src/mcp/manager.rs` (or wherever MCP connections are tracked)
+```rust
+Ok(conn) => {
+    let conn = Arc::new(conn);
+    self.connections.insert(server_id.to_string(), conn.clone());
 
-When a MCP server connection is established for a thread:
-1. Create a `CancellationToken`
-2. Spawn `run_keepalive(client_handle, cancel_token.clone())`
-3. Store the `CancellationToken` alongside the connection handle
+    // Spawn keepalive for local connections only.
+    let is_local = conn.inner.lock().await.child.is_some();
+    if is_local {
+        let conn_for_keepalive = conn.clone();
+        tokio::spawn(async move {
+            run_keepalive_local(conn_for_keepalive).await;
+        });
+    }
 
-When the connection is torn down (thread closed, MCP disabled):
-1. Call `cancel_token.cancel()` — the keepalive task exits cleanly on next loop
+    // existing: monitor_connection, backoff_shutdown_rx, etc.
+    self.monitor_connection(server_id, &conn).await;
+    // ...
+}
+```
 
-### Task 4 — Tracing / observability
+The `tokio::spawn` handle is intentionally not stored — the keepalive exits on its own via `shutdown_rx` when the connection is removed from the pool. Detaching is correct here because the keepalive must outlive the `supervise` arm's local scope but must not outlive the `McpConnection`.
 
-Keepalive pings log at `TRACE` level (not `DEBUG`) — they should be invisible in normal operation but visible when deep-debugging MCP issues. Failures log at `WARN`.
+### Task 4 — Tracing levels
 
-This integrates cleanly with AD-9.1 (structured logging with `tracing-appender`).
+- Successful ping: `tracing::trace!` — invisible in normal operation
+- Skipped tick: `tracing::trace!`
+- Shutdown signal: `tracing::debug!`
+- Ping failure: `tracing::warn!` — only meaningful signal
+
+No new files are needed. All changes are in `server/src/services/mcp.rs`.
 
 ### Parallelisation note
 
-Task 1 and Task 2 can be written in parallel. Task 3 depends on both. Task 4 is woven into Tasks 2 and 3.
+Tasks 1 and 2 are sequential (Task 2 depends on the field added in Task 1). Task 3 depends on Task 1 (uses `request_lock`). All three can be done in a single pass through `services/mcp.rs`.
 
 ---
 
 ## Acceptance Criteria
 
-- [ ] A `tools/list` ping is sent to each active MCP server every 45 seconds while the thread is open
-- [ ] Keepalive tasks start when an MCP server is connected to a thread
-- [ ] Keepalive tasks stop when the thread is closed or the MCP server is disabled
-- [ ] A failed ping logs a `WARN` and stops the keepalive for that server — does not crash or retry infinitely
-- [ ] Successful pings log at `TRACE` level only
-- [ ] No user-visible UI changes — this is entirely backend
+- [ ] A `tools/list` ping is sent to each connected **local** MCP server every 45 seconds
+- [ ] If `request_lock` is held when the tick fires, the ping is skipped for that interval — no queuing
+- [ ] Keepalive task starts when a local MCP server connects (inside `supervise`)
+- [ ] Keepalive task stops when `shutdown_rx` signals teardown (disconnect or connection drop)
+- [ ] A failed ping logs a `WARN` and exits — does not retry or crash
+- [ ] Successful pings and skipped ticks log at `TRACE` only
+- [ ] `call_tool` (local path) holds `request_lock` for the full write-then-read cycle
+- [ ] Remote (HTTP) servers: no keepalive spawned, `call_tool` unchanged
+- [ ] No user-visible UI changes
 - [ ] `cargo build` passes, all existing tests pass
-- [ ] Manual test: open a thread with an MCP server, wait 2+ minutes, make a tool call — response is fast (no cold-start delay)
 
 ---
 
@@ -159,6 +245,6 @@ Task 1 and Task 2 can be written in parallel. Task 3 depends on both. Task 4 is 
 
 ## Approval
 
-- [ ] **Implementation plan approved**
+- [x] **Implementation plan approved**
 - [ ] **Coding complete**
 - [ ] **Human review approved**
