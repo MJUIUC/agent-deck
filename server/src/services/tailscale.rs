@@ -1,6 +1,6 @@
 use serde::Serialize;
 use tokio::process::Command;
-use tracing::warn;
+use tracing::{debug, warn};
 
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct TailscaleStatus {
@@ -21,7 +21,7 @@ pub async fn get_status(port: u16) -> TailscaleStatus {
     let version_output = match Command::new("tailscale").arg("version").output().await {
         Ok(output) => output,
         Err(error) => {
-            warn!(error = %error, "tailscale binary not found in PATH");
+            debug!(error = %error, "tailscale binary not found in PATH");
             return TailscaleStatus {
                 installed: false,
                 ..Default::default()
@@ -30,7 +30,7 @@ pub async fn get_status(port: u16) -> TailscaleStatus {
     };
 
     if !version_output.status.success() {
-        warn!("tailscale version check failed — treating as not installed");
+        debug!("tailscale version check failed — treating as not installed");
         return TailscaleStatus {
             installed: false,
             ..Default::default()
@@ -124,15 +124,14 @@ pub async fn check_funnel(port: u16) -> (bool, Option<String>) {
     {
         Ok(output) => output,
         Err(error) => {
-            warn!(error = %error, "failed to run `tailscale funnel status`");
+            debug!(error = %error, "failed to run `tailscale funnel status`");
             return (false, None);
         }
     };
 
     // Older Tailscale versions may not support the funnel subcommand.
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        warn!(stderr = %stderr, "tailscale funnel status returned non-zero exit code");
+        debug!("tailscale funnel status returned non-zero exit code — funnel not available");
         return (false, None);
     }
 
