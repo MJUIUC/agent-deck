@@ -151,6 +151,13 @@
     user-select: none;
 }
 
+.breadcrumbCurrent {
+    color: var(--text-primary);
+    font-size: 0.75rem;
+    padding: 2px 4px;
+    font-weight: 500;
+}
+
 /* ── Tree Scroll + Rows ──────────────────────────────────────────────────── */
 
 .treeScroll {
@@ -219,6 +226,15 @@
     color: var(--text-tertiary);
     padding: 4px 8px;
     font-style: italic;
+}
+
+.treeAccessError {
+    font-size: 0.8125rem;
+    color: var(--text-secondary);
+    padding: 10px 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
 }
 
 /* ── Preview Panel ───────────────────────────────────────────────────────── */
