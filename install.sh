@@ -86,12 +86,17 @@ if [ "$SOURCE_MODE" = true ]; then
   print_done "Server built"
 
   print_step "Building web application..."
-  if command -v nvm &>/dev/null; then
+  # Source nvm if present so the correct Node version is available.
+  # nvm is a shell function — it cannot be detected with command -v.
+  if [ -f "$HOME/.nvm/nvm.sh" ]; then
     # shellcheck source=/dev/null
-    (cd "$SCRIPT_DIR/web" && source "$NVM_DIR/nvm.sh" 2>/dev/null && nvm use 24 2>/dev/null || true && npm ci && npm run build)
-  else
-    (cd "$SCRIPT_DIR/web" && npm ci && npm run build)
+    source "$HOME/.nvm/nvm.sh"
+    nvm use 24 2>/dev/null || nvm use --lts 2>/dev/null || true
   fi
+  cd "$SCRIPT_DIR/web"
+  npm ci
+  npm run build
+  cd "$SCRIPT_DIR"
   print_done "Web application built"
 fi
 
