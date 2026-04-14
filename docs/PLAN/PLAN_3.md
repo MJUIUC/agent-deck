@@ -1493,6 +1493,22 @@ Acceptance criteria: see `docs/deprecated/AD-8.3b.md`
 
 ---
 
+**Story 8.4 — MCP Keepalive Ping** ✅ Complete
+Branch: `feature/phase8-mcp-keepalive`
+
+Adds a background keepalive ping for local (stdio) MCP servers to prevent idle-exit cold-start latency. A `tools/list` request is sent every 45 seconds while each local server is connected. A `request_lock: Mutex<()>` was added to `McpConnection` to serialise the full stdin-write → stdout-read round-trip in `call_tool`, preventing interleaving with concurrent keepalive pings. The keepalive uses `try_lock()` (not `.lock().await`) so it skips a tick rather than queuing behind an in-flight tool call. Remote (HTTP) servers are excluded — they have no idle-exit problem and are already monitored by `monitor_remote`. Keepalive tasks cancel cleanly via `shutdown_rx` when the connection is torn down.
+
+### As-built notes (Story 8.4)
+
+- **`request_lock: tokio::sync::Mutex<()>`** added to `McpConnection`; initialised in both `connect_local` and `connect_remote` struct literals.
+- **`call_tool` (local branch):** `let _request_guard = conn.request_lock.lock().await;` acquired at the top of the `if is_local {` branch; guard lives until the branch exits (after stdout read), serialising all local stdio round-trips.
+- **`run_keepalive_local`:** Private async fn inside `impl McpConnectionManager`. Ticks every 45 s; uses `try_lock()` — logs `TRACE` and skips the tick if `request_lock` is held. On failure logs `WARN` and returns. Cancels via `shutdown_rx.changed()`.
+- **`supervise`:** After `connections.insert`, checks `child.is_some()` and `tokio::spawn`s `run_keepalive_local` for local connections only. Handle is detached — task self-terminates via `shutdown_rx`.
+- **All changes in one file:** `server/src/services/mcp.rs`. No new files.
+- **Branch:** `feature/phase8-mcp-keepalive` — PR open to `dev`.
+
+---
+
 ### Phase 8.5 — Tailscale Platform Layer + Webhook Integration
 
 **Goal:** Make Tailscale a first-class citizen of agent-deck. Surface live VPN status in the UI and give the agent tools to answer connectivity questions. Add a single universal webhook endpoint that lets any external service (GitHub, Stripe, CI/CD, IoT) trigger the agent by posting to `https://{hostname}/api/webhooks`. Routing is by HMAC secret — one stable URL for all services, forever.
