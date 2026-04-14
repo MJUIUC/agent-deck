@@ -21,6 +21,7 @@ interface TreeNode {
   isExpanded: boolean;
   isLoading: boolean;
   childPaths: string[] | null;
+  loadError: string | null;
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -67,27 +68,38 @@ function TreeEntry({
         <span className={styles.treeName}>{node.name}</span>
         {node.isLoading && <span className={styles.treeLoading}>…</span>}
       </div>
-      {node.kind === "dir" && node.isExpanded && node.childPaths && (
+      {node.kind === "dir" && node.isExpanded && (
         <div>
-          {node.childPaths.map((childPath) => (
-            <TreeEntry
-              key={childPath}
-              path={childPath}
-              depth={depth + 1}
-              nodes={nodes}
-              selectedPath={selectedPath}
-              onSelectFile={onSelectFile}
-              onToggleDir={onToggleDir}
-            />
-          ))}
-          {node.childPaths.length === 0 && (
+          {node.loadError ? (
             <div
               style={{ paddingLeft: indent + 16 }}
-              className={styles.treeEmpty}
+              className={styles.treeAccessError}
             >
-              Empty directory
+              🔒 Not accessible through agent-deck
             </div>
-          )}
+          ) : node.childPaths ? (
+            <>
+              {node.childPaths.map((childPath) => (
+                <TreeEntry
+                  key={childPath}
+                  path={childPath}
+                  depth={depth + 1}
+                  nodes={nodes}
+                  selectedPath={selectedPath}
+                  onSelectFile={onSelectFile}
+                  onToggleDir={onToggleDir}
+                />
+              ))}
+              {node.childPaths.length === 0 && (
+                <div
+                  style={{ paddingLeft: indent + 16 }}
+                  className={styles.treeEmpty}
+                >
+                  Empty directory
+                </div>
+              )}
+            </>
+          ) : null}
         </div>
       )}
     </div>
@@ -96,10 +108,11 @@ function TreeEntry({
 
 interface BreadcrumbProps {
   path: string;
+  isFilePath?: boolean;
   onNavigate: (path: string) => void;
 }
 
-function Breadcrumb({ path, onNavigate }: BreadcrumbProps) {
+function Breadcrumb({ path, isFilePath, onNavigate }: BreadcrumbProps) {
   const parts = path.split("/").filter(Boolean);
   return (
     <div className={styles.breadcrumb}>
@@ -111,15 +124,20 @@ function Breadcrumb({ path, onNavigate }: BreadcrumbProps) {
       </button>
       {parts.map((part, i) => {
         const href = "/" + parts.slice(0, i + 1).join("/");
+        const isLast = i === parts.length - 1;
         return (
           <span key={href}>
             <span className={styles.breadcrumbSep}>/</span>
-            <button
-              className={styles.breadcrumbSegment}
-              onClick={() => onNavigate(href)}
-            >
-              {part}
-            </button>
+            {isLast && isFilePath ? (
+              <span className={styles.breadcrumbCurrent}>{part}</span>
+            ) : (
+              <button
+                className={styles.breadcrumbSegment}
+                onClick={() => onNavigate(href)}
+              >
+                {part}
+              </button>
+            )}
           </span>
         );
       })}
@@ -226,6 +244,7 @@ export function FileExplorerModal({
   const [nodes, setNodes] = useState<Record<string, TreeNode>>({});
   const [rootPath, setRootPath] = useState<string>("");
   const [rootEntries, setRootEntries] = useState<string[]>([]);
+  const [treeLoadError, setTreeLoadError] = useState<string | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [previewData, setPreviewData] = useState<FsFileContent | null>(null);
   const [previewFading, setPreviewFading] = useState(false);
@@ -268,6 +287,7 @@ export function FileExplorerModal({
           isExpanded: false,
           isLoading: false,
           childPaths: entry.kind === "dir" ? null : [],
+          loadError: null,
         };
       }
       if (next[path]) {
@@ -275,6 +295,7 @@ export function FileExplorerModal({
           ...next[path],
           childPaths: entries.map((e) => e.path),
           isLoading: false,
+          loadError: null,
         };
       }
       return next;
@@ -314,7 +335,7 @@ export function FileExplorerModal({
       if (node.childPaths === null) {
         setNodes((prev) => ({
           ...prev,
-          [path]: { ...prev[path], isLoading: true },
+          [path]: { ...prev[path], isLoading: true, loadError: null },
         }));
         try {
           await loadDir(path);
@@ -325,7 +346,12 @@ export function FileExplorerModal({
         } catch {
           setNodes((prev) => ({
             ...prev,
-            [path]: { ...prev[path], isLoading: false },
+            [path]: {
+              ...prev[path],
+              isExpanded: true,
+              isLoading: false,
+              loadError: "Not accessible",
+            },
           }));
         }
       } else {
@@ -344,6 +370,7 @@ export function FileExplorerModal({
       setSelectedPath(null);
       setPreviewData(null);
       setPreviewError(null);
+      setTreeLoadError(null);
       setNodes({
         [newPath]: {
           path: newPath,
@@ -353,6 +380,7 @@ export function FileExplorerModal({
           isExpanded: true,
           isLoading: true,
           childPaths: null,
+          loadError: null,
         },
       });
       setRootEntries([]);
@@ -360,7 +388,11 @@ export function FileExplorerModal({
         .then((paths) => {
           setRootEntries(paths);
         })
-        .catch(() => {});
+        .catch(() => {
+          setTreeLoadError(
+            "This location is not accessible through agent-deck.",
+          );
+        });
     },
     [loadDir],
   );
@@ -379,6 +411,7 @@ export function FileExplorerModal({
     setSelectedPath(null);
     setPreviewData(null);
     setPreviewError(null);
+    setTreeLoadError(null);
     setNodes({
       [rootDir]: {
         path: rootDir,
@@ -388,6 +421,7 @@ export function FileExplorerModal({
         isExpanded: true,
         isLoading: true,
         childPaths: null,
+        loadError: null,
       },
     });
     setRootEntries([]);
@@ -402,7 +436,9 @@ export function FileExplorerModal({
           }
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        setTreeLoadError("This location is not accessible through agent-deck.");
+      });
   }, [isOpen, initialPath, loadDir, handleSelectFile]);
 
   if (!isOpen) return null;
@@ -443,19 +479,29 @@ export function FileExplorerModal({
           {/* Tree panel */}
           {(!isMobile || mobilePanel === "tree") && (
             <div className={styles.treePanel}>
-              <Breadcrumb path={rootPath} onNavigate={navigateToDir} />
+              <Breadcrumb
+                path={selectedPath ?? rootPath}
+                isFilePath={selectedPath !== null}
+                onNavigate={navigateToDir}
+              />
               <div className={styles.treeScroll}>
-                {rootEntries.map((path) => (
-                  <TreeEntry
-                    key={path}
-                    path={path}
-                    depth={0}
-                    nodes={nodes}
-                    selectedPath={selectedPath}
-                    onSelectFile={handleSelectFile}
-                    onToggleDir={handleToggleDir}
-                  />
-                ))}
+                {treeLoadError ? (
+                  <div className={styles.treeAccessError}>
+                    🔒 {treeLoadError}
+                  </div>
+                ) : (
+                  rootEntries.map((path) => (
+                    <TreeEntry
+                      key={path}
+                      path={path}
+                      depth={0}
+                      nodes={nodes}
+                      selectedPath={selectedPath}
+                      onSelectFile={handleSelectFile}
+                      onToggleDir={handleToggleDir}
+                    />
+                  ))
+                )}
               </div>
             </div>
           )}
@@ -463,6 +509,29 @@ export function FileExplorerModal({
           {/* Preview panel */}
           {(!isMobile || mobilePanel === "preview") && (
             <div className={styles.previewPanel}>
+              {selectedPath && (
+                <div className={styles.previewPaneHeader}>
+                  <span className={styles.previewPaneFilename}>
+                    {selectedPath.split("/").pop()}
+                  </span>
+                  <button
+                    className={styles.downloadBtn}
+                    title="Download file"
+                    onClick={() => {
+                      const url = `/api/fs/download?path=${encodeURIComponent(selectedPath)}`;
+                      const anchor = document.createElement("a");
+                      anchor.href = url;
+                      anchor.download =
+                        selectedPath.split("/").pop() ?? "download";
+                      document.body.appendChild(anchor);
+                      anchor.click();
+                      document.body.removeChild(anchor);
+                    }}
+                  >
+                    ⬇
+                  </button>
+                </div>
+              )}
               <div
                 className={
                   previewFading && previewData

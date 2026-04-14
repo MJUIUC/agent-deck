@@ -720,4 +720,8 @@ export const fsApi = {
     if (title) params.set("thread_title", title);
     return apiFetch(`/api/fs/workspace?${params.toString()}`);
   },
+  /** Build a download URL for a file. Pure URL builder — no fetch call. */
+  downloadUrl(path: string): string {
+    return `/api/fs/download?path=${encodeURIComponent(path)}`;
+  },
 };

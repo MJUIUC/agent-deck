@@ -1,7 +1,9 @@
 use crate::error::{AppError, AppResult};
 use crate::routes::AppState;
 use axum::{
+    body::Body,
     extract::{Query, State},
+    http::header,
     response::IntoResponse,
     Json,
 };
@@ -9,6 +11,7 @@ use base64::Engine;
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
+use tokio_util::io::ReaderStream;
 
 #[derive(Deserialize)]
 pub struct PathParams {
@@ -285,4 +288,60 @@ pub async fn get_workspace(
             "path": workspace_path.to_string_lossy()
         }
     })))
+}
+
+pub async fn download_file(
+    State(_state): State<Arc<AppState>>,
+    Query(params): Query<PathParams>,
+) -> AppResult<impl IntoResponse> {
+    let canonical = validate_path(&params.path).map_err(|e| AppError::Forbidden(e.to_string()))?;
+
+    if !canonical.is_file() {
+        return Err(AppError::BadRequest(format!(
+            "'{}' is not a file",
+            canonical.display()
+        )));
+    }
+
+    let metadata = tokio::fs::metadata(&canonical)
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to read metadata: {}", e)))?;
+
+    let filename = canonical
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "download".to_string());
+
+    // Percent-encode the filename for the Content-Disposition header per RFC 5987.
+    let encoded_filename: String = filename
+        .bytes()
+        .flat_map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                vec![b as char]
+            }
+            other => format!("%{:02X}", other).chars().collect::<Vec<char>>(),
+        })
+        .collect();
+
+    let file = tokio::fs::File::open(&canonical)
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to open file: {}", e)))?;
+
+    let stream = ReaderStream::new(file);
+    let body = Body::from_stream(stream);
+
+    let response = axum::response::Response::builder()
+        .header(header::CONTENT_TYPE, "application/octet-stream")
+        .header(
+            header::CONTENT_DISPOSITION,
+            format!(
+                "attachment; filename=\"{}\"; filename*=UTF-8''{}",
+                filename, encoded_filename
+            ),
+        )
+        .header(header::CONTENT_LENGTH, metadata.len())
+        .body(body)
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to build response: {}", e)))?;
+
+    Ok(response)
 }

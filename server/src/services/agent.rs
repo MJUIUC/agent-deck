@@ -551,13 +551,13 @@ async fn run_inner(
     let workspace_path: Option<String> = if !is_routine {
         match dirs::home_dir() {
             Some(home) => {
-                let workspace_dir = home.join("agent-deck-workspaces").join(thread_id);
+                let workspace_dir = home.join(".agent-deck").join("workspaces").join(thread_id);
                 if let Err(e) = tokio::fs::create_dir_all(&workspace_dir).await {
                     warn!(thread_id = %thread_id, error = %e, "Failed to create workspace dir; continuing without it");
                     None
                 } else {
                     // Update workspace meta.json with the thread's human-readable title
-                    let workspaces_root = home.join("agent-deck-workspaces");
+                    let workspaces_root = home.join(".agent-deck").join("workspaces");
                     crate::routes::fs::update_workspace_meta(
                         &workspaces_root,
                         thread_id,
