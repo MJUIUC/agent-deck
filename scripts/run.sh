@@ -15,6 +15,7 @@ fi
 
 mkdir -p "$AGENT_DECK_HOME"
 
+PUBLIC_DIR="$AGENT_DECK_HOME/public" \
 nohup "$BINARY" >> "$LOG_FILE" 2>&1 &
 
 echo $! > "$PID_FILE"
