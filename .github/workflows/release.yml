@@ -63,7 +63,7 @@ jobs:
           ARCH="${{ matrix.arch }}"
           TARBALL="agent-deck-macos-${ARCH}.tar.gz"
           mkdir -p dist
-          cp "target/${{ matrix.target }}/release/agent-deck" dist/
+          cp "target/${{ matrix.target }}/release/server" dist/agent-deck
           cp -r web/dist dist/public
           cp install.sh dist/
           cp -r scripts dist/
