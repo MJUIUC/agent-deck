@@ -463,6 +463,29 @@ export function FileExplorerModal({
           {/* Preview panel */}
           {(!isMobile || mobilePanel === "preview") && (
             <div className={styles.previewPanel}>
+              {selectedPath && (
+                <div className={styles.previewPaneHeader}>
+                  <span className={styles.previewPaneFilename}>
+                    {selectedPath.split("/").pop()}
+                  </span>
+                  <button
+                    className={styles.downloadBtn}
+                    title="Download file"
+                    onClick={() => {
+                      const url = `/api/fs/download?path=${encodeURIComponent(selectedPath)}`;
+                      const anchor = document.createElement("a");
+                      anchor.href = url;
+                      anchor.download =
+                        selectedPath.split("/").pop() ?? "download";
+                      document.body.appendChild(anchor);
+                      anchor.click();
+                      document.body.removeChild(anchor);
+                    }}
+                  >
+                    ⬇
+                  </button>
+                </div>
+              )}
               <div
                 className={
                   previewFading && previewData

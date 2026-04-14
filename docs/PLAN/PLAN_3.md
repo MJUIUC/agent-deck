@@ -1473,6 +1473,26 @@ Acceptance criteria: see `docs/deprecated/AD-8.3a.md`
 
 ---
 
+**Story 8.3b — Downloadable Shared Docs** ✅ Complete  
+Branch: `feature/phase8-downloadable-docs`
+
+Adds `GET /api/fs/download?path=` endpoint that streams file bytes with a `Content-Disposition: attachment` header (no memory buffering; same `canonicalize()` security boundary as the read endpoint). A download button (⬇) is added to the `FileExplorerModal` preview pane header — visible for all selected files including binary/too-large ones. `fsApi.downloadUrl()` pure URL-builder helper added to `client.ts`. The agent workspace system prompt is extended to teach the `/api/fs/download?path=` pattern alongside `/api/fs/read?path=`. Also fixes the workspace path in `agent.rs` which still used the old `~/agent-deck-workspaces/` root instead of `~/.agent-deck/workspaces/`.
+
+Acceptance criteria: see `docs/deprecated/AD-8.3b.md`
+
+---
+
+### As-built notes (Story 8.3b)
+
+- **`GET /api/fs/download` (`server/src/routes/fs.rs`):** Reuses `validate_path`; rejects directories with 400; streams via `tokio_util::io::ReaderStream` + `axum::body::Body::from_stream`; sets RFC 5987-compliant `Content-Disposition: attachment` and `Content-Length` headers. `tokio-util` workspace dep updated to include `io` feature.
+- **Download button (`FileExplorerModal.tsx`):** `previewPaneHeader` bar added above preview content showing filename and ⬇ button; shown whenever any file is selected; triggers download via programmatic `<a download>` element.
+- **`fsApi.downloadUrl` (`client.ts`):** Pure URL builder; no fetch call.
+- **System prompt (`context.rs`):** Workspace block now distinguishes `/api/fs/read?path=` (in-app preview) from `/api/fs/download?path=` (save to device).
+- **Bug fix (`agent.rs`):** Workspace creation in the agent run loop was using `~/agent-deck-workspaces/` instead of `~/.agent-deck/workspaces/`; aligned with the `get_workspace` route.
+- **Branch:** `feature/phase8-downloadable-docs` — PR open to `dev`.
+
+---
+
 ### Phase 8.5 — Tailscale Platform Layer + Webhook Integration
 
 **Goal:** Make Tailscale a first-class citizen of agent-deck. Surface live VPN status in the UI and give the agent tools to answer connectivity questions. Add a single universal webhook endpoint that lets any external service (GitHub, Stripe, CI/CD, IoT) trigger the agent by posting to `https://{hostname}/api/webhooks`. Routing is by HMAC secret — one stable URL for all services, forever.

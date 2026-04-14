@@ -402,6 +402,7 @@ pub async fn build_router(
         // Filesystem explorer
         .route("/api/fs/list", get(fs::list_directory))
         .route("/api/fs/read", get(fs::read_file))
+        .route("/api/fs/download", get(fs::download_file))
         .route("/api/fs/workspace", get(fs::get_workspace))
         .layer(middleware::from_fn_with_state(
             state.clone(),
