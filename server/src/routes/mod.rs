@@ -238,6 +238,7 @@ pub async fn build_router(
         let state = state.clone();
         tokio::spawn(async move {
             let status = crate::services::tailscale::get_status(state.server_port).await;
+            crate::routes::tailscale::log_status(&status);
             let mut cache = state.tailscale_status_cache.write().await;
             *cache = Some((status, std::time::Instant::now()));
         });

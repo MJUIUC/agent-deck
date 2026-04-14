@@ -1,6 +1,5 @@
 use serde::Serialize;
 use tokio::process::Command;
-use tracing::{debug, warn};
 
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct TailscaleStatus {
@@ -20,8 +19,7 @@ pub async fn get_status(port: u16) -> TailscaleStatus {
     // Check if tailscale binary is available.
     let version_output = match Command::new("tailscale").arg("version").output().await {
         Ok(output) => output,
-        Err(error) => {
-            debug!(error = %error, "tailscale binary not found in PATH");
+        Err(_) => {
             return TailscaleStatus {
                 installed: false,
                 ..Default::default()
@@ -30,7 +28,6 @@ pub async fn get_status(port: u16) -> TailscaleStatus {
     };
 
     if !version_output.status.success() {
-        debug!("tailscale version check failed — treating as not installed");
         return TailscaleStatus {
             installed: false,
             ..Default::default()
@@ -49,8 +46,7 @@ pub async fn get_status(port: u16) -> TailscaleStatus {
         .await
     {
         Ok(output) => output,
-        Err(error) => {
-            warn!(error = %error, "failed to run `tailscale status --json`");
+        Err(_) => {
             return TailscaleStatus {
                 installed: true,
                 ..Default::default()
@@ -59,8 +55,6 @@ pub async fn get_status(port: u16) -> TailscaleStatus {
     };
 
     if !status_output.status.success() {
-        let stderr = String::from_utf8_lossy(&status_output.stderr);
-        warn!(stderr = %stderr, "tailscale status returned non-zero exit code");
         return TailscaleStatus {
             installed: true,
             version,
@@ -71,8 +65,7 @@ pub async fn get_status(port: u16) -> TailscaleStatus {
     let raw_json = String::from_utf8_lossy(&status_output.stdout);
     let parsed: serde_json::Value = match serde_json::from_str(&raw_json) {
         Ok(value) => value,
-        Err(error) => {
-            warn!(error = %error, "failed to parse tailscale status JSON");
+        Err(_) => {
             return TailscaleStatus {
                 installed: true,
                 version,
@@ -123,15 +116,12 @@ pub async fn check_funnel(port: u16) -> (bool, Option<String>) {
         .await
     {
         Ok(output) => output,
-        Err(error) => {
-            debug!(error = %error, "failed to run `tailscale funnel status`");
+        Err(_) => {
             return (false, None);
         }
     };
 
-    // Older Tailscale versions may not support the funnel subcommand.
     if !output.status.success() {
-        debug!("tailscale funnel status returned non-zero exit code — funnel not available");
         return (false, None);
     }
 
@@ -168,8 +158,7 @@ pub async fn run_connect(port: u16) -> TailscaleStatus {
         .await
     {
         Ok(output) => output,
-        Err(error) => {
-            warn!(error = %error, "failed to run `tailscale up`");
+        Err(_) => {
             return TailscaleStatus {
                 installed: true,
                 ..Default::default()
@@ -205,13 +194,7 @@ pub async fn enable_funnel(port: u16) -> TailscaleStatus {
 
     match output {
         Ok(result) if result.status.success() => {}
-        Ok(result) => {
-            let stderr = String::from_utf8_lossy(&result.stderr);
-            warn!(stderr = %stderr, "tailscale funnel enable returned non-zero exit code");
-        }
-        Err(error) => {
-            warn!(error = %error, "failed to run `tailscale funnel <port>`");
-        }
+        Ok(_) | Err(_) => {}
     }
 
     get_status(port).await
@@ -227,30 +210,15 @@ pub async fn disable_funnel(port: u16) -> TailscaleStatus {
 
     match output {
         Ok(result) if result.status.success() => {}
-        Ok(result) => {
-            let stderr = String::from_utf8_lossy(&result.stderr);
-            warn!(stderr = %stderr, "tailscale funnel off failed, trying port-specific form");
-
+        Ok(_) => {
             // Fall back to disabling for the specific port.
             let port_str = port.to_string();
-            match Command::new("tailscale")
+            let _ = Command::new("tailscale")
                 .args(["funnel", "--bg=false", &port_str])
                 .output()
-                .await
-            {
-                Ok(fallback) if fallback.status.success() => {}
-                Ok(fallback) => {
-                    let fallback_stderr = String::from_utf8_lossy(&fallback.stderr);
-                    warn!(stderr = %fallback_stderr, "tailscale funnel port-specific disable also failed");
-                }
-                Err(error) => {
-                    warn!(error = %error, "failed to run tailscale funnel port-specific disable");
-                }
-            }
+                .await;
         }
-        Err(error) => {
-            warn!(error = %error, "failed to run `tailscale funnel off`");
-        }
+        Err(_) => {}
     }
 
     get_status(port).await
