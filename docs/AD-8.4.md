@@ -248,9 +248,11 @@ Tasks 1 and 2 are sequential (Task 2 depends on the field added in Task 1). Task
 4. Disconnect the MCP server or disable it → **Expected:** Log shows `mcp keepalive: shutdown signal received`; no further ping logs
 5. Start a tool call at the same moment a keepalive tick would fire → **Expected:** No interleaving — one completes before the other; no garbled responses (the `request_lock` serialises them)
 
-**Optional server log check:**
+**Optional log check:**
+
+Logs go to stdout only (no log file until Story 9.1). Run the server with `RUST_LOG=trace` to see keepalive output:
 ```
-grep "mcp keepalive" ~/.agent-deck/server.log
+RUST_LOG=trace cargo run 2>&1 | grep "mcp keepalive"
 ```
 
 ---
