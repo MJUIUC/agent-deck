@@ -443,24 +443,42 @@ Never use `machine_secret` for credential encryption. Never return encrypted byt
 
 When development commands arrive **from a mobile device** (i.e. via the agent-deck mobile UI), the agent must **never run `cargo run`, `npm run dev`, or any command that modifies the live server process**. Instead, all build-and-test work goes through the isolated Docker dev instance.
 
+### The `.agent-machine` file
+
+Every repo that supports Docker dev builds ships with `.agent-machine` listed in `.gitignore`. The file must be created **manually on each authorised machine** — it is never committed.
+
+The file contains a single keyword identifying the machine. The keyword for the Mac mini is:
+
+```
+mac-mini
+```
+
+To set up a new machine:
+
+```bash
+echo 'mac-mini' > .agent-machine
+```
+
+Requires Colima + Docker CLI installed (`brew install colima docker`).
+
 ### Machine guard
 
-Before running any build command, check for the machine identity file:
+Before running any build command, check the machine identity:
 
 ```bash
 cat .agent-machine
 ```
 
 - If the file **does not exist** → stop. Do not run build commands. Tell the human this machine is not configured for dev Docker builds and point them to §15 setup.
-- If the file contains anything **other than** `mac-mini-primary` → stop. Same message.
-- If the file contains `mac-mini-primary` → proceed.
+- If the file does **not contain** `mac-mini` → stop. Same message.
+- If the file **contains** `mac-mini` → proceed.
 
-This file is gitignored and must be created manually on each authorised machine. It is **never committed**.
+> The check is a substring match — `mac-mini`, `mac-mini-primary`, `mac-mini-studio` all pass.
 
 ### Setup (one-time, per machine)
 
 ```bash
-echo 'mac-mini-primary' > .agent-machine
+echo 'mac-mini' > .agent-machine
 ```
 
 Requires Colima + Docker CLI installed (`brew install colima docker`).
@@ -479,7 +497,7 @@ All dev Docker operations go through `scripts/agent-dev.sh`:
 | `./scripts/agent-dev.sh status` | Check if container is running |
 | `./scripts/agent-dev.sh clean` | Remove container + image |
 
-The script **self-guards** — it reads `.agent-machine` and exits with an error if not on the primary Mac mini.
+The script **self-guards** — it reads `.agent-machine` and exits with an error if the file is missing or does not contain `mac-mini`.
 
 ### Dev instance details
 
