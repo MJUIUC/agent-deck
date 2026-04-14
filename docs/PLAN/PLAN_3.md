@@ -1,0 +1,1649 @@
+# Agent-Deck — Project Plan (Part 3: Phased Execution Plan)
+
+> See also: **PLAN_1.md** (Overview, Architecture, Data Model) · **PLAN_2.md** (API Contract, Features, UI, Dev Guide)
+
+---
+
+## 10. Phased Execution Plan
+
+Each story maps to one feature branch. Complete all stories in a phase before starting the next. Run all tests before merging any branch.
+
+**Guiding principle:** Each phase ends with something usable or demonstrable. Backend and frontend are interleaved so you can dogfood early.
+
+---
+
+### Phase 1 — Skeleton That Runs ✅ Complete
+
+**Goal:** A Rust server that boots with SQLite, serves a React SPA shell, and has all tables in place. Tailscale integration is wired in so the server knows its own hostname from the start. Nothing functional yet, but the entire foundation is solid and both projects compile.
+
+**Status:** All stories complete. Rust/Axum server boots with SQLite WAL, static file serving, auth middleware, and full entity CRUD. React SPA scaffolded with Vite/TypeScript, API client and Zustand stores in place. All UI mockups built. Tailscale detection wired in at startup.
+
+---
+
+**Story 1.1 — Cargo workspace and project scaffolding** ✅ Complete  
+Branch: `feature/phase1-cargo-workspace`
+
+Set up the Cargo workspace with a single `server` member. Add all production dependencies to `Cargo.toml`. Create the directory structure under `server/src/`. Add `.env.example`. Verify the project compiles with `cargo build`.
+
+Acceptance criteria:
+- `cargo build` succeeds with no errors
+- Directory structure matches the spec in section 9.1
+- All crates listed in section 3.1 are present in `Cargo.toml`
+
+---
+
+**Story 1.2 — SQLite schema and migrations** ✅ Complete  
+Branch: `feature/phase1-sqlite-schema`
+
+Create all SQLx migration files under `server/src/db/migrations/`. Include all tables from section 5.1 (including the updated `memory` table with `persona_id`). Enable WAL mode and foreign keys. Write a database module that initializes the connection pool.
+
+Acceptance criteria:
+- `sqlx migrate run` completes without errors
+- All tables from section 5.1 exist with correct columns and constraints
+- FTS5 virtual table for memory is created
+- `memory` table includes `persona_id` column with FK to `agent_personas`
+- Unit test: database initializes cleanly with an in-memory SQLite instance
+
+---
+
+**Story 1.3 — Configuration and server bootstrap** ✅ Complete  
+Branch: `feature/phase1-server-bootstrap`
+
+Load config from `.env` using `dotenvy`. Set up `tracing` for structured logging. Create the main `axum` router. Add a health check endpoint at `GET /health`. Serve static files from a configurable `public/` directory. Start the server on port 7474.
+
+Acceptance criteria:
+- `GET /health` returns `200 OK`
+- Static file serving works (place a test `index.html` in `public/`)
+- Server starts and logs the port it's listening on
+
+---
+
+**Story 1.4 — Auth middleware** ✅ Complete  
+Branch: `feature/phase1-auth-middleware`
+
+Implement the authentication system per section 6.0. Bearer token auth middleware that checks the `Authorization` header OR the `agent_deck_session` cookie. Token is stored in `app_config` table under key `auth_token`. Generate a random 64-character hex token on first run if none exists, log it to the terminal at startup. Localhost requests (origin `127.0.0.1` or `::1`) bypass auth entirely. Implement `POST /api/auth/token` (validates token, sets `httpOnly` cookie) and `POST /api/auth/logout` (clears cookie). All `/api/*` routes require auth except `GET /api/setup/status` and `POST /api/auth/token`.
+
+Acceptance criteria:
+- Requests without a valid token or cookie return `401`
+- Requests with a valid Bearer header pass through
+- Requests with a valid session cookie pass through
+- Localhost requests bypass auth entirely
+- `POST /api/auth/token` with correct token sets cookie and returns success
+- `POST /api/auth/token` with incorrect token returns `401`
+- Token is printed to terminal on server startup
+- Unit test: middleware rejects invalid tokens, accepts valid ones, bypasses for localhost
+
+---
+
+**Story 1.5 — Setup endpoint and first-run detection** ✅ Complete  
+Branch: `feature/phase1-setup-endpoint`
+
+Implement `GET /api/setup/status` and `POST /api/setup/complete`. On first run (no user row in DB), setup status returns `{ "complete": false }`. `POST /api/setup/complete` accepts a display name, creates the user row, and marks setup complete.
+
+Acceptance criteria:
+- Fresh DB returns `complete: false`
+- After POST, returns `complete: true`
+- Integration test covers both states
+
+---
+
+**Story 1.x — Tailscale server integration** ✅ Complete  
+Branch: `feature/phase1-tailscale-integration`
+
+Implement Tailscale detection and management on the server side. This is a prerequisite for the setup wizard Tailscale step and for the server URL being available in app_config.
+
+**Tailscale status detection:**
+- On server startup, attempt to run `tailscale status --json` via `tokio::process::Command`
+- If the command succeeds and the machine is connected, parse the hostname and store it in `app_config` as `tailscale_hostname`
+- This runs non-blocking — server startup is never delayed waiting for Tailscale
+
+**New endpoints (section 6.15):**
+
+`GET /api/tailscale/status` — calls `tailscale status --json` (or checks the binary exists first), returns:
+```json
+{
+  "installed": true,
+  "connected": true,
+  "hostname": "mac-mini.tail1234.ts.net",
+  "auth_url": null
+}
+```
+
+`POST /api/tailscale/install` — runs the official install script:
+```bash
+curl -fsSL https://tailscale.com/install.sh | sh
+```
+Streams output to a temporary log, returns status on completion. macOS only — returns a clear error on other platforms.
+
+`POST /api/tailscale/connect` — runs `tailscale up`, captures the auth URL from stdout/stderr if the machine is not yet authenticated, and returns it. Once connected, stores the hostname in `app_config`.
+
+Acceptance criteria:
+- `GET /api/tailscale/status` returns correct state when Tailscale is installed and connected
+- `GET /api/tailscale/status` returns `installed: false` when `tailscale` binary is not found
+- `POST /api/tailscale/install` runs the install script and returns updated status
+- `POST /api/tailscale/connect` returns an `auth_url` when machine is not yet authenticated
+- `POST /api/tailscale/connect` stores `tailscale_hostname` in `app_config` once connected
+- Server startup Tailscale check is non-blocking
+- Unit test: status parsing handles connected, disconnected, and not-installed states
+
+---
+
+**Story 1.6 — Core entity CRUD (providers, personas, threads, skills, MCP servers)** ✅ Complete  
+Branch: `feature/phase1-core-crud`
+
+Implement all REST endpoints for providers (section 6.2, excluding Copilot auth), personas (section 6.4 including avatar upload), threads (section 6.7 including archive/unarchive and skill/MCP attachment), skills (section 6.5), and MCP servers (section 6.6). Implement API key encryption using a machine-derived secret. Include `POST /api/providers/:id/test` which calls the provider's `/v1/models` endpoint.
+
+This is a large story but the entities are straightforward CRUD with no complex business logic. Batch them to avoid the overhead of six nearly identical stories.
+
+Acceptance criteria:
+- Full CRUD works for all entity types
+- API keys are not returned in plaintext in GET responses (return masked value)
+- Avatar upload accepts image files, stores in `data/avatars/`, returns serveable URL
+- Thread creation requires valid `persona_id`; archive/unarchive works; skills and MCP servers can be attached/detached
+- Integration tests for all endpoints across all entities
+
+---
+
+**Story 1.7 — React SPA scaffolding** ✅ Complete  
+Branch: `feature/phase1-web-scaffolding`
+
+Initialize the React app in `web/`. Set up Vite, TypeScript, Tailwind CSS, and shadcn/ui. Configure Tailwind with the color tokens from section 4.1. Set up React Router with placeholder routes for all main sections. Configure Vite to proxy `/api` to `localhost:7474` in development. Set up the Vite build to output to `server/public/` so the Rust server serves it.
+
+Acceptance criteria:
+- `npm run dev` starts the dev server
+- `npm run build` outputs to `server/public/`
+- Color tokens are configured in `tailwind.config.ts`
+- All route placeholders are reachable
+- SPA loads when served by the Rust server
+
+---
+
+**Story 1.8 — API client and Zustand store shell** ✅ Complete  
+Branch: `feature/phase1-api-client`
+
+Implement a typed API client service that wraps all API calls. On `401` response, show a **token entry screen** — a single input field where the user pastes their auth token, which is validated via `POST /api/auth/token` and stored as a cookie. On localhost, this screen is never shown (auth is bypassed). Create Zustand store shells for threads, messages, and UI state.
+
+Acceptance criteria:
+- All API endpoints from section 6 have typed client functions
+- 401 responses show the token entry screen (not a redirect — an in-app state)
+- Successful token entry stores cookie and resumes normal app flow
+- Zustand stores are in place with empty initial state
+- SSE client wrapper exists with reconnection logic (used in Phase 2)
+
+---
+
+**Story 1.9 — UI mockups (all screens)** ✅ Complete  
+Branch: `feature/phase1-ui-mockups`
+
+Create static HTML mockups for every major screen in the application. These serve as the approved visual reference for all subsequent UI implementation. Mockups live in a `mockups/` directory at the project root. Each file is self-contained (inline CSS, no external dependencies) and uses the color tokens from section 4.1 as CSS custom properties. Includes light JavaScript for key interactions — hover states, transitions, dropdowns — but no API calls or real data. Dummy data is hardcoded.
+
+**Web mockups (desktop viewport):**
+- `chat-view.html` — Two-column layout: thread list sidebar (with search, thread entries showing agent emoji/name/preview, "New Chat" button, Settings/Archived links) + main chat area (thread title, agent header with avatar, message history with user messages right-aligned and agent messages left-aligned with avatar, routine message styling with `bubble_routine` color and label, streaming indicator animation, message input bar). Persona picker modal for new chat.
+- `thread-config.html` — The slide-in config pane animating from the right over the chat view. Sections: persona info (read-only), model switcher dropdown, routines list with toggle switches and add button, skills list with add/remove, MCP servers list, memory section showing recent entries, system prompt addendum textarea. Cron field with human-readable description below it.
+- `settings-providers.html` — Provider list with status indicators (connected/error badge). Add/edit provider form. Copilot auth modal showing device code and GitHub link. Test connection button with model list result.
+- `settings-personas.html` — Persona cards with avatar, emoji, name. Create/edit form with system prompt textarea. Avatar upload with preview. Memory viewer tab showing memory entries with content, date, source thread, and delete button. Memory count badge.
+- `settings-other.html` — Skills page with instructions editor (markdown-friendly textarea). MCP server list. Mobile pairing page with QR code placeholder. General settings with masked auth token and rotation button.
+- `setup-wizard.html` — Full-screen multi-step wizard: welcome screen, provider selection and auth, persona creation with starter template, completion screen. Step indicator and skip button visible from step 2.
+- `slash-commands.html` — Chat input with `/` typed, showing the floating autocomplete panel above it with command names and descriptions. Arrow key highlight state. Ephemeral message rendering (visually distinct from persisted messages — lighter opacity or dashed border).
+- `empty-states.html` — Empty thread list, no personas configured banner, no provider connected banner, empty routines list.
+- `token-entry.html` — Full-screen token entry for remote device authentication. Single input field, paste button, "Connect" action, brief explanation of where to find the token. Error state for invalid token.
+- `setup-wizard-tailscale.html` — The Tailscale wizard step in all three states: (1) not installed — install button + explanation; (2) installed/not-connected — "Connect" button + auth URL display with "Open Tailscale login" link; (3) connected — green success box with hostname + auto-advance indicator.
+
+**Mobile mockups (375px viewport, matching Pixel 4a):**
+- `mobile-thread-list.html` — Thread list with agent emoji + avatar, title, last message preview, timestamp. New thread FAB button. Header with app name.
+- `mobile-chat.html` — Chat screen with agent header, message bubbles matching web styling, streaming indicator, input bar. Routine messages styled distinctly. Header button for thread config.
+- `mobile-thread-config.html` — Simplified config: current model display, model switcher, routines list (view only).
+- `mobile-pairing.html` — First-launch QR scanner screen with instructions.
+
+**Interaction fidelity (light JS):**
+- Hover states on all interactive elements (buttons, thread list items, settings cards)
+- Thread list item selection highlighting
+- Config pane slide-in/slide-out animation (CSS transition)
+- Slash command dropdown: appears on input focus, items highlight on hover
+- Modal open/close (persona picker, Copilot auth, routine add)
+- Setup wizard step transitions
+- Toggle switch animation for routines/skills enable/disable
+- Mobile: bottom sheet or push-style navigation feel
+
+**Constraints:**
+- All colors must use CSS custom properties matching section 4.1 token names — no hardcoded hex values
+- Typography: system font stack, sizes that feel natural at both desktop and mobile viewports
+- No external dependencies (no Tailwind CDN, no React) — pure HTML, CSS, inline JS
+- Each file opens directly in a browser with no build step
+
+Acceptance criteria:
+- All listed mockup files exist in `mockups/` and render correctly in a browser
+- Color tokens match section 4.1 exactly via CSS custom properties
+- All key interactions listed above are functional
+- Mobile mockups render correctly at 375px viewport width
+- Mockups are reviewed and approved before proceeding to Phase 2
+
+---
+
+### Phase 2 — First Chat ✅ Complete
+
+**Goal:** You can talk to an LLM through your own UI. This is the milestone that makes the project feel real. By the end of this phase you can bootstrap a provider and persona via curl, then chat in the browser.
+
+**Status:** All stories complete. End-to-end streaming chat works with OpenAI, Anthropic, and Copilot providers. SSE infrastructure in place. Context assembly, agent run-loop, and message persistence all complete. Thread list and chat UI match approved mockups.
+
+---
+
+**Story 2.1 — copilot-api vendor submodule and process management** ✅ Complete  
+Branch: `feature/phase2-copilot-process`
+
+Add `copilot-api` as a git submodule at `vendor/copilot-api/`. Implement the service that manages it as a child process using `tokio::process`. Start it when Copilot is the active provider, stop it when not needed, restart on crash. Implement `GET /api/providers/copilot/auth-status` and `POST /api/providers/copilot/auth-start`.
+
+Acceptance criteria:
+- `vendor/copilot-api/` is a valid git submodule
+- Process starts and stops correctly
+- Auth status reflects whether `copilot-api` has a valid GitHub token
+- Process restarts automatically if it crashes
+- Manual verification: can list Copilot models via the provider test endpoint
+
+---
+
+**Story 2.2 — Provider abstraction layer** ✅ Complete  
+Branch: `feature/phase2-provider-abstraction`
+
+Implement the provider service using `async-openai`. It should accept a provider record from the DB (base URL + API key) and expose a unified interface for: listing models, and sending a chat completion request with streaming. Write the service so that pointing it at `http://localhost:4141/v1` (Copilot proxy) works identically to pointing it at `https://api.openai.com/v1`.
+
+Acceptance criteria:
+- Unit tests mock the HTTP layer and verify correct request construction
+- Streaming works against a real provider (manual verification)
+- Error cases handled: provider unreachable, invalid API key, model not found
+
+---
+
+**Story 2.3 — SSE infrastructure** ✅ Complete  
+Branch: `feature/phase2-sse-infrastructure`
+
+Implement the two SSE endpoints from section 6.9. Create a channel-based event broadcaster in the server that routes events to the correct SSE streams. The per-thread stream should be created on connection and cleaned up on disconnect. Track connected SSE clients per thread (needed later for push notification decisions).
+
+Acceptance criteria:
+- `GET /api/threads/:id/stream` returns a valid SSE stream
+- `GET /api/events` returns a valid SSE stream
+- Client disconnection is handled cleanly (no resource leak)
+- Manual verification: connecting with `curl` shows SSE stream
+
+---
+
+**Story 2.4 — Context assembly** ✅ Complete  
+Branch: `feature/phase2-context-assembly`
+
+Implement the function that builds the message array for an LLM request. It should combine: persona system prompt + thread addendum + last N messages from DB (configurable, default 20). Write this as a pure function that is easy to unit test.
+
+Acceptance criteria:
+- Unit tests verify correct ordering of messages
+- Unit tests verify system prompt is always first
+- Unit tests verify message count is capped at the configured limit
+- Thread addendum is appended to system prompt when present
+
+---
+
+**Story 2.5 — Agent run-loop and message endpoint** ✅ Complete  
+Branch: `feature/phase2-agent-runloop`
+
+Implement `POST /api/threads/:id/messages`. The handler should:
+1. Persist the user message to DB
+2. Auto-generate thread title if this is the first message (truncate to 60 chars)
+3. Assemble context via the context assembly function
+4. Call the provider with streaming enabled
+5. Stream tokens to the per-thread SSE channel as `token` events
+6. Persist the completed assistant message once streaming finishes
+7. Emit a `message_complete` event on the SSE channel
+8. Emit a `thread_updated` event on the global SSE channel
+
+Acceptance criteria:
+- Messages are persisted correctly for both user and assistant roles
+- Streaming tokens arrive on the SSE stream
+- Thread title is auto-generated on first message
+- Integration test: send a message, verify DB state, verify SSE events
+- Manual verification: end-to-end chat works with a real provider
+
+---
+
+**Story 2.6 — Thread list and chat UI** ✅ Complete  
+Branch: `feature/phase2-chat-ui`
+
+Implement the sidebar thread list and main chat view in the React SPA, matching the approved mockups in `mockups/chat-view.html`. Thread list shows active threads with agent emoji, name, and last message preview. Include a "New Chat" button that opens a persona picker. Chat view shows message history with user messages right-aligned and agent messages left-aligned with avatar. Connect to the per-thread SSE stream for token streaming. Message input with send on Enter. Connect to the global SSE stream to update thread list previews in real time.
+
+This is the critical UI story — the one that makes the project usable.
+
+Acceptance criteria:
+- Thread list loads and displays correctly
+- New chat flow creates a thread and navigates to it
+- Message history loads on thread open
+- Sending a message shows it immediately, then streams the response
+- Agent avatar appears next to every agent message
+- Streaming feels smooth with no flickering
+- Thread list updates in real time via global SSE
+- Empty state is shown when no threads exist
+
+---
+
+### Phase 3 — Configuration and Management ✅ Complete
+
+**Goal:** The app is fully configurable through its own UI. Setup wizard, settings pages, thread config, slash commands. After this phase, you never need curl to manage the system.
+
+**Status:** All stories complete. The app supports end-to-end chat: setup wizard, provider and persona management, thread config, slash commands, archived threads, pending thread UX, and server-side title generation. Credential store, OAuth, and persona default MCP servers were deferred to Phase 4 where they belong alongside full MCP integration.
+
+---
+
+**Story 3.1 — Setup wizard**  
+Branch: `feature/phase3-setup-wizard`
+
+Implement the first-run setup wizard matching `mockups/setup-wizard.html`. On app load, check `GET /api/setup/status`. If incomplete, show the wizard. Steps: welcome, add provider (with Copilot auth flow showing device code), create first persona (name, emoji, system prompt with starter template, model selection), done. The wizard is skippable from step 2 onward.
+
+Acceptance criteria:
+- Wizard shows on fresh setup
+- Copilot auth flow triggers correctly and shows device code
+- Persona creation works end-to-end
+- After completion, wizard never shows again
+
+---
+
+**Story 3.2 — Settings: Providers**  
+Branch: `feature/phase3-settings-providers`
+
+Implement `/settings/providers` matching `mockups/settings-providers.html`. List providers with status indicators (connected/error). Add/edit/delete providers. Copilot auth flow with device code modal. Test connection button that shows model list on success.
+
+Acceptance criteria:
+- All provider CRUD operations work
+- Copilot auth flow works end-to-end
+- Test connection shows model list on success, error message on failure
+
+---
+
+**Story 3.3 — Settings: Personas**  
+Branch: `feature/phase3-settings-personas`
+
+Implement `/settings/personas` matching `mockups/settings-personas.html`. List personas with avatar, emoji, name. Create/edit persona form with system prompt editor (comfortable textarea, not single-line input). Avatar upload with preview. Delete with confirmation (only allowed if no active threads use the persona).
+
+Acceptance criteria:
+- All persona CRUD operations work
+- Avatar upload previews the image before saving
+- System prompt editor is a comfortable textarea
+- Delete blocked when active threads reference the persona
+
+---
+
+**Story 3.4 — Settings: MCP, Mobile, General**  
+Branch: `feature/phase3-settings-remaining`
+
+Implement `/settings/mcp-servers`, `/settings/mobile`, and `/settings/general` (server name, auth token rotation). MCP settings is a full management surface: add/edit/delete servers (local and remote types), per-server tool inspector (fetched from the server connection), source URL display.
+
+Acceptance criteria:
+- MCP server CRUD works for both local and remote types
+- Local server config fields: executable path, args, env vars
+- Remote server config fields: URL, auth header name, credential key reference
+- Source URL field is displayed as a clickable link when set
+- Tool inspector shows tools for connected servers
+- General settings show auth token (masked) with rotation button
+
+---
+
+
+
+**Story 3.5 — Thread config pane**  
+Branch: `feature/phase3-thread-config`
+
+Implement the slide-in thread config panel matching `mockups/thread-config.html`. Sections: persona info (read-only), model switcher (dropdown of available models), routines list (add/edit/delete/toggle — routines CRUD happens in Phase 4, but the UI shell goes here), MCP servers list with tool inspector and local/remote badge, tool activity toggle, system prompt addendum textarea. Cron expression field shows human-readable description below it.
+
+Acceptance criteria:
+- Pane opens and closes smoothly
+- Model switch takes effect immediately and persists
+- MCP servers section shows attached servers with status, type badge, and expandable tool list
+- "+ Attach server" picker shows all configured servers not yet attached
+- Tool activity toggle is visible and persists per-thread
+- Addendum textarea saves on blur
+
+---
+
+**Story 3.6 — Slash command UI and server endpoint**  
+Branch: `feature/phase3-slash-commands`
+
+Implement the slash command system end-to-end. Server: `POST /api/threads/:id/command` endpoint that parses the command and args, routes to the appropriate handler, and returns a typed response (see section 6.8.1). Client: when the user types `/` in the input, show a floating autocomplete panel matching `mockups/slash-commands.html`. Intercept slash commands before sending — route to the command endpoint and display the result as an ephemeral message in the chat (visible but not persisted, visually distinct).
+
+Acceptance criteria:
+- Server endpoint handles all commands from section 7.3
+- Unit tests for command parsing and routing on the server
+- Autocomplete panel appears on `/` in the input
+- All commands listed with descriptions
+- Command results display correctly as ephemeral messages
+- Normal messages are unaffected
+- Unknown commands return a helpful error
+
+---
+
+**Story 3.7 — Archived threads**  
+Branch: `feature/phase3-archived-threads`
+
+Implement the archived threads view. List archived threads with titles and last message preview. Allow unarchiving from the list.
+
+Acceptance criteria:
+- Archived threads appear in the archived view and not in the main list
+- Unarchiving moves a thread back to active
+- Empty state shown when no archived threads
+
+---
+
+### Phase 4 — Credentials and MCP Integration ✅ Complete
+
+**Goal:** Establish encrypted credential storage for static secrets (API keys, PATs, bearer tokens), then wire up real MCP server integration with credential resolution, tool discovery, and agent integration. After this phase, agents can use external tools in chat.
+
+**Status:** All stories complete. AES-256-GCM credential store in place with provider key migration. MCP connection manager handles local (stdio) and remote (HTTP/SSE) servers with reconnect backoff. Tool discovery, namespaced tool dispatch, and agent integration all complete. Credentials UI and MCP UI fully polished.
+
+---
+
+**Story 4.1 — Credential store and encryption** ✅ Complete
+Branch: `feature/phase4-credential-store`
+
+Implement the credential storage infrastructure. On first server run, generate a 256-bit master key and store it in `app_config` as `credential_master_key`. Implement AES-256-GCM encrypt/decrypt helpers. Implement `credentials` table CRUD with all data encrypted at rest. The `GET /api/credentials` endpoint returns metadata only — `encrypted_data` is never included in any API response.
+
+Supported credential types: `api_key`, `pat`, `bearer_token`, `key_secret_pair`. No OAuth or refresh token support in this story — static secrets only.
+
+Migrate existing provider API keys: the `providers.api_key` column currently stores keys as plaintext in SQLite. Add a migration that moves each non-null `providers.api_key` value into the `credentials` table as an encrypted entry, updates the provider record to reference the credential by key name, and nulls out the original `api_key` column. After migration, provider key resolution goes through the credential store.
+
+Acceptance criteria:
+- Master key is generated once on first run and persists across restarts
+- Master key is never included in any log output or API response
+- AES-256-GCM encrypt/decrypt helpers are unit tested
+- `credentials` table CRUD works for all supported credential types
+- `GET /api/credentials` returns metadata only — no `encrypted_data` in any response
+- Integration test: store a credential, retrieve it, confirm `encrypted_data` round-trips correctly through decrypt
+- Existing provider API keys are migrated into the credential store
+- Provider model list and chat still work after migration (key resolution goes through credential store)
+- `cargo build` passes, all tests pass
+
+---
+
+**Story 4.2 — Credentials settings UI** ✅ Complete
+Branch: `feature/phase4-credentials-ui`
+
+Implement `/settings/credentials` page for managing MCP and service credentials. This is separate from the existing provider settings page (which continues to own the provider key entry UX, but now reads/writes through the credential store under the hood).
+
+The credentials page shows a list of all stored credentials with: display name, service label, credential type, and created date. Secret values are never shown — only a masked indicator (e.g. `••••••••`). Add/edit form fields: name, service, credential type, the secret value. Delete with confirmation.
+
+Acceptance criteria:
+- Credentials list shows all stored credentials with metadata only
+- Add credential form stores encrypted data correctly
+- Edit credential allows updating the secret value
+- Delete with confirmation removes the credential
+- Provider settings page reads/writes API keys through the credential store
+- No secret values are ever displayed in the UI or returned by the API
+
+---
+
+**Story 4.3 — MCP connection manager** ✅ Complete
+Branch: `feature/phase4-mcp-connection-manager`
+
+Implement the server-side MCP connection manager in `services/mcp.rs`. This maintains a pool of active connections keyed by `mcp_server_id` and handles connect, disconnect, and reconnect on error.
+
+Two transport types:
+- **Local servers** — spawn the configured executable as a subprocess, communicate over stdio using the MCP protocol. Manage the child process lifecycle (start, monitor, restart on crash with backoff).
+- **Remote servers** — connect to the configured URL via HTTP/SSE. Resolve the `credential_key` from the credential store, decrypt, and attach as the configured auth header.
+
+No agent integration yet — this story is purely "can we connect to an MCP server and stay connected."
+
+Acceptance criteria:
+- Local MCP server starts as a subprocess and communicates over stdio
+- Remote MCP server connects via HTTP/SSE with credential resolution
+- Connection pool tracks active connections by server ID
+- Reconnect with exponential backoff on connection loss
+- Graceful shutdown kills all child processes when the Rust server exits
+- `GET /api/mcp-servers` reflects live connection status
+- Integration test: connect to a local MCP server, verify connection state
+- `cargo build` passes, all tests pass
+
+### As-built notes (hardening fixes applied post-merge)
+
+- **Encryption key bug fixed:** credential routes were using `machine_secret` for encryption while the MCP manager used `credential_master_key` for decryption. `credential_master_key` is now on `AppState` and used consistently everywhere credentials are encrypted or decrypted.
+- **MCP Streamable HTTP spec compliance:** `post_rpc` now sends `Accept: application/json, text/event-stream` on every POST (required by spec; absence caused HTTP 406 from compliant servers). Response handling now branches on `Content-Type` — SSE responses are parsed by reading the first `data:` line rather than calling `.json()` directly.
+- **Configurable headers:** `RemoteConfig` gained a `headers: HashMap<String, String>` field. Static headers from config are merged with the credential-derived auth header. `McpConnectionInner.auth_header` replaced with `extra_headers: HashMap<String, String>` carried through `call_tool` and `monitor_remote`. Full config chain: `config.json` → DB → UI (new Extra Headers editor + Auth Format field in settings form).
+- **Reconnect loop fixed:** after a connection drop, `supervise` was re-fetching `shutdown_rx` from `self.connections` — but the connection had just been removed, so `unwrap_or_else` returned a pre-fired receiver that immediately exited the loop. Fixed by carrying `shutdown_rx` directly out of the `Ok`/`Err` match arms. `Err` arm uses a never-firing `watch::channel(false)`.
+- **Duplicate log eliminated:** `connect_local` and `connect_remote` each emitted "server connected" before returning, then `supervise` emitted it again on receipt. Removed the inner logs; `supervise` is now the single emitter with consistent structured fields (`server_id`, `tool_count`).
+- **Credential dropdown:** the free-text `credential_key` input in the MCP server form is replaced with a `<select>` populated from `credentialsApi.list()`, showing `display_name (service)` as labels with `key` as the stored value. Falls back to a text input when no credentials exist.
+
+---
+
+**Story 4.4 — MCP tool discovery and agent integration** ✅ Complete
+Branch: `feature/phase4-mcp-agent-integration`
+
+Wire MCP servers into the agent run-loop. On connect, enumerate the server's tools and cache the list (name, description, input schema). Expose via `GET /api/mcp-servers/:id/tools`.
+
+In `agent::run_inner`, load the thread's attached MCP servers (`thread_mcp_servers`), fetch their cached tool lists, merge with built-in tools, and inject into the generation loop. Tools are namespaced using the server's `tag` field (e.g. a server with tag `github` exposes tools as `github__create_issue`, `github__search_repos`). When the model calls a namespaced tool, route execution to the corresponding MCP server.
+
+Acceptance criteria:
+- ✅ Tool list is fetched on connect and cached in memory
+- ✅ `GET /api/mcp-servers/:id/tools` returns the cached tool list
+- ✅ Tools are injected into the agent context with `{tag}__{tool_name}` namespacing
+- ✅ Tool calls from the model are routed to the correct MCP server
+- ✅ Tool results are returned to the model and the conversation continues
+- ✅ Tools from multiple servers coexist without name collisions
+- ✅ `cargo build` passes, all tests pass
+
+### As-built notes
+
+- `AttachedMcpServer { id, tag }` loaded from `thread_mcp_servers` join at the start of `run_inner`
+- `state.mcp.cached_tools(&server.id)` fetches from the in-memory `RwLock<Vec<McpTool>>` on each `McpConnection`
+- Tool definitions built as `async_openai::types::ChatCompletionTool` and passed into `context::assemble` via `mcp_tools` field; appended after built-in tools in `build_tool_definitions`
+- `execute_tool` dispatches on `tc.name.contains("__")`: splits on first `__`, finds server by tag in `attached_mcp`, calls `state.mcp.call_tool`
+- Tool call and result messages persisted with `visibility: hidden` via `persist_tool_message`; surfaced in chat when `show_tool_activity` is enabled on the thread
+- Generation loop supports up to 20 consecutive tool-call rounds (`MAX_TOOL_ROUNDS`)
+- Malformed tool-call slots (no name or id) are filtered before dispatch to prevent provider 400 errors
+
+---
+
+**Story 4.5 — MCP UI integration** ✅ Complete
+Branch: `feature/phase4-mcp-ui`
+
+Polish the MCP experience across the UI.
+
+Acceptance criteria:
+- ✅ New threads automatically get default MCP servers attached (per-persona)
+- ✅ Tool inspector shows tools per server in thread config and settings
+- ✅ Tag field is editable in server add/edit form, defaults to name
+- ✅ Connection status badges reflect live state via SSE
+- ✅ Source URL renders as a clickable link
+- ✅ `cargo build` passes, all tests pass
+
+### As-built notes
+
+- **Auto-attach (deviation from spec):** implemented as per-persona defaults via `persona_default_mcp_servers` table rather than a global `app_config` toggle. `POST /api/threads` queries `persona_default_mcp_servers` for the thread's persona and inserts rows into `thread_mcp_servers`. This is a better design and is retained as canonical; the `app_config` approach from the spec is not implemented.
+- **Tool inspector:** `ToolInspector` component in `McpServerSettings.tsx` (settings page) and `McpServerCard` component in `ConfigPane.tsx` (thread config pane). Both show expandable tool list with name + description. Tools fetched lazily from `GET /api/mcp-servers/:id/tools`.
+- **Status badges:** `StatusBadge` in both locations. Global SSE `mcp_status_changed` event drives real-time updates.
+- **Tag field:** added to `McpForm` with auto-derivation from name (lowercase, spaces→underscores, strip non-`[a-z0-9_-]`). Stops auto-following name once manually edited (`tagTouched` flag). Live preview shows `{tag}__tool_name` in hint. Added `tag` to `McpServer` TypeScript interface.
+- **Source URL:** rendered as a clickable external link in `McpServerCard` when present.
+
+---
+
+### Phase 5 — Memory and Routines ✅ Complete
+
+**Goal:** Add persistent memory and autonomous scheduled routines. This is what differentiates agent-deck from a chat wrapper — agents remember things across conversations and can act on their own schedule.
+
+**Status:** All stories complete. Per-thread run management with cancellation and queuing in place. Memory tools (save, recall, delete) wired into agent context for non-default personas. Routine CRUD, cron scheduler, and two-phase execution complete. Memory and routine UI fully integrated. User profile context injection in place. Rolling context-window summarization and `recall_conversation` tool complete.
+
+**Depends on:** Phase 4 (credential store and MCP integration complete).
+
+---
+
+**Story 5.1 — Per-thread agent run management** ✅
+Branch: `feature/phase5-run-management`
+
+This story is a prerequisite for all other Phase 5 stories. Routines, memory tools, and any future server-initiated agent trigger depend on the run lock, cancellation support, and the notify endpoint.
+
+**Part A — Per-thread agent run lock:**
+Add a per-thread `RunState` struct to `AppState` (via `DashMap<String, Arc<RunState>>`), containing a `Semaphore` (permit count 1) and an `AtomicUsize` depth counter. Every code path that invokes `agent::run` — `POST /api/threads/:id/messages`, slash command model switch, and the new notify endpoint — must increment the depth counter on entry, acquire the semaphore, and decrement on completion. User-initiated requests are rejected with `429` if depth exceeds 3. Routine-initiated runs are exempt from the depth limit — they always queue, so a scheduled routine is never silently dropped. The message input is no longer disabled while streaming — users can send additional messages while the agent is responding. Queued runs execute in FIFO order and each sees the full message history including prior responses.
+
+**Part B — Cancellation:**
+Add a `CancellationToken` (from `tokio_util`) to `RunState`, created fresh at the start of each agent run. Implement `POST /api/threads/:id/cancel` — it triggers the token and returns immediately. The generation loop checks the token at three points:
+
+1. Between streaming chunks — stop accumulating tokens, persist what exists
+2. Before dispatching each tool call — if 3 tool calls were requested and 1 completed, do not start the 2nd
+3. During in-flight MCP/tool calls — `tokio::select!` the token against the HTTP request
+
+On cancellation:
+- Completed tool calls and results from the current run are kept as hidden messages
+- In-flight tool calls that were aborted are not persisted
+- Partial assistant text is persisted with `stopped = 1`
+- If cancel hit during tool execution before any text was generated, persist "Execution stopped" with `stopped = 1`
+- The semaphore is released and any queued runs proceed
+- A `message_complete` SSE event is emitted with `stopped: true`
+
+**Part C — System notification endpoint:**
+Implement `POST /api/threads/:id/notify` per section 6.8.2. Implement the event type registry as a Rust enum with associated `persist` and `trigger` flags and a content template. For `persist: true` events, insert into `messages` with `role: system`, `source: system_event`, `visibility: hidden`, `event_type` set, and broadcast a `system_event` SSE event. For `trigger: true` events, acquire the run lock and invoke `agent::run` with the event payload as the triggering prompt.
+
+**Part D — Schema migration:**
+Add `event_type TEXT` column to `messages`. Add `stopped INTEGER NOT NULL DEFAULT 0` column to `messages`. Add `show_system_events INTEGER NOT NULL DEFAULT 0` column to `threads`. Update `Thread` and `Message` models and all affected SELECT/INSERT/UPDATE queries.
+
+**Part E — Client integration:**
+- Remove the input disable during streaming. Users can type and send while the agent is responding. Show a subtle queued indicator (e.g. "1 message queued") when messages are waiting behind an active run.
+- While streaming, the send button transforms into a stop button (■ icon). Tapping it calls `POST /api/threads/:id/cancel`. After cancellation, the button returns to send mode.
+- Stopped messages render with a subtle "stopped" label (similar to the "routine" label on routine messages).
+- After model switch in `ConfigPane`, call `POST /api/threads/:id/notify` with `event_type: model_switched`. After MCP attach/detach, emit the corresponding event. These are fire-and-forget.
+
+**Part F — `show_system_events` toggle:**
+Add the toggle to the Thread Config pane (below the existing `show_tool_activity` toggle). Wire it to `PUT /api/threads/:id`.
+
+**Part G — Orphaned routine execution cleanup:**
+On server startup, before the routine scheduler registers any jobs, query `routine_executions WHERE status = 'running'` and update them to `status: 'failed'` with `error: 'server restarted during execution'`. This prevents stale `running` rows from accumulating after crashes or restarts. Chat-initiated agent runs are fire-and-forget — no recovery is attempted for those.
+
+Acceptance criteria:
+- [x] Per-thread semaphore prevents concurrent agent runs on the same thread
+- [x] Concurrent user messages queue and run after the current completes
+- [x] Queue depth > 3 returns `429` for user-initiated requests
+- [x] Routine-initiated runs always queue regardless of depth
+- [x] Message input is not disabled during streaming; users can send while agent is responding
+- [x] Queued message indicator appears when messages are waiting
+- [x] `POST /api/threads/:id/cancel` stops an active run
+- [x] Cancel during streaming persists partial response with `stopped = 1`
+- [x] Cancel during tool execution stops before the next tool call
+- [x] Cancel during in-flight MCP call does not wait for the call to finish
+- [x] Stopped messages render with a visual "stopped" label in chat
+- [x] Send button transforms to stop button during streaming, reverts after
+- [x] `POST /api/threads/:id/notify` accepts all registered event types and rejects unknown ones with `400`
+- [x] `persist: true` events insert a hidden system message and broadcast `system_event` SSE
+- [x] `trigger: true` events invoke the agent run loop and produce a visible response
+- [x] `persist: false, trigger: false` is rejected
+- [x] `model_switched` event visible in message history (with `?include_hidden=true`)
+- [x] Client calls notify after model switch; hidden message appears in DB
+- [x] `show_system_events` toggle persists per-thread
+- [x] On startup, any `routine_executions` rows with `status = 'running'` are set to `failed`
+- [x] The orphan cleanup runs before the scheduler starts registering jobs
+- [x] Unit tests for event registry (valid types, invalid type rejection, flag combinations)
+- [x] Unit tests for cancellation (mid-stream, mid-tool, no active run)
+- [x] `cargo sqlx prepare` run and `.sqlx/` committed
+
+---
+
+**Story 5.2 — Memory tools** ✅
+Branch: `feature/phase5-memory-tools`
+
+**Prerequisite — Default persona:**
+Add a migration that seeds the Default persona row in `agent_personas` with `is_default = 1`, empty `system_prompt`, emoji `💬`, no avatar. Guard the `DELETE` and `PUT` persona endpoints against modification of the default row (`403`). Update the persona selector in the new-thread and thread-config UI to display the Default persona as "None" with the hint: "Without a persona, long-term memory is not available."
+
+**Memory tools:**
+Implement the `save_memory` and `recall_memory` tool definitions per section 7.6.2. Wire them into the agent run-loop so they are available as callable tools **only when the thread's persona is not the Default persona**. When the thread uses the Default persona, omit the memory tools from the tool list and do not append the memory system prompt. Append the memory system prompt instructions (section 7.6.3) after the persona's system prompt in every request (for non-default personas). `save_memory` inserts a new memory row with `user_id`, `persona_id` (from the thread's persona), and `thread_id` (provenance), enforcing the 500-character content limit, and updates the FTS index. `recall_memory` queries `memory_fts` filtered by the current user and persona, capped at 10 results, formatted per section 7.6.5.
+
+**Iteration note:** Memory recall reliability depends on the quality of the system prompt instructions and varies by model. The prompt-only approach (no auto-injection of memories into context) is the v1 design. Expect iteration on the memory system prompt wording after dogfooding. Auto-injection of recent memories into context is a potential future enhancement if models prove unreliable at calling `recall_memory` proactively.
+
+Acceptance criteria:
+- [x] Default persona exists after migration; has `is_default = 1`, empty system prompt
+- [x] `DELETE /api/personas/:id` returns `403` for the Default persona
+- [x] `PUT /api/personas/:id` returns `403` for the Default persona (name and delete protected)
+- [x] Persona selector shows Default persona as "None" with memory hint text
+- [x] New threads without a specified persona are assigned the Default persona
+- [x] Memory tools are NOT included in tool list when thread uses Default persona
+- [x] Memory system prompt is NOT appended when thread uses Default persona
+- [x] Unit tests for FTS search returning correct results
+- [x] Unit tests for memory insertion with correct persona scoping
+- [x] Unit tests for the 500-character truncation
+- [x] Memories saved in one thread are recallable from another thread with the same persona
+- [x] Memories are NOT recalled when querying from a different persona
+- [x] Recall results are capped at 10 and include date prefix and thread provenance
+- [x] Empty recall returns the "no memories found" message
+- [x] The memory system prompt is appended to every request for non-default personas (after persona prompt, before thread addendum)
+- [x] The tools are included in LLM requests as function definitions (non-default personas only)
+- [x] Integration test: save a memory, send a follow-up message in a different thread (same persona) that should trigger recall, verify the tool is called — deferred; covered by unit tests for each layer individually
+
+### As-built notes (Story 5.2)
+
+- **Migration 008** adds `is_default INTEGER NOT NULL DEFAULT 0` to `agent_personas` and seeds the Default persona for any existing users. Fresh installs get the Default persona created inside `POST /api/setup/complete` immediately after the user row is inserted, using a new `AgentPersona::new_default()` constructor.
+
+- **`is_default` guard coverage:** `DELETE`, `PUT`, and `POST /:id/avatar` all return `403 Forbidden` for the Default persona. The `Forbidden(String)` variant was added to `AppError` as part of this work.
+
+- **`persona_id` is now optional on thread creation:** `CreateThread.persona_id` is `Option<String>`. When absent or empty, the server resolves the user's Default persona automatically. `Thread::new()` signature updated to accept `persona_id` as a separate argument.
+
+- **Context assembly gating:** `AssemblyInput` gained an `include_memory: bool` field. When `false` (Default persona), both the `## Memory` system-prompt block and all built-in tool definitions are excluded. MCP tools are unaffected. The flag is set in `agent.rs` as `!persona.is_default`.
+
+- **`delete_memory` tool added** (beyond original spec, motivated by the memory cap design discussion): the model can now evict duplicate or stale entries by ID. `recall_memory` output was updated to prefix each result line with `[id:<uuid>]` so the model has a reference to pass to `delete_memory`. The `MEMORY_INSTRUCTIONS` system prompt was extended with a **When to delete** paragraph covering the dedup-before-save and store-full-cleanup workflows. Built-in tool count is now 3.
+
+- **Persona picker hint text:** rendered as "Long-term memory not available" (slightly shorter than the spec's "Without a persona, long-term memory is not available" — fits the card layout cleanly).
+
+- **Test count:** 228 passing (was 224 at end of Story 5.1). New tests cover FTS search, persona scoping, cross-thread recall, recall cap, empty recall, 500-char truncation, empty content guard, delete by ID, delete not-found, and recall output format.
+
+---
+
+**Story 5.3 — Routines CRUD and cron scheduler**✅
+Branch: `feature/phase5-routines`
+
+Implement all routine endpoints from section 6.10. Implement the routine scheduler service using `tokio-cron-scheduler`. On server startup, load all enabled routines from the DB and register them. When a routine is created, updated, or toggled via the API, update the scheduler accordingly. When a thread is archived, pause its routines. When unarchived, resume them.
+
+Acceptance criteria:
+- Full CRUD works
+- Toggle endpoint correctly flips the enabled flag
+- Integration tests for all endpoints
+- Routines fire at the correct time (test with a short interval like every minute)
+- Pausing and resuming works correctly
+- Server restart re-registers all active routines from DB
+
+---
+
+**Story 5.4 — Routine execution** ✅
+
+> **Depends on Story 5.1** — the routine scheduler uses the notify endpoint with `event_type: routine_fired` (`persist: false, trigger: true`) to invoke the agent.
+
+Branch: `feature/phase5-routine-execution`
+
+Implement the two-phase routine execution model per section 7.4. When a routine fires:
+
+**Phase 1 (background):**
+1. Create a `routine_executions` row with `status: running`
+2. Build a background agent context (in-process, no SSE emission during execution)
+3. Inject the routine invocation message (JSON schema per section 7.4) as the triggering prompt
+4. Run the agent loop — all intermediate messages (tool calls, MCP results) are written to `messages` with `visibility: hidden` and `execution_id` set
+
+**Phase 2 (emit):**
+5. Write the final synthesized response to `messages` with `source: routine`, `visibility: visible`, `execution_id` set
+6. Update `routine_executions` with `status: completed` and `output_message_id`
+7. Emit `routine_message` event on the thread's SSE stream
+8. Emit `routine_fired` event on the global SSE stream
+9. Update `last_run_at` and `run_count` on the routine record
+
+> **Note:** Web Push notification dispatch (when no SSE clients are connected) is implemented in Phase 7 Story 7.2.
+
+Acceptance criteria:
+- Integration test: create a routine with a 1-minute schedule, verify it fires, hidden intermediate messages are stored, and one visible result message appears
+- No hidden messages appear in `GET /api/threads/:id/messages` response (filtered by default; `?include_hidden=true` param exposes them)
+- Visible result message has `source: routine` in DB
+- `routine_executions` row correctly tracks status and output_message_id
+- SSE events are emitted correctly
+- `last_run_at` and `run_count` are updated after each run
+
+---
+
+**Story 5.5 — Routine UI integration** ✅ Complete
+Branch: `feature/phase5-routine-ui`
+
+Wire routines into the thread config pane (the shell from Story 3.5 — now with full add/edit/delete/toggle functionality). Routine-generated messages in the chat view should be visually distinct (subtle different background using `bubble_routine` color, small "routine" label).
+
+Acceptance criteria:
+- [x] Routines can be added, edited, deleted, and toggled from the thread config pane
+- [x] Cron expression field shows human-readable description below it
+- [x] Routine messages in chat are visually distinct from regular messages
+- [x] Thread list updates when a routine fires (via global SSE)
+
+---
+
+**Story 5.6 — Memory UI integration** ✅ Complete
+Branch: `feature/phase5-memory-ui`
+
+Add memory viewer per section 7.6.7:
+- In the thread config pane: a "Memory" section showing all persona memories (not thread-scoped). This section is hidden when the thread uses the Default persona (no persona).
+- In settings under each persona: a full memory list for that persona with content, date, source thread name, and delete button. The Default persona's settings page does not show a memory section.
+- `/memory list` slash command returning last 20 memories as an ephemeral message. When issued in a thread using the Default persona, returns a message explaining that memory is not available without a persona.
+
+Acceptance criteria:
+- [x] Thread config pane shows memories for the active persona (non-default persona only)
+- [x] Memory section is hidden in thread config when thread uses Default persona
+- [x] Persona settings page shows all memories for that persona with delete capability
+- [x] Default persona settings page does not show memory section
+- [x] `/memory list` command works and displays results as ephemeral message
+- [x] `/memory list` in a Default persona thread returns explanatory message
+- [x] Memory count badge visible in persona settings (non-default personas only)
+
+### As-built notes (Story 5.6)
+
+- **Memory section scope changed:** The spec called for filtering by `thread_id` provenance ("what did the agent learn in this conversation"). After review this was changed to show all persona memories — the more useful question is "what does this agent know?" not "what did it happen to save here." The `GET /api/personas/:id/memory` endpoint gained an optional `?thread_id=` filter for future use but the UI does not apply it.
+
+- **ConfigPane restructured:** The thread config pane was reorganised into two tiers. Top-level (always visible): Persona, Model, Routines, MCP Servers. Collapsible Advanced section (collapsed by default): Memory (with per-entry delete and N/500 count), Show tool activity, Show system events, System Prompt Addendum, Archive. The two developer toggles were moved out of the MCP section where they had been embedded.
+
+- **Memory list is expandable:** Shows 2 entries by default with "Show N more / Show less" toggle, matching the Routines and MCP Servers pattern. Resets to collapsed on thread switch.
+
+- **Recall quality fixes:** The FTS5 query was being passed raw to SQLite, causing two bugs: (1) multi-word queries used implicit AND so `"dog name"` required both words in the same entry; (2) hyphenated terms like `agent-deck` were parsed as `agent NOT deck` giving "no such column: deck". Fixed with `build_fts_query()` which normalises hyphens to spaces and joins tokens with `OR` + prefix wildcards (`dog* OR name*`). Queries containing explicit FTS5 operators pass through unchanged.
+
+- **`MEMORY_INSTRUCTIONS` strengthened:** The recall rule now explicitly states the model must call `recall_memory` before claiming ignorance. Tool description updated to explain OR semantics and instruct retry with different keywords before concluding a memory doesn't exist.
+
+- **`show_tool_activity` fully implemented:** Previously the toggle was stored in the DB but the messages list always filtered to `visibility = 'visible'`. Fixed: server adds `include_hidden` query param; when true, returns hidden `source = 'tool'` messages alongside visible ones. Client always fetches with `include_hidden=true` and filters display based on `show_tool_activity`. Built-in tool calls (memory ops) now persist hidden call+result records matching the MCP tool format.
+
+- **Pre-tool text preserved:** `generation_loop` previously only added the final turn's text to `final_content`. Text streamed before a tool call was visible during streaming but absent from the persisted message. Fixed: pre-tool turn text is now folded into `final_content` with `\n\n` separator. A matching `\n\n` separator token is emitted via SSE between turns so the streaming bubble stays in sync.
+
+- **Message input focus:** Auto-focuses the textarea on thread open/switch. Restores focus after streaming ends (the DOM swap from streaming bubble to final message was dropping focus to `document.body`).
+
+---
+
+**Story 5.7 — User profile** ✅
+Branch: `feature/phase5-user-profile`
+
+Implement the user profile feature per section 7.11.
+
+**Part A — Migration and model:**
+Add a new migration that adds `pronouns`, `role`, `organization`, `location`, `timezone`, `about`, and `profile_updated_at` columns to the `users` table. Update the `User` model struct to include all new fields. Add a `UpdateUserProfile` request struct for the PUT endpoint.
+
+**Part B — API endpoints:**
+Implement `GET /api/profile` and `PUT /api/profile` per section 7.11.4. The PUT handler uses a partial-update pattern (only sent fields change; `null` explicitly clears a field). Update `profile_updated_at` on every successful PUT.
+
+**Part C — Context injection:**
+Add `user_profile_context: Option<String>` to `AssemblyInput` in `context.rs`. In `assemble()`, inject it as a system message at position 1.5 (after the persona system prompt, before the thread addendum) when the value is `Some` and non-empty. In `run_inner` in `agent.rs`, load the user profile, build the formatted context block (omitting empty fields, skipping entirely if only `display_name` is set), and pass it through. Do not inject for the Default persona.
+
+**Part D — Setup wizard step:**
+Add a new "About You" step to the setup wizard between the Name step and the Provider step. All fields are optional. The step auto-detects the user's timezone from `Intl.DateTimeFormat().resolvedOptions().timeZone` and pre-fills the timezone hint. Include a "Skip for now" link.
+
+**Part E — Settings UI:**
+Add a Profile section to Settings → General. All fields are edit-in-place (blur to save). The `about` field shows a 500-character counter. Timezone is an editable text input with the auto-detected value pre-filled on first open if the field is currently empty.
+
+**Part F — Persona settings hint:**
+Add the informational hint below the system prompt textarea in the persona form per section 7.11.7.
+
+Acceptance criteria:
+- [x] Migration adds all profile columns to `users` with NULL defaults
+- [x] `GET /api/profile` returns all fields; empty fields are `null`
+- [x] `PUT /api/profile` updates only the provided fields; sending `null` clears the field
+- [x] `profile_updated_at` is updated on every PUT
+- [x] Context block is injected between persona prompt and thread addendum for non-default personas
+- [x] Context block is NOT injected when only `display_name` is set (all other fields null/empty)
+- [x] Context block is NOT injected for the Default persona
+- [x] Only non-empty fields appear in the injected block
+- [x] Timezone auto-detected from browser in setup wizard and settings
+- [x] "About You" step is skippable from the setup wizard
+- [x] Profile section appears in Settings → General
+- [x] 500-character limit enforced on `about` field (server-side truncation, client-side counter)
+- [x] Persona settings hint appears below the system prompt textarea
+- [x] Unit tests for context block formatting (all fields, partial fields, no fields)
+- [x] Unit tests for partial PUT update logic
+
+### As-built notes (Story 5.7)
+
+- **Migration 009** adds 7 nullable `TEXT` columns to `users`: `pronouns`, `role`, `organization`, `location`, `timezone`, `about`, `profile_updated_at`. All default to `NULL` — existing users are unaffected.
+
+- **Partial-update pattern:** `PUT /api/profile` deserializes the body as `serde_json::Value` and checks each key explicitly — absent keys keep the current DB value, `null` clears the field, a string sets it (trimmed; empty string treated as null). This distinguishes "not sent" from "sent as null" without requiring `Option<Option<T>>` or a custom deserializer.
+
+- **`about` truncation:** Enforced server-side at 500 characters (char boundary, not byte boundary). Client-side counter in both the setup wizard step and the Settings profile card prevents the user reaching the limit accidentally.
+
+- **Context injection gating:** `format_user_profile_context()` in `agent.rs` builds the `## About the User` block. Returns `None` when only `display_name` is set — the name line alone is not worth injecting since the model already sees the user's name from conversation. Injection is also skipped entirely for the Default persona, consistent with memory and all other context enrichments.
+
+- **Setup wizard step numbering:** The new "About You" step is inserted as step 3, shifting Provider to 4, Persona to 5, and Done to 6. `STEPS` array updated accordingly. Profile is saved best-effort after `setupApi.complete()` in `handleComplete` — failure is non-fatal and the user can fill it in via Settings.
+
+- **Timezone detection:** Uses a lazy `useState` initializer (`() => Intl.DateTimeFormat().resolvedOptions().timeZone`) in `Step2bAboutYou` to avoid the synchronous-setState-in-effect lint warning. Settings profile card uses `useMemo` for the same detection.
+
+- **Bug fix (tool message freeze):** `ToolActivityBubble` now truncates content exceeding 4,000 characters before passing it to ReactMarkdown. Large MCP tool payloads (API responses, file listings) were causing the markdown parser to hang indefinitely.
+
+- **Bug fix (message list error boundary):** `MessageListErrorBoundary` (React class component) wraps the entire message list in `ChatView`. A render error in any single message now shows a recoverable error panel instead of freezing the whole app.
+
+- **Bug fix (MCP live status):** `mcp_status_changed` global SSE events were being emitted by the server but ignored by the client. Added handler in `useSseStore` that writes to `lastMcpStatusChange` state. `ConfigPane` subscribes and updates the status badge in-place; auto-loads tools when status transitions to `connected`.
+
+- **5.8 spec updated:** Story 5.8 redesigned during 5.7 planning to include a `thread_summaries` append-only log table, a `recall_conversation` built-in tool (cross-thread by default, per-persona toggle), and `MEMORY_INSTRUCTIONS` guidance distinguishing `recall_memory` (facts) from `recall_conversation` (narrative/history). Migration renumbered to 010.
+
+- **Test count:** 262 passing (unchanged from Story 5.6 — new tests added for profile context formatting, partial PUT logic, and endpoint integration).
+
+---
+
+**Story 5.8 — Context window summarization and conversation recall** ✅ Complete
+Branch: `feature/phase5-summarization`
+
+Implement rolling context-window summarization and a `recall_conversation` agent tool. Replaces the current silent sliding-window discard with a two-trigger system: proactive (message count threshold) and reactive (context-length 400 error detection and retry). Summaries are persisted to a log table so the agent can look back at past conversations by date range.
+
+**Part A — Migration and model:**
+Add migration 010 (009 is taken by Story 5.7) with:
+
+On `threads`:
+- `summary TEXT` — latest rolling summary, overwritten on each summarization run; injected into every context window
+- `summary_updated_at TEXT`
+- `summary_message_count INTEGER NOT NULL DEFAULT 0` — message count at the time the current summary was written
+- `auto_summarize INTEGER NOT NULL DEFAULT 1`
+
+New `thread_summaries` table — append-only log of every summarization run:
+```sql
+CREATE TABLE thread_summaries (
+    id                TEXT PRIMARY KEY,
+    thread_id         TEXT NOT NULL REFERENCES threads(id),
+    summary           TEXT NOT NULL,
+    from_message_seq  INTEGER NOT NULL,
+    to_message_seq    INTEGER NOT NULL,
+    from_date         TEXT NOT NULL,
+    to_date           TEXT NOT NULL,
+    created_at        TEXT NOT NULL
+);
+CREATE INDEX idx_thread_summaries_thread_id ON thread_summaries(thread_id);
+CREATE INDEX idx_thread_summaries_to_date   ON thread_summaries(to_date);
+```
+
+On `agent_personas`:
+- `recall_conversation_cross_thread INTEGER NOT NULL DEFAULT 1` — when 1, `recall_conversation` searches across all threads using this persona; when 0, restricts to the current thread only.
+
+Update `Thread` struct and `UpdateThread` to include `auto_summarize`. Update `AgentPersona` to include `recall_conversation_cross_thread`. Add a `ThreadSummary` model struct. `summary` and `summary_message_count` are server-managed and not accepted on `PUT /api/threads/:id`.
+
+**Part B — Summarization service:**
+Add `services/summarization.rs`. Implement `pub async fn summarize_thread(state: &AppState, thread_id: &str) -> Result<()>` which:
+1. Loads the thread; checks `auto_summarize`; if false, returns immediately
+2. Counts total visible messages; if count equals `summary_message_count`, returns (already current)
+3. Loads all visible messages up to and including the current `summary_message_count + DEFAULT_HISTORY_LIMIT` boundary — these are the messages being summarised
+4. If fewer than `DEFAULT_HISTORY_LIMIT` messages would be summarised, returns early (not enough new content)
+5. Builds the summarisation prompt per §7.12.5, prepending any existing summary so the new summary covers the full history from the beginning
+6. Calls the thread's active provider with no tools and no streaming (regular completion)
+7. On success:
+   - Writes result to `threads.summary`, updates `summary_updated_at` and `summary_message_count`
+   - Appends a row to `thread_summaries` capturing `from_message_seq` (previous `summary_message_count`), `to_message_seq` (new `summary_message_count`), `from_date` and `to_date` (wall-clock timestamps of the first and last messages in the summarised range)
+8. On any failure: logs at WARN, returns — must never propagate or surface to the user
+
+**Part C — Proactive trigger:**
+At the end of `run_inner` in `agent.rs`, after the `ThreadUpdated` SSE event is emitted: count total visible messages for the thread. If `auto_summarize` is true and `(total_count - thread.summary_message_count) >= DEFAULT_HISTORY_LIMIT`, spawn a background task calling `summarize_thread`. Fire-and-forget — does not block the response.
+
+**Part D — Reactive trigger (context-length error):**
+In `retry_strategy_for`, add a new match arm that detects context-length errors (check for "context_length_exceeded", "context window", "maximum context length", "prompt is too long" in the error message). Return a new `RetryStrategy::SummarizeAndRetry` variant. In `stream_one_turn` (or its caller), handle this variant by: calling `summarize_thread` synchronously, rebuilding `AssemblyInput` with the updated summary and reduced history, and retrying the provider call once. If it fails again, fall through to the normal error path.
+
+**Part E — Context injection:**
+Add `conversation_summary: Option<String>` to `AssemblyInput` in `context.rs`. In `assemble()`, inject it at position 2.5 per §7.12.4 when `Some` and non-empty. The history query in `run_inner` changes from "last 20 visible messages" to "visible messages after the `summary_message_count` boundary, capped at `DEFAULT_HISTORY_LIMIT`". Update all existing `AssemblyInput` constructions in tests to include `conversation_summary: None`.
+
+**Part F — `recall_conversation` tool:**
+Add `recall_conversation` as a fourth built-in tool, available to non-default personas only (same gate as `save_memory` / `recall_memory` / `delete_memory`).
+
+Tool definition:
+```json
+{
+  "name": "recall_conversation",
+  "description": "Look up summaries of past conversations by date range. Use this when the user asks about something discussed in a previous conversation or references a specific time period ('last week', 'back in March'). Returns narrative summaries of what was discussed. Use recall_memory for facts and preferences — use this tool for conversational context and history.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "from_date": {
+        "type": "string",
+        "description": "Start of the date range (ISO 8601, e.g. '2024-03-01'). Omit to search from the beginning."
+      },
+      "to_date": {
+        "type": "string",
+        "description": "End of the date range (ISO 8601, e.g. '2024-03-31'). Omit to search up to the present."
+      },
+      "keywords": {
+        "type": "string",
+        "description": "Optional keywords for substring filtering of summary text (case-insensitive)."
+      }
+    },
+    "required": []
+  }
+}
+```
+
+Tool implementation in `services/tools.rs`:
+- Loads the current persona's `recall_conversation_cross_thread` flag
+- When cross-thread: queries `thread_summaries` JOIN `threads` WHERE `threads.persona_id = ?` (current persona), filtered by date range and optional keyword substring, ordered by `to_date DESC`, capped at 5 results
+- When single-thread: same query but also filtered to `thread_id = ?` (current thread)
+- Formats each result as:
+  ```
+  [thread: {thread_title}] {from_date} – {to_date}
+  {summary}
+  ```
+- Returns "No conversation summaries found for that period." when empty
+
+**Part G — System prompt instructions:**
+Extend `MEMORY_INSTRUCTIONS` in `context.rs` with a `## Conversation Recall` section that teaches the model the distinction between the two recall tools:
+
+> **`recall_memory` vs `recall_conversation`:** Use `recall_memory` for facts, preferences, names, and things the user has told you directly (e.g. "what's my dog's name?", "what stack do I use?"). Use `recall_conversation` when the user references a past discussion or a specific time period (e.g. "remember when we talked about X last week?", "what did we decide about the migration in March?"). When the intent is ambiguous, you may call both. They are complementary — facts live in memory, narrative context lives in conversation summaries.
+
+**Part H — Persona settings toggle:**
+Add a `recall_conversation_cross_thread` toggle to the persona settings form (below the system prompt field, above the profile hint). Label: "Cross-thread conversation recall". Hint: "When enabled, recall_conversation searches across all threads using this persona. When disabled, it only looks back within the current thread."
+
+**Part I — UI: Advanced section in ConfigPane:**
+Refactor the thread config pane per §7.12.8:
+- Add a collapsible Advanced section at the bottom (collapsed by default)
+- Move show-tool-activity and show-system-events toggles into it
+- Move Archive button into it (remove the Danger Zone section)
+- Add auto-summarize toggle
+- Show "Last summarized · [date] · [N] messages covered" hint when summary exists
+- Update `Thread` TypeScript type to include `summary`, `summary_updated_at`, `summary_message_count`, `auto_summarize`
+
+Acceptance criteria:
+- [x] Migration 010 adds all thread columns, creates `thread_summaries` table and indexes, adds `recall_conversation_cross_thread` to `agent_personas`
+- [x] `GET /api/threads/:id` includes new thread fields
+- [x] `PUT /api/threads/:id` accepts `auto_summarize`; ignores `summary` if sent
+- [x] No summarization when `auto_summarize = 0`
+- [x] No summarization when fewer than `DEFAULT_HISTORY_LIMIT` new messages since last summary
+- [x] Re-summarization guard: no-op when `summary_message_count` already matches current count
+- [x] Proactive trigger fires after turn when threshold is reached
+- [x] Proactive trigger does not block the user response (runs after SSE response already sent)
+- [x] Reactive trigger detects context-length error and runs summarization synchronously before retry
+- [x] After reactive summarization, the retry uses the new summary and succeeds (assuming summary reduces context sufficiently)
+- [x] On every successful summarization run, a row is appended to `thread_summaries` with correct seq boundaries and wall-clock dates
+- [x] Summary is injected between thread addendum and history
+- [x] History loaded is messages AFTER the summary boundary, not unconditional last-20
+- [x] Summary injection is absent when `summary` is null
+- [x] Summarization failure is logged at WARN and not surfaced to the user
+- [x] `summary_message_count` reflects the message count at the time of summarization
+- [x] `recall_conversation` tool is available to non-default personas and absent for the Default persona
+- [x] Cross-thread mode returns summaries from all threads sharing the current persona, ordered newest first, capped at 5
+- [x] Single-thread mode returns summaries from the current thread only
+- [x] Date range filtering works: `from_date` and `to_date` both optional, either alone, or together
+- [x] Keyword filtering performs case-insensitive substring match on summary text
+- [x] Empty result returns the "No conversation summaries found" message
+- [x] `recall_conversation_cross_thread` toggle persists on the persona; defaults to enabled
+- [x] MEMORY_INSTRUCTIONS includes the `recall_memory` vs `recall_conversation` guidance
+- [x] Advanced section in ConfigPane collapsed by default; expands on click
+- [x] Auto-summarize toggle persists; show-tool-activity and show-system-events toggles work from new location
+- [x] Archive button works from new location
+- [x] "Last summarized" hint visible when summary exists
+- [x] Unit tests: summarization prompt construction, context injection (with/without summary), re-summarization guard, `recall_conversation` cross-thread vs single-thread scoping, date range filtering, keyword filtering, empty result message
+
+### As-built notes (Story 5.8)
+
+- **Migration 010** adds `summary TEXT`, `summary_updated_at TEXT`, `summary_message_count INTEGER NOT NULL DEFAULT 0`, and `auto_summarize INTEGER NOT NULL DEFAULT 1` to `threads`; creates the `thread_summaries` append-only log table with indexes on `thread_id` and `to_date`; adds `recall_conversation_cross_thread INTEGER NOT NULL DEFAULT 1` to `agent_personas`.
+
+- **`services/summarization.rs`** is the new rolling summarization service. `summarize_thread()` resolves the thread's active provider and model (falling back to the persona's defaults), loads all visible messages up to the new boundary, builds a summarization prompt (prepending any existing summary so the new one covers full history), calls the LLM with `provider.complete()` (non-streaming, no tools), and on success updates `threads.summary` + appends to `thread_summaries`. All errors are logged at WARN and swallowed — the function never propagates.
+
+- **Proactive trigger** runs inline at the end of `run_inner` after the `ThreadUpdated` SSE event has already been sent to the client. It fires when `(total_visible_count - summary_message_count) >= DEFAULT_HISTORY_LIMIT`. Running inline (rather than `tokio::spawn`) avoids needing to clone `AppState` while still being non-blocking from the user's perspective.
+
+- **Reactive trigger** uses a new `RetryStrategy::SummarizeAndRetry` variant. `retry_strategy_for()` detects context-length error strings (`context_length_exceeded`, `context window`, `maximum context length`, `prompt is too long`, `context_window_exceeded`). `stream_one_turn` returns a tagged error `"CONTEXT_TOO_LONG_RETRY: ..."`. `run_inner` wraps the `generation_loop` call in a `loop { ... }` — on first occurrence it calls `summarize_thread` synchronously, reloads the thread, rebuilds `AssemblyInput` with the new summary and reduced history, and retries. If the retry also fails, the error propagates normally.
+
+- **Context injection** adds `conversation_summary: Option<String>` to `AssemblyInput`. When `Some` and non-empty, `assemble()` injects a system message at position 2.5 (after thread addendum, before history) formatted as `## Conversation Summary\n\n...`. The history query in `run_inner` now uses `LIMIT ? OFFSET ?` with `DEFAULT_HISTORY_LIMIT` and `thread.summary_message_count` as the offset, so the context window always starts just after the summarized portion.
+
+- **`RecallConversationTool`** is the fourth built-in tool. It builds its SQL dynamically based on which filters are provided (from_date, to_date, keywords), always scoped to the current persona via `t.persona_id = ?`. The `recall_conversation_cross_thread` flag on the persona adds a `ts.thread_id = ?` condition when disabled. Results are formatted as `[thread: {title}] {from} – {to}\n{summary}` and joined with `---` separators.
+
+- **`MEMORY_INSTRUCTIONS`** extended with a `## Conversation Recall` section explaining the semantic distinction: `recall_memory` for facts and preferences, `recall_conversation` for narrative history and past discussions. The model is instructed to call both when intent is ambiguous.
+
+- **Persona form toggle** (`recall_conversation_cross_thread`) is shown only in edit mode for non-default personas, rendered as an inline card with a native checkbox. Included in the PUT payload only when editing a non-default persona.
+
+- **ConfigPane Advanced section** already existed from Story 5.6. Story 5.8 adds the auto-summarize toggle row (same `toolActivityRow` style as the existing toggles) plus a `fieldHint` showing "Last summarized · [date] · N messages covered" when `thread.summary` is non-null.
+
+- **Bug fix (post-migration):** `routes/messages.rs` has a `verify_thread_ownership()` helper that loads a full `Thread` struct. It was not updated during the main implementation pass and was missing the four new columns, causing `ColumnNotFound("summary")` errors on every message request. Fixed by adding the new columns to its SELECT list.
+
+- **Legacy DB migration:** The development database at `data/agent-deck.db` pre-dated Phase 5 (only migrations 1–6 applied). Migrations 007–010 were applied manually via `sqlite3` and registered in `_sqlx_migrations` with `zeroblob(20)` checksums so the sqlx migration runner does not attempt to re-run them on next startup.
+
+- **Test count:** 271 passing (was 262 at end of Story 5.7). New tests cover summarization prompt construction (with/without existing summary, empty summary), context injection (with summary, without addendum, empty summary, None summary), `recall_conversation` schema validation, and tool registry count (now 4).
+
+---
+
+### Phase 6 — PWA
+
+**Goal:** The React SPA is installable as a Progressive Web App on Android and iOS. Users can add it to their home screen and open it full-screen. Mobile layout is polished. The foundation for push notifications (service worker) is in place.
+
+---
+
+**Story 6.1 — PWA manifest and installability** ✅ Complete  
+Branch: `feature/phase6-pwa-manifest`
+
+Add `web/public/manifest.json` with the correct fields for installability. Link it from `index.html`. Add app icons (192×192 and 512×512, generated from the agent-deck emoji/theme). Install `vite-plugin-pwa` as a dev dependency and configure it to inject the manifest link and register the service worker. The service worker at this stage only needs to handle the `push` event (implemented in Phase 7) — a minimal stub is sufficient now.
+
+Required `manifest.json` fields:
+- `name`: "agent-deck"
+- `short_name`: "agent-deck"
+- `display`: "standalone" — **required for iOS push notifications**
+- `start_url`: "/"
+- `background_color`: "#1C1C1A"
+- `theme_color`: "#1C1C1A"
+- `icons`: 192×192 and 512×512 PNG entries
+
+Acceptance criteria:
+- Chrome on Android shows "Add to Home Screen" prompt or banner
+- iOS Safari shows the app name and icon when going through Share → Add to Home Screen
+- PWA opens full-screen (no browser UI) when launched from home screen on both platforms
+- `vite-plugin-pwa` is in devDependencies and configured in `vite.config.ts`
+- Service worker is registered without errors (stub is fine at this stage)
+- Lighthouse PWA audit passes installability checks
+
+---
+
+### As-built notes (Story 6.1)
+
+- **`manifest.json`:** All required fields present — `name`, `short_name`, `display: standalone`, `start_url: "/"`, `background_color: "#1C1C1A"`, `theme_color: "#1C1C1A"`, 192×192 and 512×512 icon entries.
+- **Icons:** `web/public/icon-192.png` and `icon-512.png` added (dark `#1C1C1A` background, AD monogram). Regeneration script at `scripts/generate_icons.py`.
+- **Service worker:** `web/public/sw.js` — stub handles `push` and `notificationclick` events. Full implementation deferred to Phase 7 as specified.
+- **`vite-plugin-pwa` ^1.2.0:** Installed as devDependency, configured in `vite.config.ts` with `injectManifest` strategy. `devOptions.enabled: true` so the SW registers in dev mode.
+- **`web/index.html`:** Manifest linked, `apple-touch-icon` added, iOS PWA meta tags added (`apple-mobile-web-app-capable`, `status-bar-style`, `title`).
+- **No deviations** from the spec.
+
+---
+
+### As-built design note (Story 6.2 approach revision)
+
+After reviewing the mobile mockups (`mockups/mobile-chat.html`, `mobile-thread-list.html`, `mobile-thread-config.html`) and testing the PWA on a real device, the original "polish" approach for Story 6.2 was revised. The original plan assumed the existing desktop layout could be made mobile-friendly with media queries alone — patching `ConfigPane`, `SettingsModal`, and `ChatView` with breakpoint overrides.
+
+In practice, the desktop and mobile navigation models are fundamentally incompatible:
+- Desktop: persistent sidebar + main area side-by-side
+- Mobile: full-screen views + bottom tab bar + slide-up bottom sheet for config
+
+Fighting the desktop layout assumptions with media queries would produce fragile, hard-to-maintain code. Instead, Story 6.2 is rewritten as a **layout-level split**: a `useIsMobile()` hook selects between `DesktopLayout` (the current shell, unchanged) and a new `MobileLayout` at the `App.tsx` level. All business logic — stores, hooks, API calls — is shared between both layouts. Only the shell and navigation components differ.
+
+The mobile mockups are the source of truth for the mobile UI design. CSS custom properties (design tokens) are identical between desktop and mobile — no new colours are introduced.
+
+---
+
+**Story 6.2 — Mobile-first layout** ✅ Complete  
+Branch: `feature/phase6-mobile-layout`
+
+Implement a dedicated mobile UI using a layout-level split. The desktop layout (`DesktopLayout`) is untouched. A new `MobileLayout` is rendered when `useIsMobile()` returns true (viewport width ≤ 768px or touch UA). All components are built mobile-first from the mockups.
+
+**New files:**
+
+`web/src/hooks/useIsMobile.ts`
+- Returns `true` when `window.innerWidth <= 768` OR the UA is a touch device
+- Listens to `window.resize` and updates reactively
+- Used in `App.tsx` to select between `DesktopLayout` and `MobileLayout`
+
+`web/src/styles/mobile.css`
+- Global mobile-only styles imported only by mobile components
+- Safe-area variables: `env(safe-area-inset-top/bottom/left/right)`
+- Tap highlight removal: `-webkit-tap-highlight-color: transparent`
+- Minimum tap target helper class: `.tap-target { min-height: 44px; min-width: 44px; }`
+- Momentum scrolling: `-webkit-overflow-scrolling: touch`
+
+`web/src/layouts/DesktopLayout.tsx`
+- Extract the current `App.tsx` shell (sidebar + main area) into this component
+- No behaviour change — purely a rename/extract refactor
+
+`web/src/layouts/MobileLayout.tsx`
+- Bottom tab bar (83px) with 3 tabs: **Threads**, **Chat**, **Settings**
+- Active tab indicator: accent-secondary label + 4px accent-primary dot below icon
+- Renders one full-screen view at a time based on active tab
+- Home indicator spacer at bottom (`env(safe-area-inset-bottom)`)
+- Tab state is URL-driven (`?tab=threads|chat|settings`) so the back button works
+
+`web/src/layouts/mobile/MobileThreadList.tsx`
+- Nav bar: large bold "agent-deck" title (22px, weight 700) + icon buttons (filter, new thread)
+- Search bar below nav (fake input, opens filter on tap)
+- Thread rows matching `mobile-thread-list.html`: avatar, name, timestamp, preview, unread badge, routine tag
+- Unread indicator: 3px left-edge dot in accent-primary
+- FAB (floating action button): 56px rounded-square, accent-primary, "+" — creates new thread, positioned above bottom nav
+- Tapping a thread navigates to Chat tab and opens that thread
+
+`web/src/layouts/mobile/MobileChatView.tsx`
+- Nav header: back arrow (accent-secondary) → returns to Threads tab, agent avatar + name + status dot, config icon → opens `MobileConfigSheet`
+- Full-screen scrollable message area, no visible scrollbar
+- Message bubbles matching `mobile-chat.html`: user (right, bubble-user), agent (left with avatar, bubble-agent), routine (bubble-routine + label)
+- Streaming indicator: three animated dots
+- Input area: pill-shaped wrap (`border-radius: 22px`), auto-growing textarea, slash hint button, circular send button (40px, accent-primary)
+- Input bar lifts above keyboard using `visualViewport` resize listener + `padding-bottom: env(safe-area-inset-bottom)`
+- No active thread selected: shows empty state with prompt to select or create a thread
+
+`web/src/layouts/mobile/MobileConfigSheet.tsx`
+- Slide-up bottom sheet over `MobileChatView` (matches `mobile-thread-config.html` exactly)
+- Dark backdrop (`rgba(0,0,0,0.55)`), sheet `border-radius: 20px 20px 0 0`
+- Drag handle bar (36×4px) at top; drag-to-dismiss with touch events
+- `max-height: 88%`, scrollable body with `-webkit-overflow-scrolling: touch`
+- Sections: Persona row, Model picker (tap-to-expand inline list), Routines list, "Full settings →" deep-link
+- Close button (circular ×) in sheet header
+
+`web/src/layouts/mobile/MobileSettings.tsx` _(replaces existing `MobileSettings.tsx`)_
+- Full-screen settings view rendered in the Settings tab
+- Content defined by Story 6.3 — this story creates the shell and nav chrome only
+
+Acceptance criteria:
+- `useIsMobile()` correctly detects phone viewports and touch devices
+- Desktop layout is pixel-identical to pre-6.2 at viewports > 768px
+- Mobile layout renders at 375px, 390px, and 430px with no horizontal scroll
+- Bottom tab bar is always visible and above the iOS home indicator
+- Chat input stays above the keyboard when it opens on iOS and Android
+- Config sheet slides up/down smoothly and dismisses on drag-down or backdrop tap
+- All interactive elements meet 44×44px minimum tap target size
+- Thread list FAB creates a new thread and switches to Chat tab
+- Back arrow in chat nav returns to Threads tab
+- No regressions on desktop (sidebar, ConfigPane, SettingsModal all unchanged)
+
+### As-built notes (Story 6.2)
+
+- **Layout split:** Implemented as specified. `useIsMobile()` (viewport ≤ 768px or touch UA) selects between `DesktopLayout` and `MobileLayout` in `App.tsx`. All stores, hooks, and API calls shared between both layouts.
+- **2-tab bar instead of 3:** The spec described Threads / Chat / Settings tabs. The implementation uses Threads / Settings only; Chat is a view within the Threads tab, reached by selecting or creating a thread. This is simpler and equally usable. No acceptance criterion required a dedicated Chat tab.
+- **No URL-driven tab state:** `?tab=` query params were not implemented. Not called out in any acceptance criterion.
+- **No FAB:** The floating action button was removed by design decision. New-thread creation is handled by the compose icon (✏) in the thread list nav bar.
+- **No unread badge / routine tag on thread rows:** The `Thread` type has no `unread_count` or routine association field. These would require schema + API work. The left-edge accent dot is rendered for the active thread only.
+- **`mobile.css` import:** Added to `web/src/main.tsx` after `styles.css`. Safe-area CSS custom properties and utility classes (`.tap-target`, `.scroll-momentum`, etc.) are now active globally.
+- **Full Settings button removed:** A "Full Settings" button was present in `MobileSettings.tsx` but dispatched a custom event that nothing handled. Removed along with the "Connection" section, dead prop, and associated CSS.
+- **`MobileConfigSheet` Full Settings deep-link:** The config sheet retains its "Full settings →" link; this opens the desktop `SettingsModal` and is intentional for desktop-fallback access from the sheet.
+
+---
+
+
+
+**Story 6.3 — Updated mobile settings page** ✅ Complete  
+Branch: `feature/phase6-mobile-settings`
+
+Update `MobileSettings.tsx` to replace the placeholder sections with real content. Also removes all dead pairing infrastructure (server endpoints, API client, desktop settings tab) that was built for a native app no longer in the plan.
+
+Content:
+- Platform detection (iOS vs Android via user agent) to show the correct install steps
+- **iOS:** "Open in Safari → tap Share → Add to Home Screen → open from home screen"
+- **Android:** "Open in Chrome → tap menu → Add to Home Screen"
+- Simplified QR code: encodes `window.location.origin` as a plain URL — no API call, no auth token. Scanning it with a phone camera opens agent-deck in the browser. One-time convenience for getting the URL onto the phone before the PWA is installed.
+- QR code also present in desktop **General Settings** ("Open on Phone" card) — the primary use case is a desktop user scanning to open the server URL on their phone after Tailscale is set up
+- Notification subscription status: "Notifications enabled" / "Notifications not enabled" / "Permission denied"
+- "Enable Notifications" button — disabled with a "coming soon" label until Story 7.3 wires up the VAPID endpoint.
+
+Pairing cleanup (dead code removal):
+- Delete `web/src/components/settings/MobileSettings.tsx` (native app QR pairing component)
+- Remove "Mobile Pairing" tab from desktop `SettingsNav`
+- Remove `pairingApi` from `web/src/api/client.ts`
+- Remove `POST /api/pairing/generate` and `POST /api/pairing/complete` server routes and handlers
+- Remove `PAIRING_TOKEN` / `PAIRING_TOKEN_EXPIRES_AT` constants from `app_config.rs`
+
+Acceptance criteria:
+- iOS and Android show different PWA install instructions based on user agent
+- QR code renders on page load encoding `window.location.origin` — no API call made
+- Scanning the QR with a phone camera opens agent-deck in the browser
+- Notification status section renders correctly in all three states
+- "Enable Notifications" button is present but disabled with a "coming soon" label
+- Old `components/settings/MobileSettings.tsx` is deleted
+- "Mobile Pairing" tab is removed from desktop Settings nav
+- `/api/pairing/generate` and `/api/pairing/complete` routes are removed
+- `cargo build` passes after server cleanup
+- Desktop General Settings shows an "Open on Phone" QR section encoding `window.location.origin`
+
+### As-built notes (Story 6.3)
+
+- **`usePlatform()` hook:** New `web/src/hooks/usePlatform.ts` — reads `navigator.userAgent` once, returns `"ios" | "android" | "other"`. Reusable for future work.
+- **Install steps:** iOS and Android each have a four-step numbered list with platform-specific instructions. Desktop/unknown shows a single nudge row.
+- **Notification status:** `useNotificationStatus()` hook checks `Notification.permission` + `pushManager.getSubscription()`. Four states: enabled (green dot), not-enabled (yellow dot + disabled button), blocked (red dot), unavailable (grey dot). "Enable Notifications" button renders in the not-enabled state with `disabled` + "(coming soon)" label — will be wired up in Story 7.3.
+- **QR removed from mobile settings:** During human review the "Open on Your Phone" QR section was removed from `MobileSettings.tsx` — it is redundant once you are already on the phone.
+- **QR added to desktop General Settings:** An "Open on Phone" `SectionCard` with a `QrCanvas` component (inline styles, matching the file's existing pattern) was added to `web/src/components/settings/GeneralSettings.tsx`. Encodes `window.location.origin` client-side — no API call. Primary use case: desktop user scanning after Tailscale setup.
+- **Dead pairing infrastructure removed:** `components/settings/MobileSettings.tsx` deleted; "Mobile Pairing" tab removed from `SettingsNav` and `SettingsModal`; `pairingApi` removed from `client.ts`; `generate_pairing` and `complete_pairing` handlers and route registrations removed from server; `PAIRING_TOKEN` / `PAIRING_TOKEN_EXPIRES_AT` constants removed from `app_config.rs`. `cargo build` passes with 271 tests passing.
+
+---
+
+### Phase 7 — Web Push Notifications
+
+**Goal:** The PWA receives push notifications when routines fire and no SSE client is connected. No Firebase, no Google/Apple accounts, no external registration. Works on Android (Chrome) and iOS (Safari 16.4+, home screen install required).
+
+**No prerequisites.** VAPID keys are auto-generated on first server startup. No external setup is needed before starting.
+
+---
+
+**Story 7.1 — VAPID key generation and server endpoints** ✅ Complete  
+Branch: `feature/phase7-vapid-server`
+
+On server startup, check `app_config` for `vapid_public_key` and `vapid_private_key`. If absent, generate a new VAPID P-256 key pair using the `web-push` crate and store both in `app_config`. The private key must never be logged or returned by any API endpoint.
+
+Add three new endpoints:
+
+**`GET /api/push/vapid-public-key`** — public, returns:
+```json
+{ "public_key": "<base64url encoded public key>" }
+```
+
+**`POST /api/push/subscribe`** — authenticated, body:
+```json
+{
+  "endpoint": "https://...",
+  "p256dh": "<base64url>",
+  "auth": "<base64url>",
+  "user_agent": "Chrome/Android"
+}
+```
+Upserts into `push_subscriptions` (insert or update by endpoint).
+
+**`DELETE /api/push/subscribe`** — authenticated, body:
+```json
+{ "endpoint": "https://..." }
+```
+Removes the subscription row.
+
+Acceptance criteria:
+- VAPID keys are generated once and persist across server restarts
+- Private key is never logged or returned by any endpoint
+- All three endpoints work correctly
+- `push_subscriptions` table is created by migration (add migration `009_push_subscriptions.sql`)
+- Unit tests for key generation idempotency (calling generate twice returns the same key)
+
+### As-built notes (Story 7.1)
+
+- **Key generation via `p256` crate, not `web-push` directly:** `web-push` does not expose a key-generation API — it expects a pre-existing PEM. Used `p256 = "0.13"` (which is what `web-push` uses internally) to generate the key pair. Private key stored as PKCS8 PEM so `VapidSignatureBuilder::from_pem()` can load it in Story 7.2. Both crates added to workspace deps (`web-push = "0.11.0"` with `default-features = false` — no HTTP client yet).
+- **Migration number:** Spec referenced `009_push_subscriptions.sql` but the correct sequential number is `011_push_subscriptions.sql` (migrations 009 and 010 were already used by Phase 5). File created as `011`.
+- **Response envelope:** `GET /api/push/vapid-public-key` returns `{ "data": { "public_key": "..." } }` (standard project envelope), not the bare `{ "public_key": "..." }` shown in the spec.
+- **`vapid_public_key` cached in `AppState`:** Added `vapid_public_key: String` field so the public-key endpoint reads from memory rather than making a DB query on every request. Private PEM is not stored in `AppState` — it will be loaded from `app_config` in Story 7.2 when the dispatch service initialises.
+- **274 tests, 0 failed.** All three VAPID unit tests pass (`stable_across_calls`, `valid_base64url`, `private_key_is_pem`).
+
+---
+
+**Story 7.2 — Web Push dispatch from server** ✅ Complete
+Branch: `feature/phase7-web-push-dispatch`
+
+In the routine execution service, after persisting the routine response, check whether any SSE client is currently connected for the thread. If not, send a Web Push notification to all `push_subscriptions` rows for the user using the `web-push` crate.
+
+Notification payload (JSON, encrypted by the crate):
+```json
+{
+  "title": "🦉 Aldous",
+  "body": "<first 100 chars of routine response>",
+  "data": { "thread_id": "<uuid>" }
+}
+```
+
+If a subscription endpoint returns HTTP 410 (Gone), delete that subscription row — it means the browser has revoked it.
+
+Acceptance criteria:
+- Notification is sent when no SSE client is connected for the thread
+- Notification is NOT sent when an SSE client is connected
+- 410 responses from push endpoints cause the subscription to be deleted
+- Routine execution wires up the dispatch (fulfils the TODO from Story 5.4 step 10)
+- Unit test for the "should notify" decision logic
+
+### As-built notes (Story 7.2)
+
+- **HTTP client bridging:** `web-push` uses `http = "0.2"` internally while `reqwest = "0.12"` uses `http = "1.x"`. `request_builder::build_request` could not be used directly. Instead, `WebPushMessage`'s public fields (`endpoint`, `ttl`, `payload.content`, `payload.crypto_headers`) are read directly and a `reqwest` request is assembled manually. No new deps required.
+- **`vapid_private_pem` added to `AppState`:** Story 7.1 loaded the private PEM at startup but discarded it (`let (_vapid_private_pem, ...)`). This story stores it in `AppState` so the push service has it without a per-notification DB query.
+- **New `services/push.rs`:** Contains `send_routine_push_notifications` (public entry point), `send_one` (per-subscription dispatch with 410 deletion), and `should_notify` (thin testable predicate). All push errors are logged and swallowed — a push failure never aborts a routine run.
+- **Notification title uses persona emoji + name:** e.g. `"🦉 Aldous"` — derived from the already-loaded `persona` in `run_inner`, not hardcoded.
+- **4th `AppState` test site found in `sse.rs`:** The plan identified 3 construction sites in `mod.rs` but a 4th exists in `routes/sse.rs` test helpers. All four were updated.
+- **276 tests, 0 failed.** Two new unit tests: `should_notify_when_no_sse_subscriber`, `should_not_notify_when_sse_subscriber_present`.
+
+---
+
+**Story 7.3 — PWA service worker and client subscription** ✅ Complete
+Branch: `feature/phase7-pwa-push-client`
+
+Implement the service worker push handler and the client-side subscription flow.
+
+**Service worker (`web/public/sw.js` or generated by vite-plugin-pwa):**
+```javascript
+self.addEventListener('push', (event) => {
+  const { title, body, data } = event.data.json();
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      icon: '/icon-192.png',
+      data,
+    })
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const threadId = event.notification.data?.thread_id;
+  if (threadId) {
+    event.waitUntil(
+      clients.openWindow(`/?thread=${threadId}`)
+    );
+  }
+});
+```
+
+**Client subscription flow (wired into the "Enable Notifications" button in `MobileSettings.tsx`):**
+1. Fetch VAPID public key from `GET /api/push/vapid-public-key`
+2. Call `navigator.serviceWorker.ready` to get the active service worker registration
+3. Call `registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: vapidPublicKey })`
+4. POST the resulting subscription object to `POST /api/push/subscribe`
+5. Update UI to show "Notifications enabled"
+
+Handle unsubscribe: call `subscription.unsubscribe()`, then `DELETE /api/push/subscribe`.
+
+Acceptance criteria:
+- "Enable Notifications" button triggers the browser permission prompt
+- After granting permission, subscription is stored on the server
+- Push notification is received and shown on Android Chrome when a routine fires with no SSE client connected
+- Push notification is received and shown on iOS Safari (PWA installed, home screen launch) when a routine fires
+- Tapping the notification opens the PWA and navigates to the correct thread
+- "Notifications enabled" / "Notifications not enabled" status in settings reflects actual subscription state
+- Unsubscribe flow works and removes the subscription from the server
+
+---
+
+**Story 7.3a — Unified tool-call processing view** ✅ Complete (QoL side-track)
+Branch: `feature/phase7-tool-call-grouping`
+
+All tool activity for an agent response is consolidated into a single expandable `<ProcessingBlock>` instead of individual per-tool spinner indicators and per-message `<ToolActivityBubble>` rows. The final assistant text response appears in a clean, separate bubble below the block once all tool rounds are done. Tools within a round execute in parallel.
+
+Research and design decisions are documented in `docs/PLAN/tool-call-grouping.md`.
+
+Acceptance criteria:
+- All tool calls within an agent response are grouped into a single `<ProcessingBlock>`; no individual "Running tool…" spinners appear
+- The `<ProcessingBlock>` is collapsed by default while running, showing a spinner and "Processing…"
+- Expanding the block during streaming shows each tool as `tool_name · preview` with a per-tool status icon (⟳ in-progress, ✓ completed)
+- Tools within a round execute in parallel; multiple ⟳ rows appear simultaneously in the expanded view
+- Reasoning text generated between rounds appears as a "Reasoning" section inside the expanded block
+- After all tool rounds complete, the final assistant response appears in its own message bubble below the `<ProcessingBlock>`
+- Stopping mid-turn renders the `<ProcessingBlock>` in a cancelled state (dashed border, grey icon)
+- In history, tool messages load as a single grouped `<ProcessingBlock>` per execution, collapsed by default
+- `<ToolActivityBubble>` is removed; the `show_tool_activity` thread toggle is removed
+
+---
+
+### Phase 8 — MCP Depth
+
+**Goal:** MCP servers are fully first-class. Tool inspector works, local server process management is robust, and the platform is ready for any MCP integration.
+
+---
+
+**Story 8.1 — MCP tool inspector** ✅ Complete  
+Branch: `feature/phase8-mcp-tool-inspector`
+
+When an MCP server connects, enumerate its exposed tools and cache the list (name, description, input schema) in memory. Expose this via `GET /api/mcp-servers/:id/tools`. In the Thread Config pane and MCP settings page, render the tool list as an expandable section per server. Include the source URL as a clickable link when set.
+
+Acceptance criteria:
+- Tool list is fetched and displayed in Thread Config per attached server
+- Tool list is displayed in MCP settings per server
+- Source URL renders as a link when present
+- Tool list refreshes when a server reconnects
+- Unit tests for tool enumeration and caching
+
+### As-built notes (Story 8.1)
+
+- **Implemented as foundational MCP infrastructure, not on a dedicated branch.** All code landed incrementally alongside earlier phases; no separate `feature/phase8-mcp-tool-inspector` branch was created.
+- **Tool enumeration:** `connect_and_handshake` calls `list_tools_stdio` (local) or issues a `tools/list` JSON-RPC request (remote) during the MCP handshake. Results are stored in `McpConnection.tools: RwLock<Vec<McpTool>>`.
+- **`GET /api/mcp-servers/:id/tools`:** Implemented as `list_mcp_tools` in `server/src/routes/tokens.rs`; calls `state.mcp.cached_tools(id)`.
+- **Thread Config pane:** `McpServerCard` in `ConfigPane.tsx` has a lazy-loading "Tools" disclosure section. Fetches on first expand, shows tool name + description per row.
+- **MCP settings page:** `ToolInspector` component in `McpServerSettings.tsx` with identical lazy-fetch pattern.
+- **Source URL:** Rendered as a `target="_blank"` link in both card components when present.
+- **Live refresh on reconnect:** `ConfigPane.tsx` subscribes to `lastMcpStatusChange` SSE events and auto-fetches tools when status transitions to `"connected"`.
+- **Unit tests:** No dedicated unit tests for `cached_tools` or `list_tools_stdio` — the tool-enumeration path is exercised by integration behaviour. The `startup_sync`, config I/O, and tag-validation tests in `services/mcp.rs` provide coverage of surrounding logic.
+
+---
+
+**Story 8.2 — Local MCP process management** ✅ Complete  
+Branch: `feature/phase8-local-mcp-processes`
+
+Implement full lifecycle management for local MCP servers. The Rust server starts local servers as child processes on demand (when a thread with that server is opened or on server startup if the server has active threads). Health-check loop monitors the process. On crash, attempt restart with exponential backoff. Status is kept live in the `mcp_servers.status` field and broadcast via global SSE event. Graceful shutdown on server exit.
+
+Acceptance criteria:
+- Local server starts on demand and is restarted on crash
+- Restart backoff prevents tight crash loops
+- Status badge in UI reflects actual connection state in near-real-time
+- All local server processes are cleanly shut down when the Rust server exits
+- Integration test: start a local server, kill its process, verify restart and reconnection
+
+### As-built notes (Story 8.2)
+
+- **Implemented as foundational MCP infrastructure, not on a dedicated branch.** All code landed incrementally alongside earlier phases; no separate `feature/phase8-local-mcp-processes` branch was created.
+- **Supervision loop:** `McpConnectionManager::supervise()` in `server/src/services/mcp.rs`. Starts with `BACKOFF_INITIAL` (2 s), doubles on each failure up to `BACKOFF_MAX` (60 s), resets to `BACKOFF_INITIAL` after `STABILITY_THRESHOLD` (30 s) of continuous uptime.
+- **Health monitoring:** `monitor_local()` polls the child process exit status; `monitor_remote()` watches the SSE stream for closure. Both signal `supervise()` to re-enter the connect loop.
+- **DB status updates:** `set_db_status()` called on every state transition so `mcp_servers.status` always reflects reality.
+- **SSE broadcast:** `broadcast_status()` emits a `GlobalEvent` on every transition; `ConfigPane.tsx` consumes `lastMcpStatusChange` and updates status badges in-place without a page reload.
+- **Graceful shutdown:** `shutdown_all()` called in `main.rs` SIGTERM handler; sends `shutdown_tx.send(true)` to each supervise task and calls `kill_child_if_any` on the child process.
+- **Startup sync:** `startup_sync()` runs on every server start, scanning `~/.agent-deck/mcp/` for `config.json` files and syncing new/changed/deleted entries into the DB before `start()` connects enabled servers.
+- **Disable detection:** `supervise()` polls the DB every 500 ms during the backoff wait; exits immediately if the row is disabled — no need to wait for the full backoff interval.
+- **Integration test:** No crash/restart integration test exists. The supervision and backoff logic are covered by the `startup_sync_*` and config-file unit tests in `services/mcp.rs`; a full process-kill/restart test was deemed impractical in a pure unit-test environment.
+
+---
+
+**Story 8.3 — Mobile settings parity + per-thread MCP** ✅ Complete  
+Branch: `feature/phase8-mobile-settings`
+
+The mobile app currently only lets users chat and toggle routines on/off. Since agent-deck is designed to run on headless computers, the phone is often the only admin interface. This story expands `MobileSettings.tsx` with four new global-config sections: Providers, Credentials, MCP Servers, and Personas — bringing mobile settings to functional parity with the desktop sidebar. It also adds per-thread MCP attach/detach to `MobileConfigSheet.tsx`, which is the only way to attach tools to a thread on mobile.
+
+Acceptance criteria:
+- Providers section: list with enable/disable toggle per row, add new (name, kind, base URL, API key), delete with confirmation
+- Credentials section: list (key, display_name, service), add new (key, display_name, service, credential_type, secret), delete with confirmation; no secret displayed after creation
+- MCP Servers section: list with live status dots driven by `lastMcpStatusChange` SSE events, enable/disable toggle, add new (name, type, key fields for local/remote), delete with confirmation
+- Personas section: list with emoji and name, tap to edit (name, emoji, system_prompt), add new, delete with confirmation; default persona delete is disabled
+- All four sections appear below the existing "Install as App" and "Notifications" sections in `MobileSettings.tsx`
+- Forms use slide-up full-screen drawers consistent with the existing `MobileConfigSheet` visual style
+- No desktop-only features (env-var editor, tool inspector, Copilot device auth) are required on mobile
+- Per-thread MCP section in `MobileConfigSheet`: lists attached servers with live status dots, detach (×) button per row, and an "+ Attach Server" picker showing only unattached servers; attach/detach calls `threadsApi.notify` for both events (silently degrades on failure)
+
+---
+
+### As-built notes (Story 8.3)
+
+- **All four settings sections shipped in `MobileSettings.tsx`:** Providers, Credentials, MCP Servers, and Personas — each with add, edit/toggle, and delete-with-confirmation. Sections appear below "Install as App" and "Notifications".
+- **Slide-up drawers:** All forms (add provider, add credential, add MCP server, add/edit persona) use a full-screen slide-up drawer consistent with `MobileConfigSheet` style, implemented via a reusable `MobileDrawer` pattern.
+- **MCP live status dots:** Status dots in the MCP Servers section subscribe to `lastMcpStatusChange` SSE events for real-time updates without page reload.
+- **Personas:** Default persona delete button is disabled; edit drawer pre-fills all fields. `PUT /api/personas/:id` called on save.
+- **Per-thread MCP in `MobileConfigSheet`:** "Tools" section added below Routines; lists attached servers with status dots and ✕ detach buttons. "+ Attach Server" opens a picker showing only unattached servers; both attach and detach call `threadsApi.notify` (silently degrades on failure).
+- **No desktop-only features:** Env-var editor, tool inspector, and Copilot device auth were intentionally omitted from mobile.
+- **Branch:** `feature/phase8-mobile-settings` — PR merged to `dev`.
+
+---
+
+**Story 8.3a — File Explorer + Workspace Directories** ✅ Complete  
+Branch: `feature/phase8-file-explorer`
+
+Adds three server endpoints (`GET /api/fs/list`, `GET /api/fs/read`, `GET /api/fs/workspace`) with a `canonicalize()`-based path-validation security layer (home dir + `/Volumes` allow-list). Each thread gets a workspace directory at `~/.agent-deck/workspaces/{thread-id}/` injected into the agent's system prompt. The UI gains a `FileExplorerModal` with a lazy virtualized tree (react-arborist) and file preview pane. Mermaid code blocks in chat render as SVG diagrams. Agent-emitted `file://` markdown links are intercepted and rendered as styled path chips that open the explorer.
+
+Acceptance criteria: see `docs/deprecated/AD-8.3a.md`
+
+---
+
+### As-built notes (Story 8.3a)
+
+- **Server routes (`server/src/routes/fs.rs`):** Three endpoints — `GET /api/fs/list`, `GET /api/fs/read`, `GET /api/fs/workspace`. Security: `canonicalize()` + home/`/Volumes` allow-list; 403 on anything outside. Files >5 MB or non-UTF-8 non-image return `previewable: false`.
+- **Workspace directory:** Created at `~/.agent-deck/workspaces/{thread_id}/` on first `GET /api/fs/workspace` call. Path injected into system prompt for every non-routine agent run via `services/context.rs`.
+- **`fsApi` in `web/src/api/client.ts`:** `list()`, `read()`, `workspace()` helpers added.
+- **Types in `web/src/types/index.ts`:** `FsEntry` and `FsFileContent` interfaces added.
+- **`FileExplorerModal.tsx`:** Lazy tree via react-arborist, breadcrumb bar, file preview pane with rendered markdown / image / binary fallback. Full-screen on mobile with tree↔preview panel switch.
+- **Mermaid rendering:** Fenced `mermaid` blocks in `MessageBubble.tsx` render as SVG via `mermaid.render()`; errors fall back to raw code block without crashing.
+- **`file://` link interception:** `<a>` override in `MessageBubble.tsx` catches `file://` links and renders a `PathChip` that opens `FileExplorerModal` pre-navigated to the target. Bare path auto-detection was removed in favour of explicit agent-emitted links.
+- **Explorer triggers:** Folder button added to desktop `ChatView.tsx` header and mobile `MobileChatView.tsx` nav; both resolve the workspace path via `GET /api/fs/workspace` before opening.
+- **Post-approval fixes:** Workspace root moved from `~/agent-deck-workspaces/` to `~/.agent-deck/workspaces/`; `meta.json` index; file links switched to `/api/fs/read?path=` scheme; mermaid in file preview panel; mobile touch-bleed fix; Files tab in mobile bottom nav; push notification body strips markdown.
+- **Branch:** `feature/phase8-file-explorer` — PR open to `dev`.
+
+---
+
+**Story 8.3b — Downloadable Shared Docs** ✅ Complete  
+Branch: `feature/phase8-downloadable-docs`
+
+Adds `GET /api/fs/download?path=` endpoint that streams file bytes with a `Content-Disposition: attachment` header (no memory buffering; same `canonicalize()` security boundary as the read endpoint). A download button (⬇) is added to the `FileExplorerModal` preview pane header — visible for all selected files including binary/too-large ones. `fsApi.downloadUrl()` pure URL-builder helper added to `client.ts`. The agent workspace system prompt is extended to teach the `/api/fs/download?path=` pattern alongside `/api/fs/read?path=`. Also fixes the workspace path in `agent.rs` which still used the old `~/agent-deck-workspaces/` root instead of `~/.agent-deck/workspaces/`.
+
+Acceptance criteria: see `docs/deprecated/AD-8.3b.md`
+
+---
+
+### As-built notes (Story 8.3b)
+
+- **`GET /api/fs/download` (`server/src/routes/fs.rs`):** Reuses `validate_path`; rejects directories with 400; streams via `tokio_util::io::ReaderStream` + `axum::body::Body::from_stream`; sets RFC 5987-compliant `Content-Disposition: attachment` and `Content-Length` headers. `tokio-util` workspace dep updated to include `io` feature.
+- **Download button (`FileExplorerModal.tsx`):** `previewPaneHeader` bar added above preview content showing filename and ⬇ button; shown whenever any file is selected; triggers download via programmatic `<a download>` element.
+- **`fsApi.downloadUrl` (`client.ts`):** Pure URL builder; no fetch call.
+- **System prompt (`context.rs`):** Workspace block now distinguishes `/api/fs/read?path=` (in-app preview) from `/api/fs/download?path=` (save to device).
+- **Bug fix (`agent.rs`):** Workspace creation in the agent run loop was using `~/agent-deck-workspaces/` instead of `~/.agent-deck/workspaces/`; aligned with the `get_workspace` route.
+- **Branch:** `feature/phase8-downloadable-docs` — PR open to `dev`.
+
+---
+
+**Story 8.4 — MCP Keepalive Ping** ✅ Complete
+Branch: `feature/phase8-mcp-keepalive`
+
+Adds a background keepalive ping for local (stdio) MCP servers to prevent idle-exit cold-start latency. A `tools/list` request is sent every 45 seconds while each local server is connected. A `request_lock: Mutex<()>` was added to `McpConnection` to serialise the full stdin-write → stdout-read round-trip in `call_tool`, preventing interleaving with concurrent keepalive pings. The keepalive uses `try_lock()` (not `.lock().await`) so it skips a tick rather than queuing behind an in-flight tool call. Remote (HTTP) servers are excluded — they have no idle-exit problem and are already monitored by `monitor_remote`. Keepalive tasks cancel cleanly via `shutdown_rx` when the connection is torn down.
+
+### As-built notes (Story 8.4)
+
+- **`request_lock: tokio::sync::Mutex<()>`** added to `McpConnection`; initialised in both `connect_local` and `connect_remote` struct literals.
+- **`call_tool` (local branch):** `let _request_guard = conn.request_lock.lock().await;` acquired at the top of the `if is_local {` branch; guard lives until the branch exits (after stdout read), serialising all local stdio round-trips.
+- **`run_keepalive_local`:** Private async fn inside `impl McpConnectionManager`. Ticks every 45 s; uses `try_lock()` — logs `TRACE` and skips the tick if `request_lock` is held. On failure logs `WARN` and returns. Cancels via `shutdown_rx.changed()`.
+- **`supervise`:** After `connections.insert`, checks `child.is_some()` and `tokio::spawn`s `run_keepalive_local` for local connections only. Handle is detached — task self-terminates via `shutdown_rx`.
+- **All changes in one file:** `server/src/services/mcp.rs`. No new files.
+- **Branch:** `feature/phase8-mcp-keepalive` — PR open to `dev`.
+
+---
+
+### Phase 8.5 — Tailscale Platform Layer + Webhook Integration
+
+**Goal:** Make Tailscale a first-class citizen of agent-deck. Surface live VPN status in the UI and give the agent tools to answer connectivity questions. Add a single universal webhook endpoint that lets any external service (GitHub, Stripe, CI/CD, IoT) trigger the agent by posting to `https://{hostname}/api/webhooks`. Routing is by HMAC secret — one stable URL for all services, forever.
+
+**Design principle:** Tailscale is a hard prerequisite for agent-deck. This phase makes that visible and useful rather than silent. Tailscale Funnel (already implied by the Tailscale requirement) provides the stable public HTTPS URL needed for webhook receipt — no third-party relay, no extra tooling.
+
+**See:** `docs/AD-8.5.md` for the full story specification.
+
+---
+
+**Story 8.5a — Tailscale Status API and UI**
+Branch: `feature/phase8-tailscale-platform`
+
+Implement `services/tailscale.rs` to query the `tailscale` binary for connection state, Funnel status, hostname, and IP address. Cache results in AppState (30s TTL). Add four endpoints: `GET /api/tailscale/status`, `POST /api/tailscale/connect`, `POST /api/tailscale/funnel/enable`, `POST /api/tailscale/funnel/disable`. Add a `tailscale_status` built-in agent tool (returns connection state, hostname, Funnel URL, and active webhook bindings). Surface a live `TailscaleStatusCard` component in General Settings and Mobile Settings. Add a VPN status dot to the desktop sidebar and mobile nav bar.
+
+Acceptance criteria: see `docs/AD-8.5.md` § Story 8.5a Acceptance Criteria
+
+---
+
+**Story 8.5b — Generic Webhook Trigger**
+Branch: `feature/phase8-tailscale-platform` (same branch, sequenced after 8.5a)
+
+Add migration 013 (`webhook_bindings` table). Implement a single public endpoint `POST /api/webhooks` — no auth cookie, security by HMAC-SHA256 secret matching across all enabled bindings. First matching binding determines the source formatter (GitHub, Stripe, generic) and destination thread. The formatted natural-language payload is injected via `notify_internal` → agent run-loop. Refactor `notify_internal` out of the existing `notify` handler. Add auth-protected CRUD at `GET/POST/DELETE/PATCH /api/threads/:id/webhook-bindings`. Surface a Webhooks section in ConfigPane and MobileConfigSheet with one-time secret display on create. Ship `docs/skills/github-webhook.md`.
+
+Acceptance criteria: see `docs/AD-8.5.md` § Story 8.5b Acceptance Criteria
+
+
+### Phase 9 — Polish and Hardening
+
+**Goal:** The system is reliable, handles errors gracefully, and provides a good experience end-to-end.
+
+---
+
+**Story 9.1 — Error handling and user feedback**  
+Branch: `feature/phase9-error-handling`
+
+Audit all error paths in the Rust server and ensure they return consistent, meaningful error responses. Audit the React SPA and add toast notifications for API errors. Ensure SSE errors are surfaced to the user. Add retry logic for transient provider errors.
+
+---
+
+**Story 9.2 — SSE reconnection and resilience**  
+Branch: `feature/phase9-sse-resilience`
+
+Implement robust SSE reconnection in both the web and mobile clients. Use the `Last-Event-ID` header to resume from the last received event. Ensure no messages are lost during a brief disconnect.
+
+---
+
+**Story 9.3 — Message pagination**  
+Branch: `feature/phase9-message-pagination`
+
+Implement cursor-based pagination on `GET /api/threads/:id/messages`. In the web and mobile apps, implement "load more" by scrolling to the top of the message list.
+
+---
+
+**Story 9.4 — macOS distribution**  
+Branch: `feature/phase9-distribution`
+
+Package agent-deck as a proper macOS release — a Homebrew formula (primary) and a DMG (secondary) — so users can install with `brew install` and have the server start automatically on login via `brew services`. A GitHub Actions workflow produces release artifacts on tag push.
+
+Acceptance criteria:
+- `release.yml` workflow triggers on `v*` tag push and produces two tarballs (`agent-deck-macos-aarch64.tar.gz` and `agent-deck-macos-x86_64.tar.gz`), each containing the `agent-deck` binary and `public/` directory, with SHA256s in the release body
+- `brew tap <owner>/agent-deck && brew install agent-deck && brew services start agent-deck` results in the server running at `http://localhost:7474`
+- `scripts/build-dmg.sh` runs to completion on a macOS machine with Xcode CLI tools and produces a `.dmg` in `build/`
+- `scripts/com.agent-deck.server.plist` correctly starts the server on login when loaded via `launchctl`
+
+---
+
+**Story 9.5 — Setup wizard polish and documentation**  
+Branch: `feature/phase9-wizard-polish`
+
+Fix the critical gap in the setup wizard's Done step — it must tell new users how to connect from other devices. Surface the auth token, local URL, Tailscale URL (when available), and a QR code for one-tap mobile login. Write the project README.
+
+Acceptance criteria:
+- `POST /api/setup/complete` response body includes the auth token
+- `GET /api/setup/connect-info` returns `{ local_url, tailscale_url, token_shown }` — `token` field included only when `token_shown` is `false`; `POST /api/setup/connect-info/mark-shown` sets `token_shown = true`
+- `local_url` reflects the machine's non-loopback IP address
+- Done step displays a "Connect from another device" panel with: local URL (+ Tailscale URL if available), masked+copyable token, QR code encoding `<local_url>?token=<token>`, and a prominent "Save this token — it won't be shown again" warning
+- Token is held in component state only — never written to `localStorage` or `sessionStorage`
+- README covers: what agent-deck is, Homebrew install, build-from-source install, first-run wizard, connecting from mobile (QR + manual), Tailscale setup, PWA installation on iOS and Android, push notifications, adding providers/MCP servers/credentials
+
+---
+
+### Phase 10 — Status Bar App (Deferred)
+
+Deferred until all other phases are complete. See section 11 for notes.
+
+---
+
+## 11. Deferred / Future Work
+
+The following items are explicitly out of scope for v1. They are documented here so future contributors have context.
+
+### Status Bar App (Phase 10)
+A native macOS Swift/SwiftUI app that lives in the menu bar. It manages the Rust server process and optionally the `copilot-api` process. Shows server status (running/stopped), active thread count, and allows starting/stopping the server. Registers as a Login Item so it starts on boot. The `.app` bundle allows it to appear in Launchpad and Spotlight. Planned for after all other phases are complete.
+
+### Tailscale Onboarding (macOS app installer)
+
+The original Story 6.x planned a Tailscale setup step inside the web setup wizard. This was deferred because the right place for Tailscale onboarding is the initial application install — before the user opens the web UI for the first time. The intended delivery model is a macOS DMG: the user double-clicks the installer, a native setup assistant walks them through installing Tailscale, signing in, and verifying connectivity. Once that completes, the agent-deck server starts and the user opens the web UI already connected over Tailscale.
+
+This work belongs with the macOS packaging story (see Status Bar App / Phase 10) rather than as a web feature. When tackled, the existing Tailscale server-side routes (`GET /api/tailscale/status`, `POST /api/tailscale/connect`, `POST /api/tailscale/install`) can remain — they are still useful for displaying connection status in mobile settings. Only the in-web-wizard setup step is out of scope.
+
+### OAuth and Third-Party App Credentials
+Browser-based OAuth flows (Google, GitHub, etc.) with token refresh, consent screens, and callback handling. Required to unlock Gmail, Google Calendar, Google Drive, and any MCP server that authenticates via OAuth rather than static tokens. Includes: OAuth provider trait and registry, token refresh on credential resolution, `/settings/accounts` page for connected accounts, and the Google app verification process for consumer distribution. This is a significant UX and infrastructure investment — deferred until the core platform is stable and the credential store, MCP integration, and agent runtime are proven out. When ready, the credential store already supports the encrypted storage layer; the work is in adding the browser flow, refresh logic, and new credential types (`oauth2` with `scopes`, `expires_at`, `refresh_token`).
+
+### Native iOS App
+No native iOS app is planned. The PWA covers iOS via Safari Web Push (iOS 16.4+). Users install the PWA via "Add to Home Screen" in Safari — no App Store, no Developer account required. If a richer native experience is ever desired (e.g. background audio, Siri integration), a native wrapper could be added as a paid tier in a future version.
+
+### Multi-User Support
+The data model includes `user_id` on all relevant tables in anticipation of this. In v1 there is one user. Future: add a login screen, user management, per-user API keys, per-user thread isolation.
+
+### Hard Delete
+Threads can be archived in v1. Hard delete (with full cascade through messages, routines, thread_skills, etc.) requires careful design to avoid accidental data loss. In v1, use soft delete only.
+
+
+
+### Additional OAuth Providers
+The OAuth provider framework (deferred — see "OAuth and Third-Party App Credentials" above) is designed to be modular — adding a new provider (Notion, Linear, Slack, etc.) requires only implementing the `OAuthProvider` trait and registering in the provider registry. Future providers follow the same pattern with no infrastructure changes.
+
+### Memory as MCP
+The current memory system is a baked-in tool-calling implementation. A future version should expose it as a local MCP server instead, making it swappable. This would allow plugging in a different memory backend (e.g., a vector database) without touching the core agent run-loop. Deferred to avoid scope expansion in v1.
+
+### Semantic / Vector Memory (revised)
+The v1 memory system uses SQLite FTS5 keyword search. If memory is migrated to an MCP server pattern (above), the backend can be swapped to `sqlite-vec` for vector embeddings, enabling semantic recall.
+
+### Thread Hard Search
+Full-text search across all threads and messages. Useful as the thread list grows. SQLite FTS5 on the `messages` table would power this.
+
+### Agent Skills — Routine Creation and MCP Configuration
+
+Rather than implementing platform actions as hardcoded Rust tools, certain capabilities should be delivered as **skill files** — Markdown documents that describe the platform's own API contract in a form the agent can reason about. When a persona has a relevant skill attached, the agent can guide the user through or autonomously execute multi-step platform tasks using natural language and the existing REST API.
+
+Initial skills planned:
+
+**`create-routine.md`** — Teaches the agent the `POST /api/threads/:id/routines` contract (`name`, `prompt`, `cron_expr`). The agent can create a routine on the user's behalf from a plain-English request ("Create a morning briefing that runs at 8am every weekday") without any dedicated mobile UI. Solves the current gap where routines can only be created from the desktop Settings pane.
+
+**`configure-mcp.md`** — Teaches the agent the MCP server CRUD API (`POST/PUT/DELETE /api/mcp-servers`). The agent can help the user add, configure, or troubleshoot an MCP server through conversation.
+
+Stub files live at `docs/skills/create-routine.md` and `docs/skills/configure-mcp.md` and describe the API contracts. Infrastructure still needed: a mechanism for attaching skill files to personas (a `personas/<tag>/skills/` directory or a `skills` field on the persona row) and loading the relevant skill content into the agent context at run time.

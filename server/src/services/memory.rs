@@ -83,6 +83,52 @@ pub async fn save_memory(
 }
 
 /// Recall memories using FTS5 full-text search.
+/// Transform a raw user/model query string into a FTS5 OR expression with
+/// prefix matching on each token.
+///
+/// Rules:
+/// - If the query already contains explicit FTS5 operators (OR, AND, NOT, `"`,
+///   `*`, `-`) it is returned unchanged so callers can use advanced syntax.
+/// - Otherwise each whitespace-separated token is suffixed with `*` (prefix
+///   match) and joined with ` OR `.  This means a multi-word query like
+///   "dog name" becomes `dog* OR name*`, which surfaces any entry that
+///   contains *either* word rather than requiring all of them.
+///
+/// Examples:
+///   "typescript" → "typescript*"
+///   "dog name"   → "dog* OR name*"
+///   "user OR pet" → "user OR pet"   (unchanged — already has operator)
+fn build_fts_query(query: &str) -> String {
+    // Detect explicit FTS5 operator usage — leave those alone.
+    let has_operators = query.contains(" OR ")
+        || query.contains(" AND ")
+        || query.contains(" NOT ")
+        || query.contains('"')
+        || query.contains('*');
+
+    if has_operators {
+        return query.to_string();
+    }
+
+    // Normalise: replace hyphens with spaces so compound words like
+    // "agent-deck" split into two independent tokens rather than being
+    // passed raw to FTS5 where `-token` is the NOT operator.
+    let normalised = query.replace('-', " ");
+
+    // Split on whitespace, drop empty tokens, append `*` to each.
+    let terms: Vec<String> = normalised
+        .split_whitespace()
+        .filter(|t| !t.is_empty())
+        .map(|t| format!("{}*", t))
+        .collect();
+
+    if terms.is_empty() {
+        return normalised;
+    }
+
+    terms.join(" OR ")
+}
+
 /// Results are returned in relevance order (FTS rank).
 #[allow(dead_code)]
 pub async fn recall_memory(
@@ -92,6 +138,8 @@ pub async fn recall_memory(
     query: &str,
     limit: i64,
 ) -> Result<Vec<MemoryEntry>> {
+    let fts_query = build_fts_query(query);
+
     let rows = sqlx::query_as::<_, (String, String, Option<String>, Option<String>, String)>(
         "SELECT m.id, m.content, m.thread_id, t.title, m.created_at
          FROM memory m
@@ -103,7 +151,7 @@ pub async fn recall_memory(
          ORDER BY rank
          LIMIT ?",
     )
-    .bind(query)
+    .bind(fts_query)
     .bind(user_id)
     .bind(persona_id)
     .bind(limit)
@@ -125,6 +173,7 @@ pub async fn recall_memory(
 }
 
 /// List all memories for a persona, most recent first.
+/// When `thread_id` is `Some`, results are filtered to that thread only.
 #[allow(dead_code)]
 pub async fn list_memories(
     pool: &SqlitePool,
@@ -132,46 +181,92 @@ pub async fn list_memories(
     persona_id: &str,
     offset: i64,
     limit: i64,
+    thread_id: Option<&str>,
 ) -> Result<MemoryListResponse> {
-    let total: (i64,) =
-        sqlx::query_as("SELECT COUNT(*) FROM memory WHERE user_id = ? AND persona_id = ?")
-            .bind(user_id)
-            .bind(persona_id)
-            .fetch_one(pool)
-            .await?;
-
-    let rows = sqlx::query_as::<_, (String, String, Option<String>, Option<String>, String)>(
-        "SELECT m.id, m.content, m.thread_id, t.title, m.created_at
-         FROM memory m
-         LEFT JOIN threads t ON t.id = m.thread_id
-         WHERE m.user_id = ? AND m.persona_id = ?
-         ORDER BY m.created_at DESC
-         LIMIT ? OFFSET ?",
-    )
-    .bind(user_id)
-    .bind(persona_id)
-    .bind(limit)
-    .bind(offset)
-    .fetch_all(pool)
-    .await?;
-
-    let memories = rows
-        .into_iter()
-        .map(
-            |(id, content, thread_id, thread_title, created_at)| MemoryEntry {
-                id,
-                content,
-                thread_id,
-                thread_title,
-                created_at,
-            },
+    if let Some(tid) = thread_id {
+        let total: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM memory WHERE user_id = ? AND persona_id = ? AND thread_id = ?",
         )
-        .collect();
+        .bind(user_id)
+        .bind(persona_id)
+        .bind(tid)
+        .fetch_one(pool)
+        .await?;
 
-    Ok(MemoryListResponse {
-        memories,
-        total_count: total.0,
-    })
+        let rows = sqlx::query_as::<_, (String, String, Option<String>, Option<String>, String)>(
+            "SELECT m.id, m.content, m.thread_id, t.title, m.created_at
+             FROM memory m
+             LEFT JOIN threads t ON t.id = m.thread_id
+             WHERE m.user_id = ? AND m.persona_id = ? AND m.thread_id = ?
+             ORDER BY m.created_at DESC
+             LIMIT ? OFFSET ?",
+        )
+        .bind(user_id)
+        .bind(persona_id)
+        .bind(tid)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(pool)
+        .await?;
+
+        let memories = rows
+            .into_iter()
+            .map(
+                |(id, content, thread_id, thread_title, created_at)| MemoryEntry {
+                    id,
+                    content,
+                    thread_id,
+                    thread_title,
+                    created_at,
+                },
+            )
+            .collect();
+
+        Ok(MemoryListResponse {
+            memories,
+            total_count: total.0,
+        })
+    } else {
+        let total: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM memory WHERE user_id = ? AND persona_id = ?")
+                .bind(user_id)
+                .bind(persona_id)
+                .fetch_one(pool)
+                .await?;
+
+        let rows = sqlx::query_as::<_, (String, String, Option<String>, Option<String>, String)>(
+            "SELECT m.id, m.content, m.thread_id, t.title, m.created_at
+             FROM memory m
+             LEFT JOIN threads t ON t.id = m.thread_id
+             WHERE m.user_id = ? AND m.persona_id = ?
+             ORDER BY m.created_at DESC
+             LIMIT ? OFFSET ?",
+        )
+        .bind(user_id)
+        .bind(persona_id)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(pool)
+        .await?;
+
+        let memories = rows
+            .into_iter()
+            .map(
+                |(id, content, thread_id, thread_title, created_at)| MemoryEntry {
+                    id,
+                    content,
+                    thread_id,
+                    thread_title,
+                    created_at,
+                },
+            )
+            .collect();
+
+        Ok(MemoryListResponse {
+            memories,
+            total_count: total.0,
+        })
+    }
 }
 
 /// Delete a single memory entry by ID.
@@ -243,6 +338,18 @@ mod tests {
         .await
         .expect("create memory_fts table");
 
+        // threads is LEFT JOINed by recall_memory — create a minimal stub so
+        // the query does not fail with "no such table".
+        sqlx::query(
+            "CREATE TABLE threads (
+                id     TEXT PRIMARY KEY,
+                title  TEXT NOT NULL DEFAULT ''
+            )",
+        )
+        .execute(&pool)
+        .await
+        .expect("create threads stub");
+
         pool
     }
 
@@ -303,5 +410,169 @@ mod tests {
             count_after.0, 500,
             "entry count must not change when cap is reached (no eviction)"
         );
+    }
+
+    // ── build_fts_query unit tests ────────────────────────────────────────────
+
+    #[test]
+    fn single_keyword_gets_prefix_wildcard() {
+        assert_eq!(build_fts_query("typescript"), "typescript*");
+    }
+
+    #[test]
+    fn multi_word_becomes_or_with_wildcards() {
+        assert_eq!(build_fts_query("dog name"), "dog* OR name*");
+    }
+
+    #[test]
+    fn three_words_become_or_chain() {
+        assert_eq!(
+            build_fts_query("deadline march project"),
+            "deadline* OR march* OR project*"
+        );
+    }
+
+    #[test]
+    fn explicit_or_operator_passes_through_unchanged() {
+        assert_eq!(build_fts_query("user OR pet"), "user OR pet");
+    }
+
+    #[test]
+    fn explicit_and_operator_passes_through_unchanged() {
+        assert_eq!(
+            build_fts_query("user AND typescript"),
+            "user AND typescript"
+        );
+    }
+
+    #[test]
+    fn quoted_phrase_passes_through_unchanged() {
+        assert_eq!(
+            build_fts_query("\"prefers typescript\""),
+            "\"prefers typescript\""
+        );
+    }
+
+    #[test]
+    fn existing_wildcard_passes_through_unchanged() {
+        assert_eq!(build_fts_query("type*"), "type*");
+    }
+
+    #[test]
+    fn hyphenated_compound_word_splits_into_or_terms() {
+        assert_eq!(build_fts_query("agent-deck"), "agent* OR deck*");
+    }
+
+    #[test]
+    fn hyphenated_multi_word_query_splits_correctly() {
+        assert_eq!(
+            build_fts_query("agent-deck project"),
+            "agent* OR deck* OR project*"
+        );
+    }
+
+    #[test]
+    fn extra_whitespace_is_collapsed() {
+        assert_eq!(build_fts_query("dog  name"), "dog* OR name*");
+    }
+
+    /// FTS search must return entries whose content matches the query.
+    #[tokio::test]
+    async fn recall_returns_matching_entries() {
+        let pool = test_pool().await;
+        save_memory(
+            &pool,
+            "u1",
+            "p1",
+            None,
+            "User prefers TypeScript over JavaScript",
+        )
+        .await
+        .unwrap();
+        save_memory(&pool, "u1", "p1", None, "User's dog is named Pepper")
+            .await
+            .unwrap();
+        save_memory(
+            &pool,
+            "u1",
+            "p1",
+            None,
+            "Project Atlas deadline is March 15 2025",
+        )
+        .await
+        .unwrap();
+
+        let results = recall_memory(&pool, "u1", "p1", "TypeScript", 10)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(results[0].content.contains("TypeScript"));
+    }
+
+    /// Memories are scoped to persona — a different persona must not see them.
+    #[tokio::test]
+    async fn recall_is_scoped_to_persona() {
+        let pool = test_pool().await;
+        save_memory(&pool, "u1", "persona-A", None, "User likes cats")
+            .await
+            .unwrap();
+
+        // Same user, different persona — must return nothing.
+        let results = recall_memory(&pool, "u1", "persona-B", "cats", 10)
+            .await
+            .unwrap();
+        assert!(
+            results.is_empty(),
+            "memories must not cross persona boundaries"
+        );
+    }
+
+    /// A memory saved in thread-1 must be recallable from a query in thread-2
+    /// (same user + persona — provenance does not restrict access).
+    #[tokio::test]
+    async fn memories_cross_thread_within_same_persona() {
+        let pool = test_pool().await;
+        save_memory(
+            &pool,
+            "u1",
+            "p1",
+            Some("thread-1"),
+            "User timezone is US Pacific",
+        )
+        .await
+        .unwrap();
+
+        // Recall without specifying thread — simulates a query from thread-2.
+        let results = recall_memory(&pool, "u1", "p1", "timezone", 10)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].thread_id.as_deref(), Some("thread-1"));
+    }
+
+    /// Recall results are capped at the requested limit.
+    #[tokio::test]
+    async fn recall_capped_at_requested_limit() {
+        let pool = test_pool().await;
+        for i in 0..15_i64 {
+            save_memory(&pool, "u1", "p1", None, &format!("fact number {}", i))
+                .await
+                .unwrap();
+        }
+        let results = recall_memory(&pool, "u1", "p1", "fact", 10).await.unwrap();
+        assert!(
+            results.len() <= 10,
+            "recall must be capped at the requested limit"
+        );
+    }
+
+    /// Empty recall must return an empty vec (not an error).
+    #[tokio::test]
+    async fn recall_empty_result_is_ok() {
+        let pool = test_pool().await;
+        let results = recall_memory(&pool, "u1", "p1", "nonexistent_keyword_xyz", 10)
+            .await
+            .unwrap();
+        assert!(results.is_empty(), "empty recall must return Ok(empty vec)");
     }
 }

@@ -4,10 +4,13 @@ import zukeeper from "zukeeper";
 import { messagesApi } from "@/api/client";
 import type {
   Message,
+  ProcessingRound,
   SlashCommandResponse,
+  StreamingEntry,
   ThreadMap,
   ThreadPhase,
   ThreadState,
+  ToolCallEntry,
 } from "@/types";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -15,7 +18,17 @@ import type {
 const IDLE: ThreadPhase = { status: "idle" };
 
 function getThread(threads: ThreadMap, threadId: string): ThreadState {
-  return threads[threadId] ?? { messages: [], phase: IDLE };
+  return (
+    threads[threadId] ?? {
+      messages: [],
+      phase: IDLE,
+      queuedCount: 0,
+      oldestLoadedId: null,
+      hasMore: false,
+      isLoadingMore: false,
+      lastProcessingRounds: null,
+    }
+  );
 }
 
 function setThread(
@@ -36,6 +49,7 @@ interface MessageStore {
   threads: ThreadMap;
 
   loadMessages: (threadId: string) => Promise<void>;
+  loadMoreMessages: (threadId: string) => Promise<void>;
   sendMessage: (threadId: string, content: string) => Promise<void>;
   sendCommand: (
     threadId: string,
@@ -43,10 +57,29 @@ interface MessageStore {
   ) => Promise<SlashCommandResponse | null>;
   appendToken: (threadId: string, token: string) => void;
   finalizeStream: (threadId: string, message: Message) => void;
+  commitSegment: (threadId: string, message: Message) => void;
   addMessage: (message: Message) => void;
   setStreamingError: (threadId: string, errorMsg: string) => void;
   clearMessages: (threadId: string) => void;
   clearError: (threadId: string) => void;
+  cancelRun: (threadId: string) => Promise<void>;
+  beginProcessingRound: (
+    threadId: string,
+    entry: ToolCallEntry,
+    round: number,
+  ) => void;
+  setToolCallMessageId: (
+    threadId: string,
+    toolCallId: string,
+    messageId: string,
+  ) => void;
+  completeToolCallEntry: (
+    threadId: string,
+    toolCallId: string,
+    messageId: string,
+    content: string,
+  ) => void;
+  completeProcessingRound: (threadId: string, round: number) => void;
 }
 
 // ── Store ─────────────────────────────────────────────────────────────────────
@@ -61,13 +94,22 @@ const storeCreator: StateCreator<MessageStore> = (set, get) => ({
 
   loadMessages: async (threadId) => {
     try {
-      const res = await messagesApi.list(threadId, { limit: 100 });
+      const res = await messagesApi.list(threadId, {
+        limit: 50,
+        include_hidden: true,
+      });
+      const msgs = res.data;
+      const hasMore = res.has_more;
+      const oldestLoadedId = msgs[0]?.id ?? null;
       set((state) => {
         const thread = getThread(state.threads, threadId);
         return {
           threads: setThread(state.threads, threadId, {
-            messages: res.data,
+            messages: msgs,
             phase: thread.phase,
+            oldestLoadedId,
+            hasMore,
+            isLoadingMore: false,
           }),
         };
       });
@@ -75,6 +117,45 @@ const storeCreator: StateCreator<MessageStore> = (set, get) => ({
       // Silently swallow — callers can handle UI feedback independently.
       // We do not transition to an error phase here because loadMessages
       // is not part of the phase model.
+    }
+  },
+
+  // ── loadMoreMessages ─────────────────────────────────────────────────────────
+  // Fetches the next page of older messages using the oldest loaded message ID
+  // as the `before` cursor. Prepends results to the existing message list.
+  // Guards against double-fetching via isLoadingMore.
+
+  loadMoreMessages: async (threadId) => {
+    const thread = getThread(get().threads, threadId);
+    if (!thread.hasMore || thread.isLoadingMore || !thread.oldestLoadedId)
+      return;
+
+    set((state) => ({
+      threads: setThread(state.threads, threadId, { isLoadingMore: true }),
+    }));
+
+    try {
+      const res = await messagesApi.list(threadId, {
+        limit: 50,
+        before: thread.oldestLoadedId,
+        include_hidden: true,
+      });
+
+      set((state) => {
+        const current = getThread(state.threads, threadId);
+        return {
+          threads: setThread(state.threads, threadId, {
+            messages: [...res.data, ...current.messages],
+            oldestLoadedId: res.data[0]?.id ?? current.oldestLoadedId,
+            hasMore: res.has_more,
+            isLoadingMore: false,
+          }),
+        };
+      });
+    } catch {
+      set((state) => ({
+        threads: setThread(state.threads, threadId, { isLoadingMore: false }),
+      }));
     }
   },
 
@@ -98,13 +179,25 @@ const storeCreator: StateCreator<MessageStore> = (set, get) => ({
       created_at: new Date().toISOString(),
     };
 
-    // Transition: idle → sending, append optimistic message
+    // If a run is already active (streaming or in the optimistic sending
+    // window), don't overwrite the phase — just append the optimistic message
+    // and increment the queue counter so the UI can show "N queued".
+    // If idle (or error), transition normally to "sending".
+    let wasActive = false;
     set((state) => {
       const thread = getThread(state.threads, threadId);
+      wasActive =
+        thread.phase.status === "streaming" ||
+        thread.phase.status === "sending";
       return {
         threads: setThread(state.threads, threadId, {
           messages: [...thread.messages, optimisticUserMsg],
-          phase: { status: "sending", optimisticId },
+          ...(wasActive
+            ? { queuedCount: (thread.queuedCount ?? 0) + 1 }
+            : {
+                phase: { status: "sending", optimisticId },
+                queuedCount: thread.queuedCount ?? 0,
+              }),
         }),
       };
     });
@@ -129,14 +222,17 @@ const storeCreator: StateCreator<MessageStore> = (set, get) => ({
         };
       });
     } catch (err) {
-      // Transition: sending → idle, remove optimistic message
+      // Roll back: remove the optimistic message and undo the queue increment.
+      // If we were active (didn't change phase), leave the phase alone.
+      // If we were idle (set phase to sending), revert to idle.
       set((state) => {
         const thread = getThread(state.threads, threadId);
         const messages = thread.messages.filter((m) => m.id !== optimisticId);
         return {
           threads: setThread(state.threads, threadId, {
             messages,
-            phase: IDLE,
+            ...(wasActive ? {} : { phase: IDLE }),
+            queuedCount: Math.max(0, (thread.queuedCount ?? 0) - 1),
           }),
         };
       });
@@ -165,7 +261,7 @@ const storeCreator: StateCreator<MessageStore> = (set, get) => ({
 
   // ── appendToken ─────────────────────────────────────────────────────────────
   // sending → streaming (on first non-empty token)
-  // streaming → streaming (content accumulates)
+  // streaming → streaming (last text entry accumulates, or new text entry added)
   // Empty tokens are ignored — the server used to send an empty token as a
   // connection handshake which incorrectly kept isStreaming alive.
 
@@ -173,11 +269,278 @@ const storeCreator: StateCreator<MessageStore> = (set, get) => ({
     if (!token) return;
     set((state) => {
       const thread = getThread(state.threads, threadId);
-      const currentContent =
-        thread.phase.status === "streaming" ? thread.phase.content : "";
+      const phase = thread.phase;
+
+      if (phase.status === "sending" || phase.status === "streaming") {
+        const entries = phase.status === "streaming" ? phase.entries : [];
+        const lastEntry = entries[entries.length - 1];
+
+        if (lastEntry?.type === "processing") {
+          const lastRound = lastEntry.rounds[lastEntry.rounds.length - 1];
+          if (!lastRound || lastRound.status === "in_progress") {
+            // Tools are still running — ignore token
+            return state;
+          }
+          // Last round completed — append token to its reasoning
+          const newRounds: ProcessingRound[] = [
+            ...lastEntry.rounds.slice(0, -1),
+            { ...lastRound, reasoning: lastRound.reasoning + token },
+          ];
+          return {
+            threads: setThread(state.threads, threadId, {
+              phase: {
+                status: "streaming",
+                entries: [
+                  ...entries.slice(0, -1),
+                  { type: "processing", rounds: newRounds },
+                ],
+              },
+            }),
+          };
+        }
+
+        const newEntries: StreamingEntry[] =
+          !lastEntry || lastEntry.type !== "text"
+            ? [...entries, { type: "text", content: token }]
+            : [
+                ...entries.slice(0, -1),
+                { type: "text", content: lastEntry.content + token },
+              ];
+
+        return {
+          threads: setThread(state.threads, threadId, {
+            phase: { status: "streaming", entries: newEntries },
+          }),
+        };
+      }
+
+      if (phase.status === "idle" && (thread.queuedCount ?? 0) > 0) {
+        return {
+          threads: setThread(state.threads, threadId, {
+            phase: {
+              status: "streaming",
+              entries: [{ type: "text", content: token }],
+            },
+            queuedCount: Math.max(0, (thread.queuedCount ?? 0) - 1),
+          }),
+        };
+      }
+
+      // Any other phase (error, or idle with no queue) — ignore stale tokens.
+      // After a cancel (phase = idle, queuedCount = 0) stale SSE tokens from
+      // the cancelled run must not reopen the streaming bubble.
+      return state;
+    });
+  },
+
+  // ── beginProcessingRound ─────────────────────────────────────────────────────
+  // Called when tool_start arrives. Creates the processing entry if it doesn't
+  // exist, then adds a new ToolCallEntry to the matching round.
+
+  beginProcessingRound: (threadId, entry, round) => {
+    set((state) => {
+      const thread = getThread(state.threads, threadId);
+      const phase = thread.phase;
+      if (phase.status !== "streaming" && phase.status !== "sending")
+        return state;
+
+      const entries = phase.status === "streaming" ? phase.entries : [];
+      const lastEntry = entries[entries.length - 1];
+
+      if (lastEntry?.type === "processing") {
+        const existingRound = lastEntry.rounds.find((r) => r.round === round);
+        let newRounds: ProcessingRound[];
+        if (existingRound) {
+          newRounds = lastEntry.rounds.map((r) =>
+            r.round === round ? { ...r, tools: [...r.tools, entry] } : r,
+          );
+        } else {
+          newRounds = [
+            ...lastEntry.rounds,
+            {
+              round,
+              tools: [entry],
+              status: "in_progress" as const,
+              reasoning: "",
+            },
+          ];
+        }
+        return {
+          threads: setThread(state.threads, threadId, {
+            phase: {
+              status: "streaming",
+              entries: [
+                ...entries.slice(0, -1),
+                { type: "processing", rounds: newRounds },
+              ],
+            },
+          }),
+        };
+      }
+
       return {
         threads: setThread(state.threads, threadId, {
-          phase: { status: "streaming", content: currentContent + token },
+          phase: {
+            status: "streaming",
+            entries: [
+              ...entries,
+              {
+                type: "processing",
+                rounds: [
+                  {
+                    round,
+                    tools: [entry],
+                    status: "in_progress" as const,
+                    reasoning: "",
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+      };
+    });
+  },
+
+  // ── setToolCallMessageId ──────────────────────────────────────────────────────
+  // Called when tool_activity role=assistant arrives. Sets call_message_id on
+  // the matching entry.
+
+  setToolCallMessageId: (threadId, toolCallId, messageId) => {
+    set((state) => {
+      const thread = getThread(state.threads, threadId);
+      const phase = thread.phase;
+      if (phase.status !== "streaming") return state;
+
+      const entries = phase.entries.map((entry) => {
+        if (entry.type !== "processing") return entry;
+        return {
+          ...entry,
+          rounds: entry.rounds.map((r) => ({
+            ...r,
+            tools: r.tools.map((tool) =>
+              tool.tool_call_id === toolCallId
+                ? { ...tool, call_message_id: messageId }
+                : tool,
+            ),
+          })),
+        };
+      });
+
+      return {
+        threads: setThread(state.threads, threadId, {
+          phase: { status: "streaming", entries },
+        }),
+      };
+    });
+  },
+
+  // ── completeToolCallEntry ─────────────────────────────────────────────────────
+  // Called when tool_activity role=tool arrives. Sets result_message_id and
+  // marks the entry as completed.
+
+  completeToolCallEntry: (threadId, toolCallId, messageId, content) => {
+    set((state) => {
+      const thread = getThread(state.threads, threadId);
+      const phase = thread.phase;
+      if (phase.status !== "streaming") return state;
+
+      const entries = phase.entries.map((entry) => {
+        if (entry.type !== "processing") return entry;
+        return {
+          ...entry,
+          rounds: entry.rounds.map((r) => ({
+            ...r,
+            tools: r.tools.map((tool) =>
+              tool.tool_call_id === toolCallId
+                ? {
+                    ...tool,
+                    result_message_id: messageId,
+                    result_content: content,
+                    status: "completed" as const,
+                  }
+                : tool,
+            ),
+          })),
+        };
+      });
+
+      return {
+        threads: setThread(state.threads, threadId, {
+          phase: { status: "streaming", entries },
+        }),
+      };
+    });
+  },
+
+  // ── completeProcessingRound ───────────────────────────────────────────────────
+  // Called when tool_round_complete arrives. Marks the matching round as
+  // completed.
+
+  completeProcessingRound: (threadId, round) => {
+    set((state) => {
+      const thread = getThread(state.threads, threadId);
+      const phase = thread.phase;
+      if (phase.status !== "streaming") return state;
+
+      const entries = phase.entries.map((entry) => {
+        if (entry.type !== "processing") return entry;
+        return {
+          ...entry,
+          rounds: entry.rounds.map((r) =>
+            r.round === round ? { ...r, status: "completed" as const } : r,
+          ),
+        };
+      });
+
+      return {
+        threads: setThread(state.threads, threadId, {
+          phase: { status: "streaming", entries },
+        }),
+      };
+    });
+  },
+
+  // ── commitSegment ───────────────────────────────────────────────────────────
+  // Called when a chat_segment SSE event arrives. The server has persisted the
+  // pre-tool text as its own message; we anchor it in the store and clear the
+  // text entries from the streaming phase so the processing entry has a
+  // clean, unambiguous slot to render in before the next sub-turn begins.
+
+  commitSegment: (threadId, message) => {
+    cancelTokenBuffer(threadId);
+    set((state) => {
+      const thread = getThread(state.threads, threadId);
+      const phase = thread.phase;
+      if (phase.status !== "streaming") return state;
+
+      // Drop text entries — they've been committed to the segment message.
+      // Any processing entries are preserved.
+      const remainingEntries = phase.entries.filter((e) => e.type !== "text");
+
+      // If a processing entry already exists this is an inter-round segment —
+      // its tokens are already captured in round.reasoning via appendToken.
+      // Don't surface it as a separate message bubble.
+      const hasProcessingEntry = phase.entries.some(
+        (e) => e.type === "processing",
+      );
+      if (hasProcessingEntry) {
+        return {
+          threads: setThread(state.threads, threadId, {
+            phase: { status: "streaming", entries: remainingEntries },
+          }),
+        };
+      }
+
+      const alreadyExists = thread.messages.some((m) => m.id === message.id);
+      const messages = alreadyExists
+        ? thread.messages
+        : [...thread.messages, message];
+
+      return {
+        threads: setThread(state.threads, threadId, {
+          messages,
+          phase: { status: "streaming", entries: remainingEntries },
         }),
       };
     });
@@ -187,6 +550,8 @@ const storeCreator: StateCreator<MessageStore> = (set, get) => ({
   // streaming → idle
   // Strips optimistic messages, appends the completed assistant message,
   // and is idempotent (safe to call twice).
+  // If the message has stopped=true (cancelled mid-stream), it is still
+  // appended — the UI renders a "stopped" label on it via MessageBubble.
 
   finalizeStream: (threadId, message) => {
     cancelTokenBuffer(threadId);
@@ -197,10 +562,23 @@ const storeCreator: StateCreator<MessageStore> = (set, get) => ({
       );
       const alreadyExists = existing.some((m) => m.id === message.id);
       const messages = alreadyExists ? existing : [...existing, message];
+
+      // Preserve processing rounds so ProcessingBubble survives phase reset
+      let lastProcessingRounds: ProcessingRound[] | null = null;
+      if (thread.phase.status === "streaming") {
+        const processingEntry = thread.phase.entries.find(
+          (e) => e.type === "processing",
+        );
+        if (processingEntry && processingEntry.type === "processing") {
+          lastProcessingRounds = processingEntry.rounds;
+        }
+      }
+
       return {
         threads: setThread(state.threads, threadId, {
           messages,
           phase: IDLE,
+          lastProcessingRounds,
         }),
       };
     });
@@ -276,6 +654,66 @@ const storeCreator: StateCreator<MessageStore> = (set, get) => ({
         threads: setThread(state.threads, threadId, { phase: IDLE }),
       };
     });
+  },
+
+  // ── cancelRun ────────────────────────────────────────────────────────────────
+  // Sends a cancellation request to the server and immediately clears the
+  // streaming state so the UI stops showing the streaming bubble.  We don't
+  // wait for the server's message_complete event to drive phase back to idle
+  // because the run may already be complete (cancel arrived too late) or the
+  // SSE event may take a moment — either way the user pressed stop and expects
+  // the UI to respond instantly.
+  //
+  // finalizeStream is idempotent, so if a message_complete SSE arrives later
+  // (stopped=true from the server, or the natural completion if the run
+  // finished before cancel landed) it will just commit the final message text
+  // without re-entering streaming phase.
+
+  cancelRun: async (threadId) => {
+    // Optimistically flush the token buffer and collapse the streaming bubble.
+    cancelTokenBuffer(threadId);
+    set((state) => {
+      const thread = getThread(state.threads, threadId);
+      // Only act if we are actually in a streaming/sending state — do not
+      // stomp an idle or error phase if cancel is called spuriously.
+      if (
+        thread.phase.status !== "streaming" &&
+        thread.phase.status !== "sending"
+      ) {
+        return state;
+      }
+      // Strip optimistic messages (they haven't been confirmed by the server)
+      // and return to idle so the input is immediately re-enabled.
+      const messages = thread.messages.filter(
+        (m) => !m.id.startsWith("optimistic-"),
+      );
+
+      // Preserve processing rounds so ProcessingBubble survives cancel
+      let lastProcessingRounds: ProcessingRound[] | null = null;
+      if (thread.phase.status === "streaming") {
+        const processingEntry = thread.phase.entries.find(
+          (e) => e.type === "processing",
+        );
+        if (processingEntry && processingEntry.type === "processing") {
+          lastProcessingRounds = processingEntry.rounds;
+        }
+      }
+
+      return {
+        threads: setThread(state.threads, threadId, {
+          messages,
+          phase: IDLE,
+          lastProcessingRounds,
+        }),
+      };
+    });
+
+    try {
+      await messagesApi.cancel(threadId);
+    } catch {
+      // Silently swallow — if the POST fails the run will complete naturally
+      // and message_complete will arrive over SSE, which is fine.
+    }
   },
 });
 

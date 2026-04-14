@@ -39,13 +39,14 @@
 
 .avatarRoutine {
     background: var(--bubble-routine);
-    border: 1px solid #3a4a60;
+    border: 1px solid var(--border-default);
 }
 
 /* ── Bubble column ── */
 .col {
     display: flex;
     flex-direction: column;
+    min-width: 0; /* allow flex item to shrink below content size */
 }
 
 .colUser {
@@ -55,11 +56,19 @@
 /* ── Bubble ── */
 .bubble {
     max-width: 68%;
+    min-width: 140px;
     padding: 9px 13px;
-    font-size: 13.5px;
+    font-size: 0.875rem;
     line-height: 1.55;
     color: var(--text-primary);
     word-break: break-word;
+    overflow-wrap: break-word;
+}
+
+@media (max-width: 768px) {
+    .bubble {
+        max-width: 88%;
+    }
 }
 
 /* ── Markdown content inside agent bubbles ── */
@@ -138,6 +147,11 @@
     margin: 0.6em 0;
     font-size: 0.82em;
     line-height: 1.5;
+    max-width: 100%;
+    box-sizing: border-box;
+    min-width: 0;
+    word-break: normal;
+    white-space: pre;
 }
 .markdown pre code {
     background: none;
@@ -199,10 +213,17 @@
 }
 
 /* GFM tables */
+.tableWrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin: 0.6em 0;
+}
+
 .markdown table {
     border-collapse: collapse;
-    width: 100%;
-    margin: 0.6em 0;
+    width: max-content;
+    min-width: 100%;
+    margin: 0;
     font-size: 0.88em;
 }
 .markdown th,
@@ -239,9 +260,11 @@
 }
 
 .bubbleRoutine {
-    background: var(--bubble-routine);
-    border: 1px solid #3a4a60;
+    background: var(--bubble-agent);
+    /*border: 1px solid var(--border-subtle);*/
+    border: 0.5px solid var(--accent-primary);
     border-radius: 12px 12px 12px 4px;
+    box-shadow: 0px 0px 8px 2px rgba(255, 255, 255, 0.15);
 }
 
 /* ── Routine label inside bubble ── */
@@ -249,7 +272,7 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    font-size: 10px;
+    font-size: 0.625rem;
     font-weight: 600;
     color: var(--info);
     text-transform: uppercase;
@@ -257,9 +280,23 @@
     margin-bottom: 6px;
 }
 
+/* ── Stopped label inside bubble (cancelled mid-stream) ── */
+.stoppedLabel {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.625rem;
+    font-weight: 600;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 6px;
+    opacity: 0.7;
+}
+
 /* ── Timestamp ── */
 .meta {
-    font-size: 11px;
+    font-size: 0.6875rem;
     color: var(--text-tertiary);
     margin-top: 3px;
     padding: 0 2px;

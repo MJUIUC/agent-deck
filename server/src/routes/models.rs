@@ -5,6 +5,7 @@ use axum::{
     Json,
 };
 use serde_json::json;
+use std::sync::Arc;
 
 use crate::{
     error::{AppError, AppResult},
@@ -44,7 +45,7 @@ async fn get_provider(state: &AppState, provider_id: &str, user_id: &str) -> App
 ///
 /// List all models stored for a provider.
 pub async fn list(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(provider_id): Path<String>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
@@ -65,7 +66,7 @@ pub async fn list(
 
 /// GET /api/providers/:provider_id/models/:model_id
 pub async fn get(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path((provider_id, model_id)): Path<(String, String)>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
@@ -97,7 +98,7 @@ pub async fn get(
 /// remote response are left in place (they may have been manually added or
 /// the provider may have returned a partial list).
 pub async fn sync(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(provider_id): Path<String>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
@@ -114,10 +115,13 @@ pub async fn sync(
         None => None,
     };
 
-    let remote_models =
-        provider_service::test_provider(&provider.base_url, decrypted_key.as_deref())
-            .await
-            .map_err(|e| AppError::Provider(e.to_string()))?;
+    let remote_models = provider_service::test_provider(
+        &provider.base_url,
+        decrypted_key.as_deref(),
+        &provider.kind,
+    )
+    .await
+    .map_err(|e| AppError::Provider(e.to_string()))?;
 
     let mut synced_count = 0usize;
 
@@ -162,7 +166,7 @@ pub async fn sync(
 
 /// PUT /api/providers/:provider_id/models/:model_id
 pub async fn update(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path((provider_id, model_id)): Path<(String, String)>,
     Json(payload): Json<UpdateModel>,
 ) -> AppResult<impl IntoResponse> {
@@ -216,7 +220,7 @@ pub async fn update(
 
 /// DELETE /api/providers/:provider_id/models/:model_id
 pub async fn delete(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path((provider_id, model_id)): Path<(String, String)>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;

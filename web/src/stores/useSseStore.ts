@@ -2,7 +2,16 @@ import { create } from "zustand";
 import { useMessageStore } from "./useMessageStore";
 import { useThreadStore } from "./useThreadStore";
 import { bufferToken } from "./tokenBuffer";
-import type { SseThreadEvent, SseGlobalEvent } from "@/types";
+import type {
+  SseThreadEvent,
+  SseGlobalEvent,
+  SseSystemEventEvent,
+  SseToolStartEvent,
+  SseToolActivityEvent,
+  SseToolRoundCompleteEvent,
+  SseChatSegmentEvent,
+  ToolCallEntry,
+} from "@/types";
 
 // Reconnection config
 const INITIAL_BACKOFF_MS = 1000;
@@ -21,6 +30,7 @@ interface SseStore {
   threadConnected: boolean;
   threadError: string | null;
   globalError: string | null;
+  lastMcpStatusChange: { mcp_server_id: string; status: string } | null;
 
   // Internal (not exposed as reactive state, just held in closure)
   _threadConn: SseConnection | null;
@@ -52,6 +62,7 @@ export const useSseStore = create<SseStore>((set, get) => ({
   threadConnected: false,
   threadError: null,
   globalError: null,
+  lastMcpStatusChange: null,
 
   _threadConn: null,
   _globalConn: null,
@@ -111,7 +122,8 @@ export const useSseStore = create<SseStore>((set, get) => ({
         try {
           const data = JSON.parse(e.data) as SseThreadEvent;
           if (data.event === "message_complete") {
-            useMessageStore.getState().finalizeStream(threadId, {
+            const store = useMessageStore.getState();
+            store.finalizeStream(threadId, {
               id: data.id,
               thread_id: data.thread_id,
               role: data.role as "user" | "assistant" | "system",
@@ -120,7 +132,37 @@ export const useSseStore = create<SseStore>((set, get) => ({
               routine_id: null,
               visibility: "visible",
               execution_id: null,
+              stopped: data.stopped,
               created_at: data.created_at,
+            });
+            // Fire-and-forget: reload messages to surface tool messages from this turn
+            void store.loadMessages(threadId);
+          }
+        } catch {
+          // ignore
+        }
+      };
+
+      const handleSystemEvent = (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data) as SseSystemEventEvent;
+          if (data.event === "system_event") {
+            // Add as a system message so ConfigPane or ChatView can
+            // optionally render it. The message is visibility=hidden on the
+            // server so it won't appear in paginated loads unless the client
+            // explicitly requests it; here we surface it in the live store
+            // so connected clients see it immediately.
+            useMessageStore.getState().addMessage({
+              id: `system-event-${Date.now()}`,
+              thread_id: threadId,
+              role: "system",
+              content: data.content,
+              source: "system_event",
+              routine_id: null,
+              visibility: "hidden",
+              execution_id: null,
+              event_type: data.event_type,
+              created_at: new Date().toISOString(),
             });
           }
         } catch {
@@ -146,6 +188,87 @@ export const useSseStore = create<SseStore>((set, get) => ({
           }
         } catch {
           // ignore
+        }
+      };
+
+      const handleToolStart = (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data) as SseToolStartEvent;
+          if (data.event === "tool_start") {
+            const entry: ToolCallEntry = {
+              tool_call_id: data.tool_call_id,
+              tool_name: data.tool_name,
+              input_preview: data.input_preview ?? {},
+              status: "in_progress",
+              call_message_id: null,
+              result_message_id: null,
+              result_content: null,
+            };
+            useMessageStore
+              .getState()
+              .beginProcessingRound(threadId, entry, data.round);
+          }
+        } catch {
+          // ignore parse errors
+        }
+      };
+
+      const handleToolActivity = (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data) as SseToolActivityEvent;
+          if (data.event === "tool_activity") {
+            if (data.role === "assistant") {
+              useMessageStore
+                .getState()
+                .setToolCallMessageId(threadId, data.tool_call_id, data.id);
+            } else if (data.role === "tool") {
+              useMessageStore
+                .getState()
+                .completeToolCallEntry(
+                  threadId,
+                  data.tool_call_id,
+                  data.id,
+                  data.content,
+                );
+            }
+          }
+        } catch {
+          // ignore parse errors
+        }
+      };
+
+      const handleToolRoundComplete = (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data) as SseToolRoundCompleteEvent;
+          if (data.event === "tool_round_complete") {
+            useMessageStore
+              .getState()
+              .completeProcessingRound(threadId, data.round);
+          }
+        } catch {
+          // ignore parse errors
+        }
+      };
+
+      const handleChatSegment = (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data) as SseChatSegmentEvent;
+          if (data.event === "chat_segment") {
+            useMessageStore.getState().commitSegment(threadId, {
+              id: data.id,
+              thread_id: data.thread_id,
+              role: "assistant",
+              content: data.content,
+              source: "chat",
+              routine_id: null,
+              visibility: "visible",
+              execution_id: null,
+              event_type: "chat_segment",
+              created_at: data.created_at,
+            });
+          }
+        } catch {
+          // ignore parse errors
         }
       };
 
@@ -208,9 +331,14 @@ export const useSseStore = create<SseStore>((set, get) => ({
       es.addEventListener("token", handleToken);
       es.addEventListener("message_complete", handleMessageComplete);
       es.addEventListener("routine_message", handleRoutineMessage);
+      es.addEventListener("system_event", handleSystemEvent);
       // Named "stream_error" to avoid collision with EventSource's built-in
       // "error" event (which fires for connection drops, not server errors).
       es.addEventListener("stream_error", handleError);
+      es.addEventListener("tool_start", handleToolStart);
+      es.addEventListener("tool_activity", handleToolActivity);
+      es.addEventListener("tool_round_complete", handleToolRoundComplete);
+      es.addEventListener("chat_segment", handleChatSegment);
 
       es.addEventListener("open", () => {
         if (get().threadConnectionId === threadId) {
@@ -228,7 +356,12 @@ export const useSseStore = create<SseStore>((set, get) => ({
         es.removeEventListener("token", handleToken);
         es.removeEventListener("message_complete", handleMessageComplete);
         es.removeEventListener("routine_message", handleRoutineMessage);
+        es.removeEventListener("system_event", handleSystemEvent);
         es.removeEventListener("stream_error", handleError);
+        es.removeEventListener("tool_start", handleToolStart);
+        es.removeEventListener("tool_activity", handleToolActivity);
+        es.removeEventListener("tool_round_complete", handleToolRoundComplete);
+        es.removeEventListener("chat_segment", handleChatSegment);
         es.close();
       };
 
@@ -313,6 +446,47 @@ export const useSseStore = create<SseStore>((set, get) => ({
         }
       };
 
+      const handleRoutineFired = (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data) as {
+            thread_id: string;
+            routine_id: string;
+            routine_name: string;
+          };
+          if (data.thread_id) {
+            // Refresh the thread's updated_at so the sidebar re-renders
+            useThreadStore
+              .getState()
+              .updateThreadPreview(
+                data.thread_id,
+                "",
+                new Date().toISOString(),
+              );
+          }
+        } catch {
+          // ignore
+        }
+      };
+
+      const handleMcpStatusChanged = (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data) as {
+            mcp_server_id: string;
+            status: string;
+          };
+          if (data.mcp_server_id && data.status) {
+            set({
+              lastMcpStatusChange: {
+                mcp_server_id: data.mcp_server_id,
+                status: data.status,
+              },
+            });
+          }
+        } catch {
+          // ignore
+        }
+      };
+
       const handleConnError = () => {
         set({
           globalConnected: false,
@@ -337,6 +511,8 @@ export const useSseStore = create<SseStore>((set, get) => ({
 
       es.addEventListener("thread_updated", handleThreadUpdated);
       es.addEventListener("title_updated", handleTitleUpdated);
+      es.addEventListener("routine_fired", handleRoutineFired);
+      es.addEventListener("mcp_status_changed", handleMcpStatusChanged);
 
       es.addEventListener("open", () => {
         set({
@@ -351,6 +527,8 @@ export const useSseStore = create<SseStore>((set, get) => ({
       const cleanup = () => {
         es.removeEventListener("thread_updated", handleThreadUpdated);
         es.removeEventListener("title_updated", handleTitleUpdated);
+        es.removeEventListener("routine_fired", handleRoutineFired);
+        es.removeEventListener("mcp_status_changed", handleMcpStatusChanged);
         es.close();
       };
 

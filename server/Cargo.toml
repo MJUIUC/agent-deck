@@ -38,6 +38,9 @@ tokio-stream = { workspace = true }
 async-trait = { workspace = true }
 dashmap = { workspace = true }
 dirs = { workspace = true }
+tokio-util = { workspace = true }
+p256 = { workspace = true }
+web-push = { workspace = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }

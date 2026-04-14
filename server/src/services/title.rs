@@ -15,7 +15,11 @@
 
 use tracing::warn;
 
-use crate::{models::thread::Thread, routes::AppState, services::agent};
+use crate::{
+    models::thread::Thread,
+    routes::AppState,
+    services::{agent, provider::LlmProvider},
+};
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
@@ -143,7 +147,7 @@ pub async fn try_llm_title(
 
     // ── Call the LLM ──────────────────────────────────────────────────────────
 
-    let provider = match agent::build_provider(state, &provider_row) {
+    let provider: Box<dyn LlmProvider> = match agent::build_provider(state, &provider_row) {
         Ok(p) => p,
         Err(e) => {
             warn!(

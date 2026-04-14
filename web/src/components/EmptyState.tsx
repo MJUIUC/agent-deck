@@ -1,4 +1,5 @@
 import { Menu } from "lucide-react";
+import { CloudApp, Bot, Chat } from "@carbon/icons-react";
 import styles from "./EmptyState.module.css";
 
 interface EmptyStateProps {
@@ -40,7 +41,9 @@ export function EmptyState({
       <div className={styles.root}>
         {onMobileMenuOpen && <MobileMenuButton onClick={onMobileMenuOpen} />}
         <div className={styles.body}>
-          <div className={styles.icon}>🔌</div>
+          <div className={styles.icon}>
+            <CloudApp size={36} />
+          </div>
           <div className={styles.title}>
             You need a provider to get started.
           </div>
@@ -67,7 +70,9 @@ export function EmptyState({
       <div className={styles.root}>
         {onMobileMenuOpen && <MobileMenuButton onClick={onMobileMenuOpen} />}
         <div className={styles.body}>
-          <div className={styles.icon}>🤖</div>
+          <div className={styles.icon}>
+            <Bot size={36} />
+          </div>
           <div className={styles.title}>Almost there.</div>
           <div className={styles.desc}>
             Create your first agent persona to define your AI's name,
@@ -92,7 +97,9 @@ export function EmptyState({
       <div className={styles.root}>
         {onMobileMenuOpen && <MobileMenuButton onClick={onMobileMenuOpen} />}
         <div className={styles.body}>
-          <div className={styles.icon}>🔌</div>
+          <div className={styles.icon}>
+            <CloudApp size={36} />
+          </div>
           <div className={styles.title}>No provider connected.</div>
           <div className={styles.desc}>
             You have personas ready to go, but no AI provider is connected yet.
@@ -120,7 +127,9 @@ export function EmptyState({
     <div className={styles.root}>
       {onMobileMenuOpen && <MobileMenuButton onClick={onMobileMenuOpen} />}
       <div className={styles.body}>
-        <div className={styles.icon}>💬</div>
+        <div className={styles.icon}>
+          <Chat size={36} />
+        </div>
         <div className={styles.title}>
           {hasThreads ? "Select a conversation" : "No conversations yet"}
         </div>

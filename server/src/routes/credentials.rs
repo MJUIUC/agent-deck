@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -14,7 +16,7 @@ use super::AppState;
 
 /// GET /api/credentials
 /// Returns all credentials as public records (no encrypted_data).
-pub async fn list(State(state): State<AppState>) -> Result<impl IntoResponse, AppError> {
+pub async fn list(State(state): State<Arc<AppState>>) -> Result<impl IntoResponse, AppError> {
     let credentials = credential_service::list_credentials(&state.pool).await?;
     Ok(Json(credentials))
 }
@@ -22,7 +24,7 @@ pub async fn list(State(state): State<AppState>) -> Result<impl IntoResponse, Ap
 /// GET /api/credentials/:id
 /// Returns a single credential by ID (no encrypted_data).
 pub async fn get(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, AppError> {
     let credential = credential_service::get_credential(&state.pool, &id)
@@ -35,7 +37,7 @@ pub async fn get(
 /// Body must include `secret`. Server encrypts before storage.
 /// Returns the created public-facing credential record.
 pub async fn create(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Json(req): Json<CreateCredential>,
 ) -> Result<impl IntoResponse, AppError> {
     let credential =
@@ -48,7 +50,7 @@ pub async fn create(
 /// Allows updating display_name, service, and optionally the secret.
 /// Returns the updated public-facing credential record.
 pub async fn update(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Json(req): Json<UpdateCredential>,
 ) -> Result<impl IntoResponse, AppError> {
@@ -63,7 +65,7 @@ pub async fn update(
 /// Deletes the credential. Response includes a warning listing any MCP servers
 /// that reference this credential by key (so the caller can warn the user).
 pub async fn delete(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, AppError> {
     // Load the record first so we can look up its key for the MCP reference check.

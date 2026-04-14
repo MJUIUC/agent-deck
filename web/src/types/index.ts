@@ -9,6 +9,8 @@ export interface AgentPersona {
   system_prompt: string;
   default_model: string | null;
   default_provider: string | null;
+  is_default: boolean;
+  recall_conversation_cross_thread: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -22,7 +24,12 @@ export interface Thread {
   active_provider: string | null;
   system_prompt_addendum: string | null;
   status: string;
-  show_tool_activity: boolean;
+  show_system_events: boolean;
+  // Summarization fields (server-managed, read-only from client)
+  summary: string | null;
+  summary_updated_at: string | null;
+  summary_message_count: number;
+  auto_summarize: boolean;
   created_at: string;
   updated_at: string;
   // Joined client-side for display convenience
@@ -35,10 +42,12 @@ export interface Message {
   thread_id: string;
   role: "user" | "assistant" | "system";
   content: string;
-  source: "chat" | "routine" | "tool";
+  source: "chat" | "routine" | "tool" | "system_event";
   routine_id: string | null;
   visibility: "visible" | "hidden";
   execution_id: string | null;
+  event_type?: string;
+  stopped?: boolean;
   created_at: string;
 }
 
@@ -94,6 +103,31 @@ export interface Routine {
   updated_at: string;
 }
 
+// ── File system types ─────────────────────────────────────────────────────────
+
+export interface FsEntry {
+  name: string;
+  path: string;
+  kind: "file" | "dir";
+  size: number | null;
+  modified: string | null;
+  extension: string | null;
+}
+
+export interface FsFileContent {
+  path: string;
+  previewable: boolean;
+  // present when previewable === true and is_image !== true
+  content?: string;
+  // present when previewable === true and is_image === true
+  is_image?: boolean;
+  image_data?: string;
+  extension?: string | null;
+  size: number;
+  // present when previewable === false
+  reason?: "binary" | "too_large";
+}
+
 // ── SSE event payloads ────────────────────────────────────────────────────────
 
 export interface SseTokenEvent {
@@ -108,6 +142,18 @@ export interface SseMessageCompleteEvent {
   role: string;
   content: string;
   created_at: string;
+  stopped?: boolean;
+}
+
+export interface SseSystemEventEvent {
+  event: "system_event";
+  event_type: string;
+  content: string;
+}
+
+export interface SseCancelledEvent {
+  event: "cancelled";
+  thread_id: string;
 }
 
 export interface SseRoutineMessageEvent {
@@ -129,11 +175,57 @@ export interface SseErrorEvent {
   message: string;
 }
 
+export interface SseRetryEvent {
+  event: "retry";
+  attempt: number;
+  max_attempts: number;
+  reason: string;
+}
+
+export interface SseToolStartEvent {
+  event: "tool_start";
+  tool_name: string;
+  tool_call_id: string;
+  round: number;
+  input_preview: Record<string, string>;
+}
+
+export interface SseToolActivityEvent {
+  event: "tool_activity";
+  id: string;
+  role: string;
+  content: string;
+  created_at: string;
+  tool_call_id: string;
+  round: number;
+}
+
+export interface SseToolRoundCompleteEvent {
+  event: "tool_round_complete";
+  round: number;
+  tool_count: number;
+}
+
+export interface SseChatSegmentEvent {
+  event: "chat_segment";
+  id: string;
+  thread_id: string;
+  content: string;
+  created_at: string;
+}
+
 export type SseThreadEvent =
   | SseTokenEvent
   | SseMessageCompleteEvent
   | SseRoutineMessageEvent
-  | SseErrorEvent;
+  | SseErrorEvent
+  | SseSystemEventEvent
+  | SseCancelledEvent
+  | SseRetryEvent
+  | SseToolStartEvent
+  | SseToolActivityEvent
+  | SseToolRoundCompleteEvent
+  | SseChatSegmentEvent;
 
 // Global SSE event from copilot.rs GlobalEvent
 export interface SseThreadUpdatedEvent {
@@ -143,7 +235,13 @@ export interface SseThreadUpdatedEvent {
   updated_at: string;
 }
 
-export type SseGlobalEvent = SseThreadUpdatedEvent;
+export interface SseMcpStatusChangedEvent {
+  event: "mcp_status_changed";
+  mcp_server_id: string;
+  status: "inactive" | "connecting" | "connected" | "error";
+}
+
+export type SseGlobalEvent = SseThreadUpdatedEvent | SseMcpStatusChangedEvent;
 
 // ── API response wrappers ─────────────────────────────────────────────────────
 
@@ -183,15 +281,76 @@ export interface StreamingMessage {
 
 // ── Thread state machine ──────────────────────────────────────────────────────
 
+export interface ToolCallEntry {
+  tool_call_id: string;
+  tool_name: string;
+  input_preview: Record<string, string>;
+  status: "in_progress" | "completed" | "cancelled";
+  call_message_id: string | null;
+  result_message_id: string | null;
+  result_content: string | null; // tool output from tool_activity SSE
+}
+
+export interface ProcessingRound {
+  round: number;
+  tools: ToolCallEntry[];
+  status: "in_progress" | "completed" | "cancelled";
+  reasoning: string;
+}
+
+export type StreamingEntry =
+  | { type: "text"; content: string }
+  | { type: "processing"; rounds: ProcessingRound[] };
+
 export type ThreadPhase =
   | { status: "idle" }
   | { status: "sending"; optimisticId: string }
-  | { status: "streaming"; content: string }
+  | { status: "streaming"; entries: StreamingEntry[] }
   | { status: "error"; message: string; recoverable: boolean };
 
 export interface ThreadState {
   messages: Message[];
   phase: ThreadPhase;
+  /** Number of messages queued behind the currently active run. */
+  queuedCount?: number;
+  // ── Pagination ──────────────────────────────────────────────────────────────
+  /** ID of the oldest loaded message — used as `before` cursor for load-more */
+  oldestLoadedId?: string | null;
+  /** Whether older messages exist on the server beyond what's loaded */
+  hasMore?: boolean;
+  /** True while a load-more fetch is in progress (prevents double-fetch) */
+  isLoadingMore?: boolean;
+  /** Processing rounds from the most recent streaming turn. Preserved across
+   *  phase transitions so the ProcessingBubble survives finalizeStream/cancel. */
+  lastProcessingRounds?: ProcessingRound[] | null;
 }
 
 export type ThreadMap = Record<string, ThreadState>;
+
+// ── Memory ────────────────────────────────────────────────────────────────────
+
+export interface MemoryEntry {
+  id: string;
+  content: string;
+  thread_id: string | null;
+  thread_title: string | null;
+  created_at: string;
+}
+
+export interface MemoryListResponse {
+  memories: MemoryEntry[];
+  total_count: number;
+}
+
+// ── User Profile ──────────────────────────────────────────────────────────────
+
+export interface UserProfile {
+  display_name: string;
+  pronouns: string | null;
+  role: string | null;
+  organization: string | null;
+  location: string | null;
+  timezone: string | null;
+  about: string | null;
+  profile_updated_at: string | null;
+}

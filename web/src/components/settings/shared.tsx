@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { Bot, CloudApp, Key, LogoGithub, Plug } from "@carbon/icons-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -7,13 +8,12 @@ export type SettingsTab =
   | "credentials"
   | "personas"
   | "mcp-servers"
-  | "mobile"
   | "general"
   | "archived-threads";
 
 export type ProviderFormData = {
   name: string;
-  kind: "api_key" | "copilot" | "";
+  kind: "openai" | "anthropic" | "custom" | "copilot" | "";
   base_url: string;
   api_key: string;
 };
@@ -37,23 +37,38 @@ export type PersonaFormData = {
   system_prompt: string;
   default_provider: string;
   default_model: string;
+  recall_conversation_cross_thread?: boolean;
 };
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 export const KIND_DEFAULT_URLS: Record<string, string> = {
-  api_key: "https://api.openai.com/v1",
+  openai: "https://api.openai.com/v1",
+  anthropic: "https://api.anthropic.com/v1",
+  custom: "",
   copilot: "http://localhost:4141/v1",
 };
 
-export const KIND_ICONS: Record<string, string> = {
-  api_key: "🔑",
-  copilot: "🐙",
+const KIND_ICON_MAP: Record<
+  string,
+  React.ComponentType<{ size?: number; className?: string }>
+> = {
+  openai: Bot,
+  anthropic: CloudApp,
+  custom: Key,
+  copilot: LogoGithub,
 };
 
+export function KindIcon({ kind, size = 16 }: { kind: string; size?: number }) {
+  const Icon = KIND_ICON_MAP[kind] ?? Plug;
+  return <Icon size={size} />;
+}
+
 export const KIND_URL_HINTS: Record<string, string> = {
-  api_key:
-    "OpenAI-compatible endpoint — e.g. https://api.openai.com/v1, https://api.anthropic.com/v1, or a local URL.",
+  openai: "OpenAI-compatible endpoint — e.g. https://api.openai.com/v1.",
+  anthropic: "Anthropic API endpoint — https://api.anthropic.com/v1.",
+  custom:
+    "Any OpenAI-compatible endpoint, e.g. a local Ollama or LM Studio URL.",
   copilot: "Managed automatically by the copilot-api sidecar.",
 };
 

@@ -136,6 +136,8 @@ mod tests {
             system_prompt: format!("You are {}.", name),
             default_model: Some("gpt-4o".to_string()),
             default_provider: Some("openai".to_string()),
+            is_default: false,
+            recall_conversation_cross_thread: true,
             created_at: "2024-01-01T00:00:00.000Z".to_string(),
             updated_at: "2024-01-01T00:00:00.000Z".to_string(),
         }

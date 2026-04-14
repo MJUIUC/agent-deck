@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import type { Thread, Provider, Model } from "@/types";
 import { providersApi, modelsApi } from "@/api/client";
-import { Settings, Menu } from "lucide-react";
+import { Menu, FolderOpen } from "lucide-react";
 import styles from "./ChatHeader.module.css";
 
 interface ChatHeaderProps {
@@ -9,13 +9,14 @@ interface ChatHeaderProps {
   /** Optional — when undefined the settings button is rendered disabled (draft mode). */
   onToggleConfig?: () => void;
   onMobileMenuOpen?: () => void;
+  onOpenExplorer?: () => void;
 }
 
 // Module-level cache so all ChatHeader instances share one fetch per session.
 let cachedProviders: Provider[] | null = null;
-let cachedModelsByProvider: Record<string, Model[]> = {};
+const cachedModelsByProvider: Record<string, Model[]> = {};
 
-async function resolveDisplayNames(
+export async function resolveDisplayNames(
   providerUuid: string | null,
   modelUuid: string | null,
 ): Promise<{ providerName: string | null; modelName: string | null }> {
@@ -61,6 +62,7 @@ export function ChatHeader({
   thread,
   onToggleConfig,
   onMobileMenuOpen,
+  onOpenExplorer,
 }: ChatHeaderProps) {
   const persona = thread.persona;
   const emoji = persona?.emoji ?? "🤖";
@@ -123,6 +125,16 @@ export function ChatHeader({
 
       {/* Right: action buttons */}
       <div className={styles.right}>
+        {onOpenExplorer && (
+          <button
+            onClick={onOpenExplorer}
+            aria-label="Open file explorer"
+            title="File explorer"
+            className={styles.iconBtn}
+          >
+            <FolderOpen size={16} />
+          </button>
+        )}
         <button
           onClick={onToggleConfig}
           disabled={!onToggleConfig}
@@ -134,7 +146,7 @@ export function ChatHeader({
           }
           className={styles.iconBtn}
         >
-          <Settings size={16} />
+          <Menu size={16} />
         </button>
       </div>
     </div>

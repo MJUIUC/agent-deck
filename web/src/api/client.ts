@@ -8,7 +8,12 @@ import type {
   Model,
   McpServer,
   McpTool,
+  Routine,
   SlashCommandResponse,
+  MemoryListResponse,
+  UserProfile,
+  FsEntry,
+  FsFileContent,
 } from "@/types";
 
 // ── Credential types ──────────────────────────────────────────────────────────
@@ -55,17 +60,37 @@ export interface UpdateCredentialPayload {
   password?: string;
 }
 
+// Get auth token from localStorage or session
+function getAuthToken(): string | null {
+  try {
+    // Check localStorage first (set after successful login)
+    const token = localStorage.getItem("agent_deck_auth_token");
+    if (token) return token;
+  } catch {
+    // localStorage might not be available
+  }
+  return null;
+}
+
 // Base fetch helper — throws on non-OK responses with the error body
 async function apiFetch<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(options.headers ?? {}),
+  } as Record<string, string>;
+
+  // Include auth token if available
+  const token = getAuthToken();
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
   const res = await fetch(path, {
     ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers ?? {}),
-    },
+    headers,
   });
 
   if (!res.ok) {
@@ -169,12 +194,31 @@ export const threadsApi = {
       active_model?: string;
       active_provider?: string;
       system_prompt_addendum?: string;
-      show_tool_activity?: boolean;
+      show_system_events?: boolean;
+      auto_summarize?: boolean;
     },
   ): Promise<{ data: Thread }> {
     return apiFetch(`/api/threads/${id}`, {
       method: "PUT",
       body: JSON.stringify(payload),
+    });
+  },
+
+  notify(
+    id: string,
+    event_type: string,
+    payload?: Record<string, unknown>,
+  ): Promise<{
+    data: {
+      event_type: string;
+      persisted: boolean;
+      triggered: boolean;
+      message_id: string | null;
+    };
+  }> {
+    return apiFetch(`/api/threads/${id}/notify`, {
+      method: "POST",
+      body: JSON.stringify({ event_type, payload }),
     });
   },
 
@@ -239,11 +283,12 @@ export const threadsApi = {
 export const messagesApi = {
   list(
     threadId: string,
-    opts: { limit?: number; before?: string } = {},
-  ): Promise<{ data: Message[] }> {
+    opts: { limit?: number; before?: string; include_hidden?: boolean } = {},
+  ): Promise<{ data: Message[]; has_more: boolean }> {
     const params = new URLSearchParams();
     if (opts.limit != null) params.set("limit", String(opts.limit));
     if (opts.before) params.set("before", opts.before);
+    if (opts.include_hidden) params.set("include_hidden", "true");
     const qs = params.toString();
     return apiFetch(`/api/threads/${threadId}/messages${qs ? `?${qs}` : ""}`);
   },
@@ -252,6 +297,12 @@ export const messagesApi = {
     return apiFetch(`/api/threads/${threadId}/messages`, {
       method: "POST",
       body: JSON.stringify({ content }),
+    });
+  },
+
+  cancel(threadId: string): Promise<{ data: { cancelled: boolean } }> {
+    return apiFetch(`/api/threads/${threadId}/cancel`, {
+      method: "POST",
     });
   },
 
@@ -454,18 +505,29 @@ export const authApi = {
   }> {
     return apiFetch("/api/config");
   },
-};
 
-// ── Pairing ───────────────────────────────────────────────────────────────────
+  // Login with token (for mobile/remote access)
+  login(token: string): void {
+    try {
+      localStorage.setItem("agent_deck_auth_token", token);
+    } catch {
+      // localStorage might not be available, that's ok
+      console.warn("Could not store auth token in localStorage");
+    }
+  },
 
-export const pairingApi = {
-  generate(): Promise<{
-    data: {
-      pairing_payload: { server_url: string; token: string };
-      hint: string;
-    };
-  }> {
-    return apiFetch("/api/pairing/generate", { method: "POST" });
+  // Get stored auth token
+  getToken(): string | null {
+    return getAuthToken();
+  },
+
+  // Clear auth token (logout)
+  logout(): void {
+    try {
+      localStorage.removeItem("agent_deck_auth_token");
+    } catch {
+      // localStorage might not be available
+    }
   },
 };
 
@@ -499,6 +561,57 @@ export const credentialsApi = {
   },
 };
 
+// ── Routines ──────────────────────────────────────────────────────────────────
+
+export const routinesApi = {
+  list(threadId: string): Promise<{ data: Routine[] }> {
+    return apiFetch(`/api/threads/${threadId}/routines`);
+  },
+  get(threadId: string, routineId: string): Promise<{ data: Routine }> {
+    return apiFetch(`/api/threads/${threadId}/routines/${routineId}`);
+  },
+  create(
+    threadId: string,
+    payload: { name: string; prompt: string; cron_expr: string },
+  ): Promise<{ data: Routine }> {
+    return apiFetch(`/api/threads/${threadId}/routines`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  update(
+    threadId: string,
+    routineId: string,
+    payload: {
+      name?: string;
+      prompt?: string;
+      cron_expr?: string;
+      enabled?: boolean;
+    },
+  ): Promise<{ data: Routine }> {
+    return apiFetch(`/api/threads/${threadId}/routines/${routineId}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+  delete(
+    threadId: string,
+    routineId: string,
+  ): Promise<{ data: { deleted: boolean } }> {
+    return apiFetch(`/api/threads/${threadId}/routines/${routineId}`, {
+      method: "DELETE",
+    });
+  },
+  toggle(
+    threadId: string,
+    routineId: string,
+  ): Promise<{ data: { id: string; enabled: boolean } }> {
+    return apiFetch(`/api/threads/${threadId}/routines/${routineId}/toggle`, {
+      method: "PATCH",
+    });
+  },
+};
+
 // ── Setup ─────────────────────────────────────────────────────────────────────
 
 export const setupApi = {
@@ -513,5 +626,102 @@ export const setupApi = {
       method: "POST",
       body: JSON.stringify({ display_name: displayName }),
     });
+  },
+};
+
+export const memoriesApi = {
+  list(
+    personaId: string,
+    params: { limit?: number; offset?: number; thread_id?: string } = {},
+  ) {
+    const qs = new URLSearchParams();
+    if (params.limit != null) qs.set("limit", String(params.limit));
+    if (params.offset != null) qs.set("offset", String(params.offset));
+    if (params.thread_id) qs.set("thread_id", params.thread_id);
+    const query = qs.toString() ? `?${qs.toString()}` : "";
+    return apiFetch<{ data: MemoryListResponse }>(
+      `/api/personas/${personaId}/memory${query}`,
+    );
+  },
+  delete(personaId: string, memoryId: string) {
+    return apiFetch<{ data: { deleted: boolean } }>(
+      `/api/personas/${personaId}/memory/${memoryId}`,
+      { method: "DELETE" },
+    );
+  },
+};
+
+export const profileApi = {
+  get() {
+    return apiFetch<{ data: UserProfile }>("/api/profile");
+  },
+
+  update(
+    fields: Partial<{
+      display_name: string;
+      pronouns: string | null;
+      role: string | null;
+      organization: string | null;
+      location: string | null;
+      timezone: string | null;
+      about: string | null;
+    }>,
+  ) {
+    return apiFetch<{ data: UserProfile }>("/api/profile", {
+      method: "PUT",
+      body: JSON.stringify(fields),
+    });
+  },
+};
+
+export const pushApi = {
+  /** Fetch the server's VAPID public key. Public endpoint — no auth required. */
+  getVapidPublicKey(): Promise<{ data: { public_key: string } }> {
+    return apiFetch("/api/push/vapid-public-key");
+  },
+
+  /** Register a new browser push subscription on the server (upsert by endpoint). */
+  subscribe(payload: {
+    endpoint: string;
+    p256dh: string;
+    auth: string;
+    user_agent?: string;
+  }): Promise<{ data: { subscribed: boolean } }> {
+    return apiFetch("/api/push/subscribe", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  /** Remove a push subscription from the server by endpoint URL. */
+  unsubscribe(endpoint: string): Promise<{ data: { deleted: boolean } }> {
+    return apiFetch("/api/push/subscribe", {
+      method: "DELETE",
+      body: JSON.stringify({ endpoint }),
+    });
+  },
+};
+
+export const fsApi = {
+  /** List the direct children of a directory on the headless machine. */
+  list(path: string): Promise<{ data: { path: string; entries: FsEntry[] } }> {
+    return apiFetch(`/api/fs/list?path=${encodeURIComponent(path)}`);
+  },
+  /** Fetch the content of a file on the headless machine for preview. */
+  read(path: string): Promise<{ data: FsFileContent }> {
+    return apiFetch(`/api/fs/read?path=${encodeURIComponent(path)}`);
+  },
+  /** Get (and create if absent) the workspace directory path for a thread. */
+  workspace(
+    threadId: string,
+    title?: string,
+  ): Promise<{ data: { path: string } }> {
+    const params = new URLSearchParams({ thread_id: threadId });
+    if (title) params.set("thread_title", title);
+    return apiFetch(`/api/fs/workspace?${params.toString()}`);
+  },
+  /** Build a download URL for a file. Pure URL builder — no fetch call. */
+  downloadUrl(path: string): string {
+    return `/api/fs/download?path=${encodeURIComponent(path)}`;
   },
 };

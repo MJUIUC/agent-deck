@@ -21,7 +21,7 @@ use axum::{
     },
 };
 use futures::stream::{Stream, StreamExt};
-use std::{convert::Infallible, time::Duration};
+use std::{convert::Infallible, sync::Arc, time::Duration};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::{BroadcastStream, ReceiverStream};
 
@@ -42,7 +42,10 @@ pub enum ThreadEvent {
         role: String,
         content: String,
         created_at: String,
+        stopped: bool,
     },
+    /// A system event notification (model switched, MCP attached, etc.)
+    SystemEvent { event_type: String, content: String },
     /// A message produced by a routine firing on this thread.
     RoutineMessage {
         id: String,
@@ -54,6 +57,42 @@ pub enum ThreadEvent {
     },
     /// A streaming or provider error.
     Error { code: String, message: String },
+    /// The provider returned a transient error and the run-loop is retrying.
+    Retry {
+        attempt: u32,
+        max_attempts: u32,
+        reason: String,
+    },
+    /// Tool call is about to execute — emitted before tool.run() so the client
+    /// can commit the current streaming segment and show an "executing" indicator.
+    ToolStart {
+        tool_name: String,
+        tool_call_id: String,
+        round: u32,
+        input_preview: serde_json::Value,
+    },
+    /// A tool message (call or result) was persisted — pushed to connected clients
+    /// so tool activity appears in the streaming view in real-time.
+    ToolActivity {
+        id: String,
+        role: String,
+        content: String,
+        created_at: String,
+        tool_call_id: String,
+        round: u32,
+    },
+    /// All tool calls in a round have completed — emitted after the last
+    /// ToolActivity in the round so the client can close the round's UI group.
+    ToolRoundComplete { round: u32, tool_count: u32 },
+    /// A pre-tool text sub-turn has been committed to the database — emitted before
+    /// tool execution begins so the client can anchor the streaming text to a real
+    /// message ID.
+    ChatSegment {
+        id: String,
+        thread_id: String,
+        content: String,
+        created_at: String,
+    },
 }
 
 impl ThreadEvent {
@@ -63,7 +102,13 @@ impl ThreadEvent {
             ThreadEvent::Token { .. } => "token",
             ThreadEvent::MessageComplete { .. } => "message_complete",
             ThreadEvent::RoutineMessage { .. } => "routine_message",
+            ThreadEvent::SystemEvent { .. } => "system_event",
             ThreadEvent::Error { .. } => "stream_error",
+            ThreadEvent::Retry { .. } => "retry",
+            ThreadEvent::ToolStart { .. } => "tool_start",
+            ThreadEvent::ToolActivity { .. } => "tool_activity",
+            ThreadEvent::ToolRoundComplete { .. } => "tool_round_complete",
+            ThreadEvent::ChatSegment { .. } => "chat_segment",
         }
     }
 }
@@ -172,7 +217,7 @@ impl AppState {
 ///
 /// Per-thread SSE stream.  Each connected client gets its own mpsc channel.
 pub async fn thread_stream(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(thread_id): Path<String>,
 ) -> AppResult<impl IntoResponse> {
     let (tx, rx) = state.subscribe_thread(&thread_id);
@@ -212,7 +257,7 @@ pub async fn thread_stream(
 /// `GET /api/events`
 ///
 /// Global SSE stream backed by a `broadcast` channel.
-pub async fn global_stream(State(state): State<AppState>) -> AppResult<impl IntoResponse> {
+pub async fn global_stream(State(state): State<Arc<AppState>>) -> AppResult<impl IntoResponse> {
     let rx = state.subscribe_global();
 
     // Wrap the broadcast receiver as a Stream using tokio_stream's BroadcastStream,
@@ -262,7 +307,7 @@ pub async fn global_stream(State(state): State<AppState>) -> AppResult<impl Into
 /// dropped (i.e., when the SSE connection is closed by the client or the server).
 struct CleanupStream<S> {
     inner: S,
-    cleanup: Option<(AppState, String, mpsc::Sender<ThreadEvent>)>,
+    cleanup: Option<(Arc<AppState>, String, mpsc::Sender<ThreadEvent>)>,
 }
 
 impl<S> Drop for CleanupStream<S> {
@@ -295,12 +340,11 @@ mod tests {
     use crate::routes::AppState;
     use crate::services::copilot::GlobalEvent;
     use std::collections::HashMap;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, Mutex, RwLock};
     use tokio::sync::broadcast;
 
     fn make_state() -> AppState {
         let (global_tx, _) = broadcast::channel(64);
-        let (agent_tx, _agent_rx) = tokio::sync::mpsc::channel(64);
         let pool = sqlx::SqlitePool::connect_lazy("sqlite::memory:").unwrap();
         let (mcp_tx, _) = tokio::sync::broadcast::channel(1);
         let mcp = crate::services::mcp::McpConnectionManager::new(
@@ -321,12 +365,17 @@ mod tests {
                 fcm_service_account_json: None,
             },
             machine_secret: "test-secret".to_string(),
-            auth_token: "test-token".to_string(),
+            credential_master_key: "test-master-key".to_string(),
+            auth_token: Arc::new(RwLock::new("test-token".to_string())),
             global_tx,
             thread_senders: Arc::new(Mutex::new(HashMap::new())),
-            agent_tx,
+            run_states: dashmap::DashMap::new(),
             copilot: None,
             mcp,
+            built_in_tools: std::sync::Arc::new(vec![]),
+            scheduler_tx: tokio::sync::mpsc::channel(1).0,
+            vapid_public_key: String::new(),
+            vapid_private_pem: String::new(),
         }
     }
 
@@ -477,6 +526,7 @@ mod tests {
             role: "assistant".to_string(),
             content: "hello".to_string(),
             created_at: "2025-01-01".to_string(),
+            stopped: false,
         };
         assert_eq!(e.event_name(), "message_complete");
     }
@@ -503,6 +553,50 @@ mod tests {
             created_at: "2025-01-01".to_string(),
         };
         assert_eq!(e.event_name(), "routine_message");
+    }
+
+    #[test]
+    fn chat_segment_event_name() {
+        let e = ThreadEvent::ChatSegment {
+            id: "m1".to_string(),
+            thread_id: "t1".to_string(),
+            content: "thinking about this...".to_string(),
+            created_at: "2025-01-01".to_string(),
+        };
+        assert_eq!(e.event_name(), "chat_segment");
+    }
+
+    #[test]
+    fn thread_event_tool_start_event_name() {
+        let e = ThreadEvent::ToolStart {
+            tool_name: "read_file".to_string(),
+            tool_call_id: "call_abc123".to_string(),
+            round: 1,
+            input_preview: serde_json::json!({"path": "/tmp/foo.txt"}),
+        };
+        assert_eq!(e.event_name(), "tool_start");
+    }
+
+    #[test]
+    fn thread_event_tool_activity_event_name() {
+        let e = ThreadEvent::ToolActivity {
+            id: "m1".to_string(),
+            role: "tool".to_string(),
+            content: "**Tool result** (`read_file`):\nhello".to_string(),
+            created_at: "2025-01-01".to_string(),
+            tool_call_id: "call_abc123".to_string(),
+            round: 1,
+        };
+        assert_eq!(e.event_name(), "tool_activity");
+    }
+
+    #[test]
+    fn thread_event_tool_round_complete_event_name() {
+        let e = ThreadEvent::ToolRoundComplete {
+            round: 1,
+            tool_count: 3,
+        };
+        assert_eq!(e.event_name(), "tool_round_complete");
     }
 
     #[test]

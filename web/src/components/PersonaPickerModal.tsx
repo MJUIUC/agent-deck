@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { Bot, Chat } from "@carbon/icons-react";
 import type { AgentPersona } from "@/types";
 import styles from "./PersonaPickerModal.module.css";
 
@@ -19,10 +20,17 @@ export function PersonaPickerModal({
 }: PersonaPickerModalProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // Pre-select first persona when modal opens
+  const sorted = [...personas].sort((a, b) => {
+    if (a.is_default && !b.is_default) return -1;
+    if (!a.is_default && b.is_default) return 1;
+    return a.created_at < b.created_at ? -1 : 1;
+  });
+
+  // Pre-select the Default persona when modal opens
   useEffect(() => {
     if (isOpen && personas.length > 0 && !selectedId) {
-      setSelectedId(personas[0].id);
+      const def = personas.find((p) => p.is_default);
+      setSelectedId(def ? def.id : personas[0].id);
     }
   }, [isOpen, personas, selectedId]);
 
@@ -66,11 +74,13 @@ export function PersonaPickerModal({
           isOpen ? styles.modalOpen : styles.modalClosed,
         ].join(" ")}
       >
-        <div className={styles.title}>Choose a persona for this chat</div>
+        <div className={styles.title}>Start a new chat</div>
 
         {personas.length === 0 ? (
           <div className={styles.empty}>
-            <div className={styles.emptyIcon}>🤖</div>
+            <div className={styles.emptyIcon}>
+              <Bot size={36} />
+            </div>
             <div className={styles.emptyTitle}>No personas configured</div>
             <div className={styles.emptyDesc}>
               Set up a persona in Settings before starting a chat.
@@ -78,24 +88,37 @@ export function PersonaPickerModal({
           </div>
         ) : (
           <div className={styles.grid}>
-            {personas.map((persona) => (
-              <div
-                key={persona.id}
-                onClick={() => setSelectedId(persona.id)}
-                className={[
-                  styles.card,
-                  selectedId === persona.id ? styles.cardSelected : "",
-                ].join(" ")}
-              >
-                <div className={styles.cardEmoji}>{persona.emoji}</div>
-                <div className={styles.cardName}>{persona.name}</div>
-                <div className={styles.cardPrompt}>
-                  {persona.system_prompt.length > 60
-                    ? persona.system_prompt.slice(0, 60) + "…"
-                    : persona.system_prompt}
+            {sorted.map((persona) => {
+              const isDefault = persona.is_default;
+              return (
+                <div
+                  key={persona.id}
+                  onClick={() => setSelectedId(persona.id)}
+                  className={[
+                    styles.card,
+                    selectedId === persona.id ? styles.cardSelected : "",
+                  ].join(" ")}
+                >
+                  <div className={styles.cardEmoji}>
+                    {isDefault ? <Chat size={20} /> : persona.emoji}
+                  </div>
+                  <div className={styles.cardName}>
+                    {isDefault ? "None" : persona.name}
+                  </div>
+                  {isDefault ? (
+                    <div className={styles.cardHint}>
+                      Long-term memory not available
+                    </div>
+                  ) : (
+                    <div className={styles.cardPrompt}>
+                      {persona.system_prompt.length > 60
+                        ? persona.system_prompt.slice(0, 60) + "…"
+                        : persona.system_prompt}
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 

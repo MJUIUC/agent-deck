@@ -1,13 +1,26 @@
-import { useState, useEffect, useRef, useCallback } from "react";
-import type { Thread, McpServer, McpTool, Provider, Model } from "@/types";
+import { useState, useEffect, useCallback } from "react";
+import { useSseStore } from "@/stores/useSseStore";
+import cronstrue from "cronstrue";
+import type {
+  Thread,
+  McpServer,
+  McpTool,
+  Provider,
+  Model,
+  Routine,
+  MemoryEntry,
+} from "@/types";
 import {
   threadsApi,
   mcpServersApi,
   providersApi,
   modelsApi,
+  routinesApi,
+  memoriesApi,
 } from "@/api/client";
 import { X, ChevronRight, Settings } from "lucide-react";
 import styles from "./ConfigPane.module.css";
+import { CronPicker } from "./CronPicker";
 
 // ─── Sub-types ────────────────────────────────────────────────────────────────
 
@@ -389,32 +402,19 @@ function ProviderModelSelector({
 function AttachServerPicker({
   attachedIds,
   onAttach,
-  onClose,
 }: {
   attachedIds: Set<string>;
   onAttach: (server: McpServer) => void;
-  onClose: () => void;
 }) {
   const [allServers, setAllServers] = useState<McpServer[]>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
-  const ref = useRef<HTMLDivElement>(null);
-
   useEffect(() => {
     mcpServersApi.list().then(({ data }) => {
       setAllServers(data);
       setLoading(false);
     });
   }, []);
-
-  // Click-outside to close
-  useEffect(() => {
-    function handler(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
-    }
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [onClose]);
 
   const available = allServers.filter(
     (s) =>
@@ -425,13 +425,8 @@ function AttachServerPicker({
   );
 
   return (
-    <div className={styles.pickerOverlay} ref={ref}>
-      <div className={styles.pickerHeader}>
-        <span className={styles.pickerTitle}>Attach MCP Server</span>
-        <button className={styles.pickerClose} onClick={onClose}>
-          <X size={12} />
-        </button>
-      </div>
+    <div className={styles.pickerOverlay}>
+      <div className={styles.pickerTitle}>Attach MCP Server</div>
       <input
         className={styles.pickerSearch}
         type="text"
@@ -499,13 +494,21 @@ export function ConfigPane({
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
   const [isArchiving, setIsArchiving] = useState(false);
 
-  // ── Tool activity ──
-  const [showToolActivity, setShowToolActivity] = useState(
-    thread.show_tool_activity ?? false,
+  // ── System events ──
+  const [showSystemEvents, setShowSystemEvents] = useState(
+    thread.show_system_events ?? false,
   );
-  const [isSavingToolActivity, setIsSavingToolActivity] = useState(false);
+  const [isSavingSystemEvents, setIsSavingSystemEvents] = useState(false);
+
+  // ── Auto-summarize ──
+  const [autoSummarize, setAutoSummarize] = useState(
+    thread.auto_summarize ?? true,
+  );
+  const [isSavingAutoSummarize, setIsSavingAutoSummarize] = useState(false);
 
   // ── MCP servers ──
+  const lastMcpStatusChange = useSseStore((s) => s.lastMcpStatusChange);
+
   const [attachedEntries, setAttachedEntries] = useState<ThreadMcpEntry[]>([]);
   const [mcpServersMap, setMcpServersMap] = useState<Record<string, McpServer>>(
     {},
@@ -516,13 +519,57 @@ export function ConfigPane({
   const [showAttachPicker, setShowAttachPicker] = useState(false);
   const [mcpLoading, setMcpLoading] = useState(false);
 
+  // ── Routines ──
+  const [routines, setRoutines] = useState<Routine[]>([]);
+  const [routinesLoading, setRoutinesLoading] = useState(false);
+  const [showRoutineForm, setShowRoutineForm] = useState(false);
+  const [editingRoutine, setEditingRoutine] = useState<Routine | null>(null);
+  // Routine form state
+  const [routineFormName, setRoutineFormName] = useState("");
+  const [routineFormPrompt, setRoutineFormPrompt] = useState("");
+  const [routineFormCron, setRoutineFormCron] = useState("0 9 * * *");
+  const [routineFormSaving, setRoutineFormSaving] = useState(false);
+  const [routineFormError, setRoutineFormError] = useState<string | null>(null);
+  const [deletingRoutineId, setDeletingRoutineId] = useState<string | null>(
+    null,
+  );
+  const [routinesExpanded, setRoutinesExpanded] = useState(false);
+  const [mcpExpanded, setMcpExpanded] = useState(false);
+
+  // ── Persona memories ──
+  const [personaMemories, setPersonaMemories] = useState<MemoryEntry[]>([]);
+  const [personaMemoriesLoading, setPersonaMemoriesLoading] = useState(false);
+  const [personaMemoriesTotal, setPersonaMemoriesTotal] = useState(0);
+
+  // ── Advanced collapsible ──
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [deletingMemoryId, setDeletingMemoryId] = useState<string | null>(null);
+  const [memoriesExpanded, setMemoriesExpanded] = useState(false);
+
   // Sync local state when thread prop changes (different thread selected)
   useEffect(() => {
     setAddendum(thread.system_prompt_addendum ?? "");
-    setShowToolActivity(thread.show_tool_activity ?? false);
+    setShowSystemEvents(thread.show_system_events ?? false);
+    setAutoSummarize(thread.auto_summarize ?? true);
     setShowAttachPicker(false);
     setShowArchiveConfirm(false);
-  }, [thread.id, thread.system_prompt_addendum, thread.show_tool_activity]);
+    // Reset routines form state on thread switch
+    setRoutines([]);
+    setShowRoutineForm(false);
+    setEditingRoutine(null);
+    setRoutineFormError(null);
+    // Reset persona memories on thread switch
+    setPersonaMemories([]);
+    setPersonaMemoriesTotal(0);
+    setAdvancedOpen(false);
+    setDeletingMemoryId(null);
+    setMemoriesExpanded(false);
+  }, [
+    thread.id,
+    thread.system_prompt_addendum,
+    thread.show_system_events,
+    thread.auto_summarize,
+  ]);
 
   // Load attached MCP servers whenever the pane opens or thread changes
   useEffect(() => {
@@ -558,6 +605,99 @@ export function ConfigPane({
     };
   }, [isOpen, thread.id]);
 
+  // Load persona memories whenever the pane opens or persona changes
+  useEffect(() => {
+    if (!isOpen) return;
+    const p = thread.persona;
+    if (!p || p.is_default) {
+      setPersonaMemories([]);
+      return;
+    }
+    let cancelled = false;
+    async function load() {
+      setPersonaMemoriesLoading(true);
+      try {
+        const res = await memoriesApi.list(p!.id, { limit: 20 });
+        if (!cancelled) {
+          setPersonaMemories(res.data.memories);
+          setPersonaMemoriesTotal(res.data.total_count);
+        }
+      } catch {
+        // ignore
+      } finally {
+        if (!cancelled) setPersonaMemoriesLoading(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, thread.persona?.id, thread.persona?.is_default]);
+
+  // React to MCP server status changes broadcast over the global SSE stream.
+  // Updates the status badge in place and auto-loads tools when a server
+  // transitions to "connected" so the card reflects live state without a
+  // manual refresh.
+  useEffect(() => {
+    if (!lastMcpStatusChange) return;
+    const { mcp_server_id, status } = lastMcpStatusChange;
+
+    // Update the server's status in our local map if we know about it
+    setMcpServersMap((prev) => {
+      if (!prev[mcp_server_id]) return prev;
+      return {
+        ...prev,
+        [mcp_server_id]: {
+          ...prev[mcp_server_id],
+          status: status as McpServer["status"],
+        },
+      };
+    });
+
+    // If the server just connected and is attached to this thread, load its tools
+    if (status === "connected") {
+      setAttachedEntries((entries) => {
+        const isAttached = entries.some(
+          (e) => e.mcp_server_id === mcp_server_id,
+        );
+        if (isAttached) {
+          mcpServersApi
+            .listTools(mcp_server_id)
+            .then(({ data: tools }) => {
+              setToolsMap((prev) => ({ ...prev, [mcp_server_id]: tools }));
+            })
+            .catch(() => {
+              setToolsMap((prev) => ({ ...prev, [mcp_server_id]: [] }));
+            });
+        }
+        return entries;
+      });
+    }
+  }, [lastMcpStatusChange]);
+
+  // Load routines whenever the pane opens or thread changes
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+
+    async function loadRoutines() {
+      setRoutinesLoading(true);
+      try {
+        const res = await routinesApi.list(thread.id);
+        if (!cancelled) setRoutines(res.data);
+      } catch {
+        /* non-critical */
+      } finally {
+        if (!cancelled) setRoutinesLoading(false);
+      }
+    }
+
+    loadRoutines();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, thread.id]);
+
   // ── Handlers ──
 
   const handleAddendumBlur = async () => {
@@ -570,6 +710,10 @@ export function ConfigPane({
         system_prompt_addendum: current || undefined,
       });
       onThreadUpdated(res.data);
+      // Notify connected clients about the addendum change
+      threadsApi.notify(thread.id, "addendum_updated").catch(() => {
+        /* silently degrade */
+      });
     } catch {
       setAddendum(thread.system_prompt_addendum ?? "");
     } finally {
@@ -577,18 +721,35 @@ export function ConfigPane({
     }
   };
 
-  const handleToolActivityChange = async (value: boolean) => {
-    setShowToolActivity(value);
-    setIsSavingToolActivity(true);
+  const handleSystemEventsChange = async (value: boolean) => {
+    setShowSystemEvents(value);
+    setIsSavingSystemEvents(true);
     try {
       const res = await threadsApi.update(thread.id, {
-        show_tool_activity: value,
+        show_system_events: value,
       });
       onThreadUpdated(res.data);
     } catch {
-      setShowToolActivity(!value);
+      setShowSystemEvents(!value);
     } finally {
-      setIsSavingToolActivity(false);
+      setIsSavingSystemEvents(false);
+    }
+  };
+
+  const handleAutoSummarizeChange = async (val: boolean) => {
+    setAutoSummarize(val);
+    setIsSavingAutoSummarize(true);
+    try {
+      const res = await threadsApi.update(thread.id, {
+        auto_summarize: val,
+      });
+      if (res.data) {
+        onThreadUpdated(res.data);
+      }
+    } catch {
+      setAutoSummarize(!val); // revert on error
+    } finally {
+      setIsSavingAutoSummarize(false);
     }
   };
 
@@ -602,6 +763,17 @@ export function ConfigPane({
         // Server returns the updated thread with UUID fields — upserts the store,
         // which reactively updates ChatHeader and any other thread consumers.
         onThreadUpdated(res.data);
+
+        // Notify the thread about the model switch so system events are recorded
+        // Look up the display names from the updated thread for the notify payload
+        threadsApi
+          .notify(thread.id, "model_switched", {
+            provider_name: res.data.active_provider ?? "unknown",
+            model_name: res.data.active_model ?? "unknown",
+          })
+          .catch(() => {
+            /* silently degrade */
+          });
       } catch {
         // silently degrade — UI local state already updated optimistically
       }
@@ -610,11 +782,20 @@ export function ConfigPane({
   );
 
   const handleDetachServer = async (mcpServerId: string) => {
+    const server = mcpServersMap[mcpServerId];
     try {
       await threadsApi.detachMcpServer(thread.id, mcpServerId);
       setAttachedEntries((prev) =>
         prev.filter((e) => e.mcp_server_id !== mcpServerId),
       );
+      // Notify thread about detach
+      if (server) {
+        threadsApi
+          .notify(thread.id, "mcp_server_detached", { name: server.name })
+          .catch(() => {
+            /* silently degrade */
+          });
+      }
     } catch {
       // silently degrade
     }
@@ -629,6 +810,12 @@ export function ConfigPane({
       );
       setAttachedEntries((prev) => [...prev, entry]);
       setMcpServersMap((prev) => ({ ...prev, [server.id]: server }));
+      // Notify thread about attach
+      threadsApi
+        .notify(thread.id, "mcp_server_attached", { name: server.name })
+        .catch(() => {
+          /* silently degrade */
+        });
     } catch {
       // silently degrade
     }
@@ -642,6 +829,100 @@ export function ConfigPane({
       setToolsMap((prev) => ({ ...prev, [serverId]: [] }));
     }
   };
+
+  // ── Routine helpers ──
+
+  function openAddForm() {
+    setEditingRoutine(null);
+    setRoutineFormName("");
+    setRoutineFormPrompt("");
+    setRoutineFormCron("0 9 * * *");
+    setRoutineFormError(null);
+    setShowRoutineForm(true);
+  }
+
+  function openEditForm(r: Routine) {
+    setEditingRoutine(r);
+    setRoutineFormName(r.name);
+    setRoutineFormPrompt(r.prompt);
+    setRoutineFormCron(r.cron_expr);
+    setRoutineFormError(null);
+    setShowRoutineForm(true);
+  }
+
+  function closeRoutineForm() {
+    setShowRoutineForm(false);
+    setEditingRoutine(null);
+    setRoutineFormError(null);
+  }
+
+  async function handleRoutineSave() {
+    if (!routineFormName.trim()) {
+      setRoutineFormError("Name is required");
+      return;
+    }
+    if (!routineFormPrompt.trim()) {
+      setRoutineFormError("Prompt is required");
+      return;
+    }
+    if (!routineFormCron.trim()) {
+      setRoutineFormError("Schedule is required");
+      return;
+    }
+    setRoutineFormSaving(true);
+    setRoutineFormError(null);
+    try {
+      if (editingRoutine) {
+        const res = await routinesApi.update(thread.id, editingRoutine.id, {
+          name: routineFormName.trim(),
+          prompt: routineFormPrompt.trim(),
+          cron_expr: routineFormCron.trim(),
+        });
+        setRoutines((rs) =>
+          rs.map((r) => (r.id === editingRoutine.id ? res.data : r)),
+        );
+      } else {
+        const res = await routinesApi.create(thread.id, {
+          name: routineFormName.trim(),
+          prompt: routineFormPrompt.trim(),
+          cron_expr: routineFormCron.trim(),
+        });
+        setRoutines((rs) => [...rs, res.data]);
+      }
+      closeRoutineForm();
+    } catch (e) {
+      setRoutineFormError(
+        e instanceof Error ? e.message : "Failed to save routine",
+      );
+    } finally {
+      setRoutineFormSaving(false);
+    }
+  }
+
+  async function handleRoutineToggle(routineId: string) {
+    try {
+      const res = await routinesApi.toggle(thread.id, routineId);
+      setRoutines((rs) =>
+        rs.map((r) =>
+          r.id === routineId ? { ...r, enabled: res.data.enabled } : r,
+        ),
+      );
+    } catch {
+      /* non-critical */
+    }
+  }
+
+  async function handleRoutineDelete(routineId: string) {
+    setDeletingRoutineId(routineId);
+    try {
+      await routinesApi.delete(thread.id, routineId);
+      setRoutines((rs) => rs.filter((r) => r.id !== routineId));
+    } catch {
+      /* non-critical */
+    } finally {
+      setDeletingRoutineId(null);
+    }
+  }
 
   const handleArchiveClick = () => setShowArchiveConfirm(true);
 
@@ -659,6 +940,22 @@ export function ConfigPane({
   };
 
   const handleArchiveCancel = () => setShowArchiveConfirm(false);
+
+  const handleMemoryDelete = async (memoryId: string) => {
+    if (!thread.persona || thread.persona.is_default) return;
+    setDeletingMemoryId(memoryId);
+    try {
+      await memoriesApi.delete(thread.persona.id, memoryId);
+      setPersonaMemories((ms) => ms.filter((m) => m.id !== memoryId));
+      setPersonaMemoriesTotal((t) => Math.max(0, t - 1));
+    } catch {
+      /* non-critical */
+    } finally {
+      setDeletingMemoryId(null);
+    }
+  };
+
+  const SHOW_LIMIT = 2;
 
   const persona = thread.persona;
   const attachedIds = new Set(attachedEntries.map((e) => e.mcp_server_id));
@@ -750,15 +1047,140 @@ export function ConfigPane({
           <div className={styles.section}>
             <div className={styles.sectionHeader}>
               <span className={styles.sectionTitle}>Routines</span>
-              <button className={styles.addBtn} disabled title="Coming soon">
-                ＋ Add
+              <button
+                className={showRoutineForm ? styles.cancelBtn : styles.addBtn}
+                onClick={showRoutineForm ? closeRoutineForm : openAddForm}
+                disabled={routineFormSaving}
+              >
+                {showRoutineForm ? "✕ Cancel" : "＋ Add"}
               </button>
             </div>
-            <div className={styles.emptyState}>
-              <p className={styles.emptyStateText}>
-                No routines yet. Add one to schedule automated messages.
-              </p>
-            </div>
+
+            {routinesLoading ? (
+              <div className={styles.emptyHint}>Loading…</div>
+            ) : (
+              <div className={styles.routineList}>
+                {routines.length === 0 && !showRoutineForm && (
+                  <div className={styles.emptyHint}>No routines yet.</div>
+                )}
+
+                {routines
+                  .slice(0, routinesExpanded ? routines.length : SHOW_LIMIT)
+                  .map((r) => (
+                    <div key={r.id} className={styles.routineCard}>
+                      <div className={styles.routineCardTop}>
+                        <Toggle
+                          checked={r.enabled}
+                          onChange={() => handleRoutineToggle(r.id)}
+                        />
+                        <div className={styles.routineCardInfo}>
+                          <div className={styles.routineName}>{r.name}</div>
+                          <div className={styles.routineCron}>
+                            {(() => {
+                              try {
+                                return cronstrue.toString(r.cron_expr);
+                              } catch {
+                                return r.cron_expr;
+                              }
+                            })()}
+                          </div>
+                        </div>
+                        <div className={styles.routineCardActions}>
+                          <button
+                            className={styles.routineEditBtn}
+                            onClick={() => openEditForm(r)}
+                            title="Edit"
+                          >
+                            ✎
+                          </button>
+                          <button
+                            className={styles.routineDeleteBtn}
+                            onClick={() => handleRoutineDelete(r.id)}
+                            disabled={deletingRoutineId === r.id}
+                            title="Delete"
+                          >
+                            {deletingRoutineId === r.id ? "…" : "✕"}
+                          </button>
+                        </div>
+                      </div>
+                      <div className={styles.routinePromptPreview}>
+                        {r.prompt.length > 80
+                          ? r.prompt.slice(0, 80) + "…"
+                          : r.prompt}
+                      </div>
+                    </div>
+                  ))}
+
+                {routines.length > SHOW_LIMIT && !showRoutineForm && (
+                  <button
+                    className={styles.showMoreBtn}
+                    onClick={() => setRoutinesExpanded((e) => !e)}
+                  >
+                    {routinesExpanded
+                      ? "Show less"
+                      : `Show ${routines.length - SHOW_LIMIT} more`}
+                  </button>
+                )}
+
+                {/* ── Inline add/edit form ── */}
+                {showRoutineForm && (
+                  <div className={styles.routineForm}>
+                    <div className={styles.routineFormTitle}>
+                      {editingRoutine ? "Edit Routine" : "New Routine"}
+                    </div>
+
+                    <label className={styles.routineFormLabel}>Name</label>
+                    <input
+                      className={styles.routineFormInput}
+                      placeholder="e.g. Morning Briefing"
+                      value={routineFormName}
+                      onChange={(e) => setRoutineFormName(e.target.value)}
+                      disabled={routineFormSaving}
+                    />
+
+                    <label className={styles.routineFormLabel}>Prompt</label>
+                    <textarea
+                      className={styles.routineFormTextarea}
+                      placeholder="What should the agent do when this fires?"
+                      value={routineFormPrompt}
+                      onChange={(e) => setRoutineFormPrompt(e.target.value)}
+                      disabled={routineFormSaving}
+                      rows={3}
+                    />
+
+                    <label className={styles.routineFormLabel}>Schedule</label>
+                    <input
+                      className={styles.routineFormInput}
+                      style={{ fontFamily: "monospace" }}
+                      placeholder="0 9 * * *"
+                      value={routineFormCron}
+                      onChange={(e) => setRoutineFormCron(e.target.value)}
+                      disabled={routineFormSaving}
+                    />
+                    <CronPicker
+                      value={routineFormCron}
+                      onChange={setRoutineFormCron}
+                    />
+
+                    {routineFormError && (
+                      <div className={styles.routineFormError}>
+                        {routineFormError}
+                      </div>
+                    )}
+
+                    <div className={styles.routineFormActions}>
+                      <button
+                        className={styles.routineFormSave}
+                        onClick={handleRoutineSave}
+                        disabled={routineFormSaving}
+                      >
+                        {routineFormSaving ? "Saving…" : "Save"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className={styles.divider} />
@@ -767,6 +1189,12 @@ export function ConfigPane({
           <div className={styles.section}>
             <div className={styles.sectionHeader}>
               <span className={styles.sectionTitle}>MCP Servers</span>
+              <button
+                className={showAttachPicker ? styles.cancelBtn : styles.addBtn}
+                onClick={() => setShowAttachPicker((o) => !o)}
+              >
+                {showAttachPicker ? "✕ Cancel" : "＋ Add"}
+              </button>
             </div>
 
             {mcpLoading ? (
@@ -776,131 +1204,246 @@ export function ConfigPane({
                 {attachedEntries.length === 0 && (
                   <div className={styles.emptyHint}>No servers attached.</div>
                 )}
-                {attachedEntries.map((entry) => {
-                  const server = mcpServersMap[entry.mcp_server_id];
-                  if (!server) return null;
-                  return (
-                    <McpServerCard
-                      key={entry.id}
-                      server={server}
-                      tools={toolsMap[server.id] ?? null}
-                      onRemove={() => handleDetachServer(server.id)}
-                      onLoadTools={() => handleLoadTools(server.id)}
-                    />
-                  );
-                })}
+                {attachedEntries
+                  .slice(0, mcpExpanded ? attachedEntries.length : SHOW_LIMIT)
+                  .map((entry) => {
+                    const server = mcpServersMap[entry.mcp_server_id];
+                    if (!server) return null;
+                    return (
+                      <McpServerCard
+                        key={entry.id}
+                        server={server}
+                        tools={toolsMap[server.id] ?? null}
+                        onRemove={() => handleDetachServer(server.id)}
+                        onLoadTools={() => handleLoadTools(server.id)}
+                      />
+                    );
+                  })}
 
-                {/* Attach button */}
-                <div className={styles.mcpAttachWrap}>
+                {attachedEntries.length > SHOW_LIMIT && !showAttachPicker && (
                   <button
-                    className={styles.mcpAttachBtn}
-                    onClick={() => setShowAttachPicker((o) => !o)}
+                    className={styles.showMoreBtn}
+                    onClick={() => setMcpExpanded((e) => !e)}
                   >
-                    ＋ Attach server
+                    {mcpExpanded
+                      ? "Show less"
+                      : `Show ${attachedEntries.length - SHOW_LIMIT} more`}
                   </button>
-                  {showAttachPicker && (
-                    <AttachServerPicker
-                      attachedIds={attachedIds}
-                      onAttach={handleAttachServer}
-                      onClose={() => setShowAttachPicker(false)}
-                    />
-                  )}
-                </div>
+                )}
+
+                {showAttachPicker && (
+                  <AttachServerPicker
+                    attachedIds={attachedIds}
+                    onAttach={handleAttachServer}
+                  />
+                )}
               </div>
             )}
-
-            {/* Tool activity toggle — inside MCP section, after server list */}
-            <div className={styles.toolActivityRow}>
-              <div className={styles.toolActivityInfo}>
-                <div className={styles.toolActivityLabel}>
-                  Show tool activity in chat
-                </div>
-                <div className={styles.toolActivityHint}>
-                  Display tool calls and results inline in the conversation
-                </div>
-              </div>
-              <Toggle
-                checked={showToolActivity}
-                onChange={handleToolActivityChange}
-                disabled={isSavingToolActivity}
-              />
-            </div>
           </div>
 
           <div className={styles.divider} />
 
-          {/* ── System Prompt Addendum ── */}
+          {/* ── Advanced ── */}
           <div className={styles.section}>
-            <div className={styles.sectionHeader}>
-              <span className={styles.sectionTitle}>
-                System Prompt Addendum
+            <button
+              className={styles.advancedToggle}
+              onClick={() => setAdvancedOpen((o) => !o)}
+            >
+              <span className={styles.advancedToggleLabel}>Advanced</span>
+              <span
+                className={[
+                  styles.selectorArrow,
+                  advancedOpen ? styles.selectorArrowOpen : "",
+                ].join(" ")}
+              >
+                ›
               </span>
-              <span className={styles.sectionSubtitle}>
-                {isSavingAddendum ? "Saving…" : "editable any time"}
-              </span>
-            </div>
-            <textarea
-              className={styles.addendumTextarea}
-              placeholder="Additional instructions appended to this persona's system prompt for this thread only…"
-              value={addendum}
-              onChange={(e) => setAddendum(e.target.value)}
-              onBlur={handleAddendumBlur}
-              disabled={isSavingAddendum}
-            />
-            <div className={styles.fieldHint}>
-              {persona
-                ? `This text is appended to ${persona.name}'s base system prompt for this thread only.`
-                : "This text is appended to the persona's system prompt for this thread only."}
-            </div>
-          </div>
+            </button>
 
-          {/* ── Archive ── */}
-          {onArchiveThread && (
-            <>
-              <div className={styles.divider} />
-              <div className={styles.section}>
-                <div className={styles.sectionHeader}>
-                  <span className={styles.sectionTitle}>Danger Zone</span>
-                </div>
-                {showArchiveConfirm ? (
-                  <div className={styles.archiveConfirm}>
-                    <p className={styles.archiveConfirmText}>
-                      Archive this thread? It will be hidden from your chat list
-                      and moved to <strong>Settings → Archived Threads</strong>.
-                    </p>
-                    <p className={styles.archiveConfirmWarning}>
-                      ⚠️ There is currently no way to restore an archived
-                      thread. Restore functionality is planned for a future
-                      update.
-                    </p>
-                    <div className={styles.archiveConfirmActions}>
-                      <button
-                        className={styles.archiveCancelBtn}
-                        onClick={handleArchiveCancel}
-                        disabled={isArchiving}
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        className={styles.archiveConfirmBtn}
-                        onClick={handleArchiveConfirm}
-                        disabled={isArchiving}
-                      >
-                        {isArchiving ? "Archiving…" : "Yes, archive it"}
-                      </button>
+            {advancedOpen && (
+              <div className={styles.advancedBody}>
+                {/* Memory — only for non-default persona */}
+                {persona && !persona.is_default && (
+                  <>
+                    <div className={styles.advancedSectionTitle}>Memory</div>
+                    <div className={styles.advancedMemoryCount}>
+                      {personaMemoriesTotal} / 500 memories
+                      {personaMemoriesTotal > 400 && (
+                        <span className={styles.advancedMemoryWarning}>
+                          {" "}
+                          · Approaching limit
+                        </span>
+                      )}
+                    </div>
+                    {personaMemoriesLoading ? (
+                      <div className={styles.emptyHint}>Loading…</div>
+                    ) : personaMemories.length === 0 ? (
+                      <div className={styles.emptyHint}>
+                        No memories stored for this persona yet.
+                      </div>
+                    ) : (
+                      <div className={styles.memoryList}>
+                        {personaMemories
+                          .slice(
+                            0,
+                            memoriesExpanded
+                              ? personaMemories.length
+                              : SHOW_LIMIT,
+                          )
+                          .map((m) => (
+                            <div key={m.id} className={styles.memoryEntry}>
+                              <div className={styles.memoryEntryBody}>
+                                <div className={styles.memoryContent}>
+                                  {m.content}
+                                </div>
+                                <div className={styles.memoryMeta}>
+                                  {new Date(m.created_at).toLocaleDateString()}
+                                  {m.thread_title &&
+                                    ` · from "${m.thread_title}"`}
+                                </div>
+                              </div>
+                              <button
+                                className={styles.memoryDeleteBtn}
+                                onClick={() => handleMemoryDelete(m.id)}
+                                disabled={deletingMemoryId === m.id}
+                                title="Delete memory"
+                              >
+                                {deletingMemoryId === m.id ? "…" : "✕"}
+                              </button>
+                            </div>
+                          ))}
+                        {personaMemories.length > SHOW_LIMIT && (
+                          <button
+                            className={styles.showMoreBtn}
+                            onClick={() => setMemoriesExpanded((e) => !e)}
+                          >
+                            {memoriesExpanded
+                              ? "Show less"
+                              : `Show ${personaMemories.length - SHOW_LIMIT} more`}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    <div className={styles.advancedDivider} />
+                  </>
+                )}
+
+                {/* Show system events toggle */}
+                <div className={styles.toolActivityRow}>
+                  <div className={styles.toolActivityInfo}>
+                    <div className={styles.toolActivityLabel}>
+                      Show system events in chat
+                    </div>
+                    <div className={styles.toolActivityHint}>
+                      Display model switches, MCP attach/detach, and other
+                      events
                     </div>
                   </div>
-                ) : (
-                  <button
-                    className={styles.archiveBtn}
-                    onClick={handleArchiveClick}
+                  <Toggle
+                    checked={showSystemEvents}
+                    onChange={handleSystemEventsChange}
+                    disabled={isSavingSystemEvents}
+                  />
+                </div>
+
+                {/* Auto-summarize toggle */}
+                <div className={styles.toolActivityRow}>
+                  <div className={styles.toolActivityInfo}>
+                    <div className={styles.toolActivityLabel}>
+                      Auto-summarize conversation
+                    </div>
+                    <div className={styles.toolActivityHint}>
+                      Automatically summarizes older messages to maintain
+                      context across long conversations
+                    </div>
+                  </div>
+                  <Toggle
+                    checked={autoSummarize}
+                    onChange={handleAutoSummarizeChange}
+                    disabled={isSavingAutoSummarize}
+                  />
+                </div>
+
+                {/* Last summarized hint */}
+                {thread.summary && thread.summary_updated_at && (
+                  <div
+                    className={styles.fieldHint}
+                    style={{ marginTop: 6, marginBottom: 4 }}
                   >
-                    📦 Archive Thread
-                  </button>
+                    Last summarized ·{" "}
+                    {new Date(thread.summary_updated_at).toLocaleDateString()} ·{" "}
+                    {thread.summary_message_count} messages covered
+                  </div>
+                )}
+
+                <div className={styles.advancedDivider} />
+
+                {/* System Prompt Addendum */}
+                <div className={styles.advancedSectionTitle}>
+                  System Prompt Addendum
+                  <span className={styles.advancedSectionHint}>
+                    {isSavingAddendum ? " · Saving…" : ""}
+                  </span>
+                </div>
+                <textarea
+                  className={styles.addendumTextarea}
+                  placeholder="Additional instructions appended to this persona's system prompt for this thread only…"
+                  value={addendum}
+                  onChange={(e) => setAddendum(e.target.value)}
+                  onBlur={handleAddendumBlur}
+                  disabled={isSavingAddendum}
+                />
+                <div className={styles.fieldHint}>
+                  {persona
+                    ? `Appended to ${persona.name}'s system prompt for this thread only.`
+                    : "Appended to the persona's system prompt for this thread only."}
+                </div>
+
+                {/* Archive */}
+                {onArchiveThread && (
+                  <>
+                    <div className={styles.advancedDivider} />
+                    {showArchiveConfirm ? (
+                      <div className={styles.archiveConfirm}>
+                        <p className={styles.archiveConfirmText}>
+                          Archive this thread? It will be hidden from your chat
+                          list and moved to{" "}
+                          <strong>Settings → Archived Threads</strong>.
+                        </p>
+                        <p className={styles.archiveConfirmWarning}>
+                          ⚠️ There is currently no way to restore an archived
+                          thread.
+                        </p>
+                        <div className={styles.archiveConfirmActions}>
+                          <button
+                            className={styles.archiveCancelBtn}
+                            onClick={handleArchiveCancel}
+                            disabled={isArchiving}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            className={styles.archiveConfirmBtn}
+                            onClick={handleArchiveConfirm}
+                            disabled={isArchiving}
+                          >
+                            {isArchiving ? "Archiving…" : "Yes, archive it"}
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        className={styles.archiveBtn}
+                        onClick={handleArchiveClick}
+                      >
+                        📦 Archive Thread
+                      </button>
+                    )}
+                  </>
                 )}
               </div>
-            </>
-          )}
+            )}
+          </div>
         </div>
         {/* /body */}
       </div>

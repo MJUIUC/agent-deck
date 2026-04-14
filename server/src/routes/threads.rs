@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -8,11 +10,12 @@ use serde::Deserialize;
 use serde_json::json;
 use uuid::Uuid;
 
+use crate::services::scheduler::SchedulerCommand;
+
 use crate::{
     error::{AppError, AppResult},
     models::thread::{AttachMcpServer, CreateThread, Thread, ThreadMcpServer, UpdateThread},
     routes::AppState,
-    services::agent,
 };
 
 /// Helper: get the single user id from the DB.
@@ -32,7 +35,7 @@ pub struct ListThreadsQuery {
 /// GET /api/threads
 /// Optional query param: ?status=archived (default: active)
 pub async fn list(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Query(query): Query<ListThreadsQuery>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
@@ -48,7 +51,9 @@ pub async fn list(
 
     let threads: Vec<Thread> = sqlx::query_as(
         "SELECT id, user_id, persona_id, title, active_model, active_provider,
-                system_prompt_addendum, status, show_tool_activity, created_at, updated_at
+                system_prompt_addendum, status, show_tool_activity, show_system_events,
+                summary, summary_updated_at, summary_message_count, auto_summarize,
+                created_at, updated_at
          FROM threads
          WHERE user_id = ? AND status = ?
          ORDER BY updated_at DESC",
@@ -58,19 +63,76 @@ pub async fn list(
     .fetch_all(&state.pool)
     .await?;
 
-    Ok((StatusCode::OK, Json(json!({ "data": threads }))))
+    // Fetch the last visible message content for each thread in one query,
+    // then merge into the response. Using a separate query with GROUP BY is
+    // simpler than a correlated subquery and works well with SQLx's type system.
+    let previews: Vec<(String, String)> = sqlx::query_as(
+        "SELECT thread_id, content
+         FROM messages
+         WHERE (thread_id, created_at) IN (
+             SELECT thread_id, MAX(created_at)
+             FROM messages
+             WHERE thread_id IN (
+                 SELECT id FROM threads WHERE user_id = ? AND status = ?
+             )
+             AND visibility = 'visible'
+             AND role IN ('user', 'assistant')
+             GROUP BY thread_id
+         )",
+    )
+    .bind(&user_id)
+    .bind(status)
+    .fetch_all(&state.pool)
+    .await
+    .unwrap_or_default();
+
+    let preview_map: std::collections::HashMap<String, String> = previews
+        .into_iter()
+        .map(|(tid, content)| {
+            // Truncate to 120 chars, collapse newlines to spaces
+            let truncated = content
+                .lines()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .chars()
+                .take(120)
+                .collect::<String>();
+            (tid, truncated)
+        })
+        .collect();
+
+    let response: Vec<serde_json::Value> = threads
+        .into_iter()
+        .map(|t| {
+            let preview = preview_map.get(&t.id).cloned();
+            let mut v = serde_json::to_value(&t).unwrap_or(serde_json::Value::Null);
+            if let serde_json::Value::Object(ref mut map) = v {
+                map.insert(
+                    "last_message_preview".to_string(),
+                    preview
+                        .map(serde_json::Value::String)
+                        .unwrap_or(serde_json::Value::Null),
+                );
+            }
+            v
+        })
+        .collect();
+
+    Ok((StatusCode::OK, Json(json!({ "data": response }))))
 }
 
 /// GET /api/threads/:id
 pub async fn get(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
 
     let thread: Option<Thread> = sqlx::query_as(
         "SELECT id, user_id, persona_id, title, active_model, active_provider,
-                system_prompt_addendum, status, show_tool_activity, created_at, updated_at
+                system_prompt_addendum, status, show_tool_activity, show_system_events,
+                summary, summary_updated_at, summary_message_count, auto_summarize,
+                created_at, updated_at
          FROM threads
          WHERE id = ? AND user_id = ?",
     )
@@ -87,39 +149,56 @@ pub async fn get(
 
 /// POST /api/threads
 pub async fn create(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Json(payload): Json<CreateThread>,
 ) -> AppResult<impl IntoResponse> {
-    if payload.persona_id.trim().is_empty() {
-        return Err(AppError::BadRequest(
-            "persona_id must not be empty".to_string(),
-        ));
-    }
-
     let user_id = get_user_id(&state).await?;
 
-    // Verify the persona exists and belongs to this user
-    let persona_exists: Option<(String,)> =
-        sqlx::query_as("SELECT id FROM agent_personas WHERE id = ? AND user_id = ?")
-            .bind(&payload.persona_id)
+    // Resolve the persona_id: use the provided one (with ownership check) or fall back to Default
+    let resolved_persona_id = match payload.persona_id.as_deref().filter(|s| !s.is_empty()) {
+        Some(id) => {
+            // Verify the persona exists and belongs to this user
+            let persona_exists: Option<(String,)> =
+                sqlx::query_as("SELECT id FROM agent_personas WHERE id = ? AND user_id = ?")
+                    .bind(id)
+                    .bind(&user_id)
+                    .fetch_optional(&state.pool)
+                    .await?;
+
+            if persona_exists.is_none() {
+                return Err(AppError::BadRequest(format!("Persona '{}' not found", id)));
+            }
+
+            id.to_string()
+        }
+        None => {
+            let default: Option<(String,)> = sqlx::query_as(
+                "SELECT id FROM agent_personas WHERE user_id = ? AND is_default = 1 LIMIT 1",
+            )
             .bind(&user_id)
             .fetch_optional(&state.pool)
             .await?;
 
-    if persona_exists.is_none() {
-        return Err(AppError::BadRequest(format!(
-            "Persona '{}' not found",
-            payload.persona_id
-        )));
-    }
+            match default {
+                Some((id,)) => id,
+                None => {
+                    return Err(AppError::Internal(anyhow::anyhow!(
+                        "No Default persona found for user — setup may be incomplete"
+                    )))
+                }
+            }
+        }
+    };
 
-    let thread = Thread::new(&user_id, payload);
+    let thread = Thread::new(&user_id, &resolved_persona_id, payload);
 
     sqlx::query(
         "INSERT INTO threads
              (id, user_id, persona_id, title, active_model, active_provider,
-              system_prompt_addendum, status, show_tool_activity, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+              system_prompt_addendum, status, show_tool_activity, show_system_events,
+              summary, summary_updated_at, summary_message_count, auto_summarize,
+              created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&thread.id)
     .bind(&thread.user_id)
@@ -130,6 +209,11 @@ pub async fn create(
     .bind(&thread.system_prompt_addendum)
     .bind(&thread.status)
     .bind(thread.show_tool_activity)
+    .bind(thread.show_system_events)
+    .bind(&thread.summary)
+    .bind(&thread.summary_updated_at)
+    .bind(thread.summary_message_count)
+    .bind(thread.auto_summarize)
     .bind(&thread.created_at)
     .bind(&thread.updated_at)
     .execute(&state.pool)
@@ -164,7 +248,7 @@ pub async fn create(
 
 /// PUT /api/threads/:id
 pub async fn update(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Json(payload): Json<UpdateThread>,
 ) -> AppResult<impl IntoResponse> {
@@ -172,7 +256,9 @@ pub async fn update(
 
     let existing: Option<Thread> = sqlx::query_as(
         "SELECT id, user_id, persona_id, title, active_model, active_provider,
-                system_prompt_addendum, status, show_tool_activity, created_at, updated_at
+                system_prompt_addendum, status, show_tool_activity, show_system_events,
+                summary, summary_updated_at, summary_message_count, auto_summarize,
+                created_at, updated_at
          FROM threads
          WHERE id = ? AND user_id = ?",
     )
@@ -207,6 +293,12 @@ pub async fn update(
         .show_tool_activity
         .unwrap_or(existing.show_tool_activity);
 
+    let show_system_events = payload
+        .show_system_events
+        .unwrap_or(existing.show_system_events);
+
+    let auto_summarize = payload.auto_summarize.unwrap_or(existing.auto_summarize);
+
     let now = chrono::Utc::now()
         .format("%Y-%m-%dT%H:%M:%S%.3fZ")
         .to_string();
@@ -214,7 +306,8 @@ pub async fn update(
     sqlx::query(
         "UPDATE threads
          SET title = ?, active_model = ?, active_provider = ?,
-             system_prompt_addendum = ?, show_tool_activity = ?, updated_at = ?
+             system_prompt_addendum = ?, show_tool_activity = ?,
+             show_system_events = ?, auto_summarize = ?, updated_at = ?
          WHERE id = ? AND user_id = ?",
     )
     .bind(title)
@@ -222,6 +315,8 @@ pub async fn update(
     .bind(active_provider)
     .bind(system_prompt_addendum)
     .bind(show_tool_activity)
+    .bind(show_system_events)
+    .bind(auto_summarize)
     .bind(&now)
     .bind(&id)
     .bind(&user_id)
@@ -238,6 +333,11 @@ pub async fn update(
         system_prompt_addendum: system_prompt_addendum.map(|s| s.to_string()),
         status: existing.status,
         show_tool_activity,
+        show_system_events,
+        summary: existing.summary,
+        summary_updated_at: existing.summary_updated_at,
+        summary_message_count: existing.summary_message_count,
+        auto_summarize,
         created_at: existing.created_at,
         updated_at: now,
     };
@@ -251,7 +351,7 @@ pub async fn update(
 /// this prevents accidental data loss and is the intended guard for the pending
 /// thread discard flow (which only calls this on zero-message threads).
 pub async fn delete(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
@@ -298,7 +398,7 @@ pub async fn delete(
 /// The underlying logic still lives in `services/title.rs` and is called by
 /// `agent::run_inner`.
 pub async fn generate_title(
-    State(_state): State<AppState>,
+    State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
 ) -> AppResult<impl IntoResponse> {
     Ok((
@@ -314,7 +414,7 @@ pub async fn generate_title(
 
 /// POST /api/threads/:id/archive
 pub async fn archive(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
@@ -323,7 +423,7 @@ pub async fn archive(
 
 /// POST /api/threads/:id/unarchive
 pub async fn unarchive(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
@@ -356,6 +456,18 @@ async fn set_thread_status(
         )));
     }
 
+    if status == "archived" {
+        let _ = state
+            .scheduler_tx
+            .send(SchedulerCommand::PauseThread(thread_id.to_string()))
+            .await;
+    } else if status == "active" {
+        let _ = state
+            .scheduler_tx
+            .send(SchedulerCommand::ResumeThread(thread_id.to_string()))
+            .await;
+    }
+
     Ok((
         StatusCode::OK,
         Json(json!({ "data": { "id": thread_id, "status": status } })),
@@ -366,7 +478,7 @@ async fn set_thread_status(
 
 /// GET /api/threads/:id/mcp-servers
 pub async fn list_mcp_servers(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(thread_id): Path<String>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
@@ -386,7 +498,7 @@ pub async fn list_mcp_servers(
 
 /// POST /api/threads/:id/mcp-servers
 pub async fn attach_mcp(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(thread_id): Path<String>,
     Json(payload): Json<AttachMcpServer>,
 ) -> AppResult<impl IntoResponse> {
@@ -426,7 +538,7 @@ pub async fn attach_mcp(
 
 /// DELETE /api/threads/:id/mcp-servers/:mcp_id
 pub async fn detach_mcp(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path((thread_id, mcp_id)): Path<(String, String)>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
@@ -460,7 +572,9 @@ async fn verify_thread_ownership(
 ) -> AppResult<Thread> {
     let thread: Option<Thread> = sqlx::query_as(
         "SELECT id, user_id, persona_id, title, active_model, active_provider,
-                system_prompt_addendum, status, show_tool_activity, created_at, updated_at
+                system_prompt_addendum, status, show_tool_activity, show_system_events,
+                summary, summary_updated_at, summary_message_count, auto_summarize,
+                created_at, updated_at
          FROM threads
          WHERE id = ? AND user_id = ?",
     )

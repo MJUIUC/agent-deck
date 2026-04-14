@@ -1,16 +1,20 @@
 use axum::{
     body::Body,
     extract::Request,
-    http::{header, StatusCode},
+    http::header,
     middleware::{self, Next},
-    response::{IntoResponse, Response},
+    response::Response,
     routing::get,
     Router,
 };
+use dashmap::DashMap;
 use sqlx::SqlitePool;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use tokio::sync::{broadcast, mpsc};
+use std::sync::atomic::AtomicUsize;
+use std::sync::{Arc, Mutex, RwLock};
+use tokio::sync::broadcast;
+use tokio::task::JoinHandle;
+
 use tower_http::{services::ServeDir, trace::TraceLayer};
 use tracing::warn;
 
@@ -20,16 +24,22 @@ use crate::services::auth as auth_service;
 use crate::services::copilot::{CopilotApiService, GlobalEvent};
 use crate::services::credentials as credentials_service;
 use crate::services::mcp::McpConnectionManager;
+use crate::services::scheduler::SchedulerCommand;
+use crate::services::tools::{self as tools_service, AgentTool};
 
 pub mod auth;
 pub mod config;
 pub mod credentials;
+pub mod fs;
 pub mod health;
 pub mod memory;
 pub mod messages;
 pub mod models;
+pub mod notify;
 pub mod personas;
+pub mod profile;
 pub mod providers;
+pub mod push;
 pub mod routines;
 pub mod setup;
 
@@ -37,13 +47,60 @@ pub mod sse;
 pub mod threads;
 pub mod tokens;
 
-/// A unit of work sent from the `send` message handler to the background
-/// agent worker.  Decouples the HTTP response lifecycle from agent execution —
-/// the handler enqueues the job and returns the 201 immediately; the worker
-/// drains the queue independently.
+/// A unit of work — kept for compatibility with any remaining references,
+/// but the channel-based agent dispatch has been replaced with per-thread
+/// `RunState` and direct `tokio::spawn` in the `send` handler.
 pub struct AgentJob {
     pub thread_id: String,
     pub content: String,
+}
+
+// ─── RunningTurn ──────────────────────────────────────────────────────────────
+
+/// Holds the handle and cancellation channel for a single active agent turn.
+pub struct RunningTurn {
+    pub task: JoinHandle<()>,
+    pub cancellation_tx: tokio::sync::watch::Sender<bool>,
+    pub thread_id: String,
+    pub turn_id: uuid::Uuid,
+}
+
+impl RunningTurn {
+    /// Signal the task to cancel cooperatively and return the JoinHandle
+    /// so the caller can await its completion.
+    pub fn cancel(self) -> JoinHandle<()> {
+        // Harmless if the receiver was already dropped (task already done).
+        let _ = self.cancellation_tx.send(true);
+        self.task
+    }
+}
+
+// ─── Per-thread run state ─────────────────────────────────────────────────────
+
+/// Per-thread run state. Controls concurrency and task lifecycle for agent
+/// runs on a single thread.
+///
+/// - `semaphore`: capacity-1 semaphore that serialises concurrent runs.
+///   The second run waits behind the first rather than being rejected.
+/// - `depth`: count of tasks that have been spawned and not yet completed.
+///   Used to reject sends that would exceed `MAX_DEPTH`.
+/// - `running_turn`: the currently active `RunningTurn`, if any. `cancel_run`
+///   takes this slot and calls `cancel()` to send the cooperative shutdown
+///   signal, then awaits the handle.
+pub struct RunState {
+    pub semaphore: tokio::sync::Semaphore,
+    pub depth: AtomicUsize,
+    pub running_turn: tokio::sync::Mutex<Option<RunningTurn>>,
+}
+
+impl RunState {
+    pub fn new() -> Self {
+        Self {
+            semaphore: tokio::sync::Semaphore::new(1),
+            depth: AtomicUsize::new(0),
+            running_turn: tokio::sync::Mutex::new(None),
+        }
+    }
 }
 
 /// Application state shared across all handlers via Axum's `State` extractor.
@@ -53,7 +110,7 @@ pub struct AppState {
     pub config: Config,
     pub machine_secret: String,
     pub credential_master_key: String,
-    pub auth_token: String,
+    pub auth_token: Arc<RwLock<String>>,
     /// Global SSE broadcast channel.  All connected global-stream clients
     /// subscribe via `global_tx.subscribe()`.
     pub global_tx: broadcast::Sender<GlobalEvent>,
@@ -62,42 +119,41 @@ pub struct AppState {
     pub thread_senders: Arc<
         Mutex<HashMap<String, Vec<tokio::sync::mpsc::Sender<crate::routes::sse::ThreadEvent>>>>,
     >,
-    /// Agent work queue.  The `send` handler drops a job here and returns the
-    /// HTTP 201 immediately.  A single background task drains this channel and
-    /// runs each agent job in its own spawned task, keeping the queue itself
-    /// non-blocking.
-    pub agent_tx: mpsc::Sender<AgentJob>,
+    /// Per-thread run state map.  Created on first access for each thread.
+    pub run_states: DashMap<String, Arc<RunState>>,
     /// Handle to the copilot-api side-car service.  `None` when the service
-    /// could not be started (e.g. `bun` not on PATH).
+    /// could not be started (e.g. `node` not on PATH).
     pub copilot: Option<CopilotApiService>,
     /// MCP connection pool.  Manages all local and remote MCP server connections,
     /// tool caching, and status broadcasting.
     pub mcp: McpConnectionManager,
+    /// Statically-registered built-in tools available to every agent run.
+    /// MCP tools are discovered dynamically and routed separately.
+    pub built_in_tools: Arc<Vec<Arc<dyn AgentTool>>>,
+    /// Sender half of the scheduler command channel.
+    /// Route handlers send commands here; the background `SchedulerService`
+    /// task receives on the other end and reacts by registering or removing
+    /// cron jobs.
+    pub scheduler_tx: tokio::sync::mpsc::Sender<SchedulerCommand>,
+    /// VAPID public key (base64url, no padding). Cached from app_config at startup.
+    /// Served by GET /api/push/vapid-public-key without a DB round-trip.
+    pub vapid_public_key: String,
+    /// PKCS8 PEM-encoded VAPID private key. Loaded from app_config at startup.
+    /// Used by the push dispatch service. Never logged or returned by any endpoint.
+    pub vapid_private_pem: String,
+}
+
+impl AppState {
+    /// Get or create the `RunState` for a given thread.
+    pub fn get_run_state(&self, thread_id: &str) -> Arc<RunState> {
+        self.run_states
+            .entry(thread_id.to_string())
+            .or_insert_with(|| Arc::new(RunState::new()))
+            .clone()
+    }
 }
 
 /// Build the main application router.
-/// Spawn the background task that drains the agent work queue.
-///
-/// Each job is run in its own `tokio::spawn` so that slow or failing agent
-/// runs never block the queue from processing subsequent jobs.
-fn start_agent_worker(mut rx: mpsc::Receiver<AgentJob>, state: AppState) {
-    tokio::spawn(async move {
-        while let Some(job) = rx.recv().await {
-            let job_state = state.clone();
-            tokio::spawn(async move {
-                // Wait up to 3 seconds for the SSE client to connect before
-                // starting to stream.  If no subscriber appears in time we
-                // proceed anyway — message_complete and DB persistence still
-                // happen so the user sees the response on next load.
-                job_state
-                    .wait_for_subscriber(&job.thread_id, std::time::Duration::from_secs(3))
-                    .await;
-                crate::services::agent::run(job_state, job.thread_id, job.content).await;
-            });
-        }
-    });
-}
-
 pub async fn build_router(
     pool: SqlitePool,
     config: Config,
@@ -117,8 +173,6 @@ pub async fn build_router(
     tracing::info!("╚══════════════════════════════════════════════════════════╝");
 
     // ── SSE broadcast channel ─────────────────────────────────────────────────
-    // Capacity of 256 gives global-stream clients some slack before they start
-    // lagging on bursts of events.
     let (global_tx, _global_rx) = broadcast::channel::<GlobalEvent>(256);
 
     // ── copilot-api side-car ──────────────────────────────────────────────────
@@ -126,9 +180,12 @@ pub async fn build_router(
     let copilot_handle = copilot.clone();
 
     // ── MCP connection manager ────────────────────────────────────────────────
-    // The master key is needed to decrypt credential secrets injected into MCP
-    // server env vars and auth headers.
     let master_key = credentials_service::get_or_create_master_key(&pool).await?;
+
+    // ── VAPID key pair ────────────────────────────────────────────────────────
+    let (vapid_private_pem, vapid_public_key) =
+        crate::services::vapid::get_or_create_vapid_keys(&pool).await?;
+    tracing::info!("vapid: public key loaded ({}…)", &vapid_public_key[..8]);
     let mcp = McpConnectionManager::new(
         pool.clone(),
         master_key.clone(),
@@ -136,34 +193,40 @@ pub async fn build_router(
         config.mcp_dir.clone(),
     );
 
-    // Agent work queue — capacity of 64 is generous; in practice there will
-    // rarely be more than a handful of concurrent agent runs.
-    let (agent_tx, agent_rx) = mpsc::channel::<AgentJob>(64);
+    // ── Scheduler command channel ─────────────────────────────────────────────
+    let (scheduler_tx, scheduler_rx) = tokio::sync::mpsc::channel::<SchedulerCommand>(256);
 
-    let state = AppState {
+    let state = Arc::new(AppState {
         pool,
         config: config.clone(),
         machine_secret,
         credential_master_key: master_key.clone(),
-        auth_token,
+        auth_token: Arc::new(RwLock::new(auth_token)),
         global_tx,
         thread_senders: Arc::new(Mutex::new(HashMap::new())),
-        agent_tx,
+        run_states: DashMap::new(),
         copilot: Some(copilot_handle),
         mcp: mcp.clone(),
-    };
-
-    // Start the agent worker before the router starts accepting requests.
-    start_agent_worker(agent_rx, state.clone());
+        built_in_tools: Arc::new(tools_service::built_in_tools()),
+        scheduler_tx,
+        vapid_public_key,
+        vapid_private_pem,
+    });
 
     // Start copilot-api supervision in the background.
-    // This is non-blocking — the server starts immediately regardless of whether
-    // copilot-api becomes available.
     copilot.start();
 
-    // Connect all enabled MCP servers.  Each connection runs in its own task
-    // with backoff restart, so this returns immediately.
+    // Connect all enabled MCP servers.
     mcp.start().await;
+
+    // Start the routine scheduler in the background.
+    let scheduler =
+        crate::services::scheduler::SchedulerService::new(state.pool.clone(), state.clone())
+            .await?;
+    let scheduler_arc = scheduler.clone();
+    tokio::spawn(async move {
+        scheduler_arc.start(scheduler_rx).await;
+    });
 
     // Public API routes (no auth required)
     let public_api = Router::new()
@@ -171,7 +234,11 @@ pub async fn build_router(
         .route("/api/setup/complete", axum::routing::post(setup::complete))
         .route("/api/auth/token", axum::routing::post(auth::login))
         .route("/api/auth/logout", axum::routing::post(auth::logout))
-        .route("/health", get(health::health_check));
+        .route("/health", get(health::health_check))
+        .route(
+            "/api/push/vapid-public-key",
+            get(push::get_vapid_public_key),
+        );
 
     // Protected API routes (auth required)
     let protected_api = Router::new()
@@ -271,6 +338,15 @@ pub async fn build_router(
             "/api/threads/:id/command",
             axum::routing::post(messages::slash_command),
         )
+        // Run management
+        .route(
+            "/api/threads/:id/cancel",
+            axum::routing::post(messages::cancel_run),
+        )
+        .route(
+            "/api/threads/:id/notify",
+            axum::routing::post(notify::notify),
+        )
         // SSE streams
         .route("/api/threads/:id/stream", get(sse::thread_stream))
         .route("/api/events", get(sse::global_stream))
@@ -284,6 +360,10 @@ pub async fn build_router(
             get(routines::get)
                 .put(routines::update)
                 .delete(routines::delete),
+        )
+        .route(
+            "/api/threads/:thread_id/routines/:routine_id/toggle",
+            axum::routing::patch(routines::toggle),
         )
         // Memory
         .route(
@@ -303,14 +383,10 @@ pub async fn build_router(
             "/api/device-tokens",
             axum::routing::post(tokens::register_device).delete(tokens::unregister_device),
         )
-        // Mobile pairing
+        // Push subscriptions (Web Push / VAPID)
         .route(
-            "/api/pairing/generate",
-            axum::routing::post(tokens::generate_pairing),
-        )
-        .route(
-            "/api/pairing/complete",
-            axum::routing::post(tokens::complete_pairing),
+            "/api/push/subscribe",
+            axum::routing::post(push::subscribe).delete(push::unsubscribe),
         )
         // App config
         .route("/api/config", get(config::get_config))
@@ -318,13 +394,22 @@ pub async fn build_router(
             "/api/auth/token/rotate",
             axum::routing::post(auth::rotate_token),
         )
+        // User profile
+        .route(
+            "/api/profile",
+            get(profile::get_profile).put(profile::update_profile),
+        )
+        // Filesystem explorer
+        .route("/api/fs/list", get(fs::list_directory))
+        .route("/api/fs/read", get(fs::read_file))
+        .route("/api/fs/download", get(fs::download_file))
+        .route("/api/fs/workspace", get(fs::get_workspace))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,
         ));
 
     // Static file serving (React SPA) — serves from public_dir
-    // Falls back to index.html for SPA routing (404 → index.html)
     let static_files = Router::new().nest_service(
         "/",
         ServeDir::new(&config.public_dir).not_found_service(tower_http::services::ServeFile::new(
@@ -333,8 +418,6 @@ pub async fn build_router(
     );
 
     // ── Copilot provider auth routes — genuinely public, no auth required ──
-    // These endpoints drive the GitHub device-code flow from the UI, which
-    // may be used before the user has a session token.
     let copilot_routes = Router::new()
         .route(
             "/api/providers/copilot/auth-status",
@@ -367,7 +450,7 @@ pub async fn build_router(
 /// Auth middleware: validates Bearer token or session cookie.
 /// Localhost requests (127.0.0.1 / ::1) bypass auth entirely.
 async fn auth_middleware(
-    axum::extract::State(state): axum::extract::State<AppState>,
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
     request: Request<Body>,
     next: Next,
 ) -> Result<Response, AppError> {
@@ -388,7 +471,7 @@ async fn auth_middleware(
     if let Some(auth_header) = request.headers().get(header::AUTHORIZATION) {
         if let Ok(auth_str) = auth_header.to_str() {
             if let Some(token) = auth_str.strip_prefix("Bearer ") {
-                if token == state.auth_token {
+                if token == *state.auth_token.read().unwrap() {
                     return Ok(next.run(request).await);
                 } else {
                     warn!("Invalid Bearer token presented");
@@ -404,7 +487,7 @@ async fn auth_middleware(
             for cookie_part in cookie_str.split(';') {
                 let cookie_part = cookie_part.trim();
                 if let Some(value) = cookie_part.strip_prefix("agent_deck_session=") {
-                    if value == state.auth_token {
+                    if value == *state.auth_token.read().unwrap() {
                         return Ok(next.run(request).await);
                     } else {
                         warn!("Invalid session cookie presented");
@@ -425,103 +508,8 @@ mod tests {
         body::Body,
         http::{Request, StatusCode},
     };
+    use std::sync::atomic::Ordering;
     use tower::ServiceExt;
-
-    // ── AgentJob channel tests ────────────────────────────────────────────────
-
-    /// The agent_tx channel must accept a job without blocking — the send
-    /// handler depends on this being a cheap, non-blocking enqueue.
-    #[tokio::test]
-    async fn agent_tx_send_does_not_block() {
-        let (tx, _rx) = mpsc::channel::<AgentJob>(64);
-        // try_send (non-async) must succeed immediately — channel has capacity.
-        tx.try_send(AgentJob {
-            thread_id: "t1".to_string(),
-            content: "hello".to_string(),
-        })
-        .expect("send should succeed without blocking");
-    }
-
-    /// Jobs sent to agent_tx are received by the worker in order.
-    #[tokio::test]
-    async fn agent_worker_receives_jobs_in_order() {
-        let (tx, mut rx) = mpsc::channel::<AgentJob>(64);
-
-        tx.send(AgentJob {
-            thread_id: "t1".to_string(),
-            content: "first".to_string(),
-        })
-        .await
-        .unwrap();
-
-        tx.send(AgentJob {
-            thread_id: "t2".to_string(),
-            content: "second".to_string(),
-        })
-        .await
-        .unwrap();
-
-        let job1 = rx.recv().await.unwrap();
-        assert_eq!(job1.thread_id, "t1");
-        assert_eq!(job1.content, "first");
-
-        let job2 = rx.recv().await.unwrap();
-        assert_eq!(job2.thread_id, "t2");
-        assert_eq!(job2.content, "second");
-    }
-
-    /// Dropping the sender closes the channel — the worker's recv loop exits
-    /// cleanly rather than hanging forever.
-    #[tokio::test]
-    async fn agent_worker_exits_when_sender_dropped() {
-        let (tx, mut rx) = mpsc::channel::<AgentJob>(64);
-        drop(tx);
-        // recv() must return None immediately once the sender is gone.
-        assert!(rx.recv().await.is_none());
-    }
-
-    /// The channel does not block the caller when at capacity — try_send
-    /// returns Err rather than waiting, protecting the HTTP handler from
-    /// stalling if the worker falls behind.
-    #[tokio::test]
-    async fn agent_tx_try_send_fails_when_full() {
-        // Capacity of 1 so we can fill it with a single job.
-        let (tx, _rx) = mpsc::channel::<AgentJob>(1);
-
-        tx.try_send(AgentJob {
-            thread_id: "t1".to_string(),
-            content: "fill".to_string(),
-        })
-        .expect("first send fills the channel");
-
-        // Channel is now full — try_send must not block, it must error.
-        let result = tx.try_send(AgentJob {
-            thread_id: "t2".to_string(),
-            content: "overflow".to_string(),
-        });
-
-        assert!(result.is_err(), "try_send should fail on a full channel");
-    }
-
-    /// AgentJob fields are stored and retrieved intact.
-    #[tokio::test]
-    async fn agent_job_fields_roundtrip() {
-        let (tx, mut rx) = mpsc::channel::<AgentJob>(8);
-
-        let thread_id = "d05a7947-9b72-4573-aee5-48572afaf198".to_string();
-        let content = "Plan a trip to Japan 🇯🇵".to_string();
-
-        tx.send(AgentJob {
-            thread_id: thread_id.clone(),
-            content: content.clone(),
-        })
-        .await
-        .unwrap();
-
-        let job = rx.recv().await.unwrap();
-        assert_eq!(job.thread_id, thread_id);
-        assert_eq!(job.content, content);
-    }
 
     async fn test_app() -> (Router, String) {
         let pool = sqlx::SqlitePool::connect("sqlite::memory:")
@@ -545,8 +533,6 @@ mod tests {
         let token = auth_service::get_or_create_auth_token(&pool)
             .await
             .expect("token");
-        // build_router starts copilot supervision — that's fine in tests,
-        // it will fail to spawn bun (not installed in CI) and back off quietly.
         let (app, _mcp) = build_router(pool, config).await.expect("router");
         (app, token)
     }
@@ -594,7 +580,6 @@ mod tests {
             )
             .await
             .unwrap();
-        // 200 or other non-401 is fine — we just need auth to pass
         assert_ne!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
@@ -643,5 +628,239 @@ mod tests {
             .await
             .unwrap();
         assert_ne!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn run_state_depth_increments() {
+        let state = RunState::new();
+        let prev = state.depth.fetch_add(1, Ordering::SeqCst);
+        assert_eq!(prev, 0);
+        assert_eq!(state.depth.load(Ordering::SeqCst), 1);
+    }
+
+    // ── RunState additional unit tests ────────────────────────────────────────
+
+    #[test]
+    fn run_state_new_has_zero_depth() {
+        let state = RunState::new();
+        assert_eq!(state.depth.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn run_state_semaphore_has_one_permit() {
+        let state = RunState::new();
+        // A freshly created Semaphore(1) should report 1 available permit.
+        assert_eq!(state.semaphore.available_permits(), 1);
+    }
+
+    #[tokio::test]
+    async fn run_state_semaphore_blocks_second_acquire() {
+        use std::sync::Arc;
+        use tokio::sync::Semaphore;
+        use tokio::time::{timeout, Duration};
+
+        // Use a standalone Arc<Semaphore> so the permit's lifetime is tied to
+        // the Arc, not to a RunState owned inside the async block.
+        let sem = Arc::new(Semaphore::new(1));
+
+        // Acquire the single permit — holds it for the duration of the test.
+        let _permit = sem.acquire().await.unwrap();
+
+        // A second acquire on a capacity-1 semaphore that is already held
+        // must block.  Wrap it in a short timeout to prove it never succeeds.
+        let sem2 = Arc::clone(&sem);
+        let result = timeout(Duration::from_millis(50), async move {
+            // Drive the acquire but drop the permit inside the block so
+            // nothing is returned that would reference sem2.
+            let _p = sem2.acquire().await.unwrap();
+            drop(_p);
+        })
+        .await;
+
+        assert!(
+            result.is_err(),
+            "second semaphore acquire should have timed out (semaphore is at capacity)"
+        );
+    }
+
+    // ── RunningTurn initial state test ───────────────────────────────────────
+
+    #[tokio::test]
+    async fn run_state_running_turn_is_none_initially() {
+        let state = RunState::new();
+        let slot = state.running_turn.lock().await;
+        assert!(
+            slot.is_none(),
+            "running_turn must be None on a freshly created RunState"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_run_state_returns_same_arc_for_same_thread_id() {
+        use std::collections::HashMap;
+        use std::sync::{Arc, Mutex};
+        use tokio::sync::broadcast;
+
+        let (global_tx, _) = broadcast::channel(64);
+        let pool = sqlx::SqlitePool::connect_lazy("sqlite::memory:").unwrap();
+        let (mcp_tx, _) = tokio::sync::broadcast::channel(1);
+        let mcp = crate::services::mcp::McpConnectionManager::new(
+            pool.clone(),
+            "test-master-key".to_string(),
+            mcp_tx,
+            std::path::PathBuf::from("/tmp/test-deck/mcp"),
+        );
+        let app_state = AppState {
+            pool,
+            config: Config {
+                port: 7474,
+                data_dir: std::path::PathBuf::from("/tmp/test-deck"),
+                mcp_dir: std::path::PathBuf::from("/tmp/test-deck/mcp"),
+                personas_dir: std::path::PathBuf::from("/tmp/test-deck/personas"),
+                database_url: "sqlite::memory:".to_string(),
+                public_dir: "./public".to_string(),
+                fcm_service_account_json: None,
+            },
+            machine_secret: "test-secret".to_string(),
+            credential_master_key: "test-master-key".to_string(),
+            auth_token: Arc::new(RwLock::new("test-token".to_string())),
+            global_tx,
+            thread_senders: Arc::new(Mutex::new(HashMap::new())),
+            run_states: dashmap::DashMap::new(),
+            copilot: None,
+            mcp,
+            built_in_tools: std::sync::Arc::new(vec![]),
+            scheduler_tx: tokio::sync::mpsc::channel(1).0,
+            vapid_public_key: String::new(),
+            vapid_private_pem: String::new(),
+        };
+
+        let rs1 = app_state.get_run_state("thread-abc");
+        let rs2 = app_state.get_run_state("thread-abc");
+
+        // Both calls with the same thread_id must return the exact same Arc.
+        assert!(
+            Arc::ptr_eq(&rs1, &rs2),
+            "get_run_state must return the same Arc for the same thread_id"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_run_state_returns_different_arc_for_different_threads() {
+        use std::collections::HashMap;
+        use std::sync::{Arc, Mutex};
+        use tokio::sync::broadcast;
+
+        let (global_tx, _) = broadcast::channel(64);
+        let pool = sqlx::SqlitePool::connect_lazy("sqlite::memory:").unwrap();
+        let (mcp_tx, _) = tokio::sync::broadcast::channel(1);
+        let mcp = crate::services::mcp::McpConnectionManager::new(
+            pool.clone(),
+            "test-master-key".to_string(),
+            mcp_tx,
+            std::path::PathBuf::from("/tmp/test-deck/mcp"),
+        );
+        let app_state = AppState {
+            pool,
+            config: Config {
+                port: 7474,
+                data_dir: std::path::PathBuf::from("/tmp/test-deck"),
+                mcp_dir: std::path::PathBuf::from("/tmp/test-deck/mcp"),
+                personas_dir: std::path::PathBuf::from("/tmp/test-deck/personas"),
+                database_url: "sqlite::memory:".to_string(),
+                public_dir: "./public".to_string(),
+                fcm_service_account_json: None,
+            },
+            machine_secret: "test-secret".to_string(),
+            credential_master_key: "test-master-key".to_string(),
+            auth_token: Arc::new(RwLock::new("test-token".to_string())),
+            global_tx,
+            thread_senders: Arc::new(Mutex::new(HashMap::new())),
+            run_states: dashmap::DashMap::new(),
+            copilot: None,
+            mcp,
+            built_in_tools: std::sync::Arc::new(vec![]),
+            scheduler_tx: tokio::sync::mpsc::channel(1).0,
+            vapid_public_key: String::new(),
+            vapid_private_pem: String::new(),
+        };
+
+        let rs_a = app_state.get_run_state("thread-aaa");
+        let rs_b = app_state.get_run_state("thread-bbb");
+
+        // Different thread IDs must produce distinct Arc instances.
+        assert!(
+            !Arc::ptr_eq(&rs_a, &rs_b),
+            "get_run_state must return distinct Arcs for different thread IDs"
+        );
+    }
+
+    #[tokio::test]
+    async fn arc_appstate_clones_share_run_states_dashmap() {
+        // This test verifies the core fix for cancellation not working.
+        //
+        // Before the fix: AppState was cloned on every request via Axum's State
+        // extractor.  DashMap::clone() performs a deep copy, so the RunState
+        // inserted by POST /messages was invisible to POST /cancel — each
+        // request was operating on its own disconnected map.
+        //
+        // After the fix: the state type is Arc<AppState>.  Cloning the Arc just
+        // bumps the reference count; both clones point at the same DashMap, so
+        // a RunState registered by one "request" is immediately visible to the
+        // other — exactly what cancel needs.
+        use std::collections::HashMap;
+        use std::sync::{Arc, Mutex};
+        use tokio::sync::broadcast;
+
+        let (global_tx, _) = broadcast::channel(64);
+        let pool = sqlx::SqlitePool::connect_lazy("sqlite::memory:").unwrap();
+        let (mcp_tx, _) = tokio::sync::broadcast::channel(1);
+        let mcp = crate::services::mcp::McpConnectionManager::new(
+            pool.clone(),
+            "test-master-key".to_string(),
+            mcp_tx,
+            std::path::PathBuf::from("/tmp/test-deck/mcp"),
+        );
+        let shared_state = Arc::new(AppState {
+            pool,
+            config: Config {
+                port: 7474,
+                data_dir: std::path::PathBuf::from("/tmp/test-deck"),
+                mcp_dir: std::path::PathBuf::from("/tmp/test-deck/mcp"),
+                personas_dir: std::path::PathBuf::from("/tmp/test-deck/personas"),
+                database_url: "sqlite::memory:".to_string(),
+                public_dir: "./public".to_string(),
+                fcm_service_account_json: None,
+            },
+            machine_secret: "test-secret".to_string(),
+            credential_master_key: "test-master-key".to_string(),
+            auth_token: Arc::new(RwLock::new("test-token".to_string())),
+            global_tx,
+            thread_senders: Arc::new(Mutex::new(HashMap::new())),
+            run_states: dashmap::DashMap::new(),
+            copilot: None,
+            mcp,
+            built_in_tools: std::sync::Arc::new(vec![]),
+            scheduler_tx: tokio::sync::mpsc::channel(1).0,
+            vapid_public_key: String::new(),
+            vapid_private_pem: String::new(),
+        });
+
+        // Simulate two requests receiving their own clone of the Arc —
+        // this is exactly what Axum's State extractor does per request.
+        let send_request_state = shared_state.clone();
+        let cancel_request_state = shared_state.clone();
+
+        // "POST /messages" registers a RunState for the thread.
+        let run_state_from_send = send_request_state.get_run_state("thread-xyz");
+
+        // "POST /cancel" looks up the same thread — must find the same Arc.
+        let run_state_from_cancel = cancel_request_state.get_run_state("thread-xyz");
+
+        assert!(
+            Arc::ptr_eq(&run_state_from_send, &run_state_from_cancel),
+            "send and cancel requests must see the same RunState — \
+             DashMap must be shared via Arc, not deep-cloned per request"
+        );
     }
 }

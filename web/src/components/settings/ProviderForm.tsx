@@ -33,10 +33,14 @@ export function ProviderForm({
   onCancel,
 }: ProviderFormProps) {
   // Normalise legacy kind values saved before the two-kind model
-  const normaliseKind = (k: string): "api_key" | "copilot" | "" => {
+  const normaliseKind = (
+    k: string,
+  ): "openai" | "anthropic" | "custom" | "copilot" | "" => {
     if (k === "copilot") return "copilot";
-    if (k === "api_key") return "api_key";
-    if (k === "openai" || k === "anthropic" || k === "custom") return "api_key";
+    if (k === "openai") return "openai";
+    if (k === "anthropic") return "anthropic";
+    if (k === "custom") return "custom";
+    if (k === "api_key") return "openai"; // legacy fallback
     return "";
   };
 
@@ -78,7 +82,7 @@ export function ProviderForm({
     try {
       const payload = {
         name: form.name.trim(),
-        kind: form.kind,
+        kind: form.kind as string,
         base_url:
           form.kind === "copilot"
             ? KIND_DEFAULT_URLS.copilot
@@ -168,10 +172,10 @@ export function ProviderForm({
               disabled={!!editing}
             >
               <option value="">Select provider type…</option>
-              <option value="api_key">
-                🔑 API Key (OpenAI, Anthropic, custom…)
-              </option>
-              <option value="copilot">🐙 GitHub Copilot</option>
+              <option value="openai">OpenAI</option>
+              <option value="anthropic">Anthropic</option>
+              <option value="custom">Custom (OpenAI-compatible)</option>
+              <option value="copilot">GitHub Copilot</option>
             </FieldSelect>
             {editing && (
               <FieldHint>Kind cannot be changed after creation.</FieldHint>
@@ -179,7 +183,9 @@ export function ProviderForm({
           </div>
 
           {/* API Key provider — base URL + key */}
-          {form.kind === "api_key" && (
+          {(form.kind === "openai" ||
+            form.kind === "anthropic" ||
+            form.kind === "custom") && (
             <>
               <div
                 style={{
@@ -196,7 +202,9 @@ export function ProviderForm({
                   value={form.base_url}
                   onChange={setField("base_url")}
                 />
-                <FieldHint>{KIND_URL_HINTS.api_key}</FieldHint>
+                <FieldHint>
+                  {KIND_URL_HINTS[form.kind] ?? KIND_URL_HINTS.custom}
+                </FieldHint>
               </div>
 
               <div

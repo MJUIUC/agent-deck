@@ -95,7 +95,9 @@
     padding: 14px;
     cursor: pointer;
     border: 2px solid transparent;
-    transition: background 0.15s, border-color 0.15s;
+    transition:
+        background 0.15s,
+        border-color 0.15s;
 }
 
 .card:hover {
@@ -124,6 +126,13 @@
     line-height: 1.45;
 }
 
+.cardHint {
+    font-size: 11px;
+    color: var(--text-tertiary, #888);
+    font-style: italic;
+    margin-top: 2px;
+}
+
 /* ── Footer buttons ── */
 .footer {
     display: flex;
@@ -141,7 +150,9 @@
     color: var(--text-secondary);
     border: 1px solid var(--border-default);
     cursor: pointer;
-    transition: background 0.15s, color 0.15s;
+    transition:
+        background 0.15s,
+        color 0.15s;
     font-family: inherit;
 }
 

@@ -358,6 +358,30 @@
     cursor: not-allowed;
 }
 
+.cancelBtn {
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    background: transparent;
+    color: var(--text-tertiary);
+    border: 1px solid transparent;
+    transition:
+        background 0.15s,
+        color 0.15s;
+}
+
+.cancelBtn:hover:not(:disabled) {
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+}
+
+.cancelBtn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
 /* ── Empty states ── */
 .emptyState {
     background: var(--bg-tertiary);
@@ -580,81 +604,23 @@
     line-height: 1.3;
 }
 
-/* ── Attach button + picker ── */
-.mcpAttachWrap {
-    position: relative;
-}
-
-.mcpAttachBtn {
-    background: none;
-    border: 1px dashed var(--border-default);
-    border-radius: 8px;
-    color: var(--text-tertiary);
-    font-size: 12px;
-    cursor: pointer;
-    padding: 8px 12px;
-    width: 100%;
-    text-align: center;
-    transition:
-        border-color 0.15s,
-        color 0.15s;
-}
-
-.mcpAttachBtn:hover {
-    border-color: var(--accent-primary);
-    color: var(--accent-secondary);
-}
-
 /* ── Attach picker overlay ── */
 .pickerOverlay {
-    position: absolute;
-    bottom: calc(100% + 6px);
-    left: 0;
-    right: 0;
     background: var(--bg-elevated);
-    border: 1px solid var(--border-default);
+    border: 1px solid var(--border-subtle);
     border-radius: 10px;
-    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
-    z-index: 30;
     display: flex;
     flex-direction: column;
     overflow: hidden;
     max-height: 300px;
-}
-
-.pickerHeader {
-    padding: 10px 12px 6px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-shrink: 0;
+    margin-top: 6px;
 }
 
 .pickerTitle {
     font-size: 12px;
     font-weight: 600;
     color: var(--text-primary);
-}
-
-.pickerClose {
-    width: 22px;
-    height: 22px;
-    border-radius: 4px;
-    background: transparent;
-    border: none;
-    color: var(--text-tertiary);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition:
-        background 0.15s,
-        color 0.15s;
-}
-
-.pickerClose:hover {
-    background: var(--bg-secondary);
-    color: var(--text-primary);
+    padding: 10px 12px 4px;
 }
 
 .pickerSearch {
@@ -735,6 +701,24 @@
     display: flex;
     gap: 5px;
     margin-top: 2px;
+}
+
+/* ── Show more / less accordion button ── */
+.showMoreBtn {
+    background: none;
+    border: none;
+    color: var(--accent-secondary);
+    font-size: 12px;
+    font-family: inherit;
+    cursor: pointer;
+    padding: 2px 0;
+    text-align: left;
+    opacity: 0.8;
+    transition: opacity 0.15s;
+}
+
+.showMoreBtn:hover {
+    opacity: 1;
 }
 
 /* ── Tool activity row ── */
@@ -956,4 +940,328 @@
 .archiveConfirmBtn:disabled {
     opacity: 0.5;
     cursor: default;
+}
+
+/* ── Routines ── */
+.routineList {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.routineCard {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.routineCardTop {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.routineCardInfo {
+    flex: 1;
+    min-width: 0;
+}
+
+.routineName {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.routineCron {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    font-family: "SF Mono", "Fira Code", monospace;
+    margin-top: 2px;
+}
+
+.routineCardActions {
+    display: flex;
+    gap: 4px;
+}
+
+.routineEditBtn,
+.routineDeleteBtn {
+    background: none;
+    border: 1px solid var(--border-subtle);
+    border-radius: 5px;
+    color: var(--text-tertiary);
+    font-size: 12px;
+    width: 26px;
+    height: 26px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition:
+        background 0.15s,
+        color 0.15s;
+}
+
+.routineEditBtn:hover {
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+}
+
+.routineDeleteBtn:hover {
+    background: rgba(196, 90, 90, 0.15);
+    color: var(--error);
+    border-color: rgba(196, 90, 90, 0.3);
+}
+
+.routineDeleteBtn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.routinePromptPreview {
+    font-size: 11.5px;
+    color: var(--text-secondary);
+    line-height: 1.45;
+}
+
+/* ── Routine form ── */
+.routineForm {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-default);
+    border-radius: 8px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.routineFormTitle {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 2px;
+}
+
+.routineFormLabel {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.routineFormInput {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-default);
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-size: 13px;
+    color: var(--text-primary);
+    outline: none;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.routineFormInput:focus {
+    border-color: var(--accent-primary);
+}
+
+.routineFormTextarea {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-default);
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-size: 13px;
+    color: var(--text-primary);
+    outline: none;
+    width: 100%;
+    resize: vertical;
+    box-sizing: border-box;
+    font-family: inherit;
+    line-height: 1.5;
+}
+
+.routineFormTextarea:focus {
+    border-color: var(--accent-primary);
+}
+
+.routineFormCronRow {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.routineFormError {
+    font-size: 12px;
+    color: var(--error);
+    padding: 6px 10px;
+    background: rgba(196, 90, 90, 0.08);
+    border-radius: 5px;
+    border: 1px solid rgba(196, 90, 90, 0.2);
+}
+
+.routineFormActions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 4px;
+}
+
+.routineFormCancel {
+    background: none;
+    border: 1px solid var(--border-default);
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.routineFormCancel:hover {
+    background: var(--bg-elevated);
+}
+
+.routineFormSave {
+    background: var(--accent-primary);
+    border: none;
+    border-radius: 6px;
+    padding: 6px 16px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-inverse);
+    cursor: pointer;
+}
+
+.routineFormSave:hover:not(:disabled) {
+    opacity: 0.88;
+}
+
+.routineFormSave:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+/* ── Memory section ── */
+.memoryList {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.memoryEntry {
+    background: var(--bg-elevated);
+    border-radius: 8px;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: row;
+    gap: 8px;
+    align-items: flex-start;
+}
+
+.memoryContent {
+    font-size: 12px;
+    color: var(--text-primary);
+    line-height: 1.5;
+}
+
+.memoryMeta {
+    font-size: 10px;
+    color: var(--text-tertiary);
+}
+
+/* ── Advanced collapsible ── */
+.advancedToggle {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    font-family: inherit;
+    color: var(--text-tertiary);
+    transition: color 0.15s;
+}
+
+.advancedToggle:hover {
+    color: var(--text-secondary);
+}
+
+.advancedToggleLabel {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.advancedBody {
+    margin-top: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.advancedSectionTitle {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+}
+
+.advancedSectionHint {
+    font-weight: 400;
+    color: var(--text-tertiary);
+    font-size: 11px;
+}
+
+.advancedMemoryCount {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    margin-bottom: 8px;
+}
+
+.advancedMemoryWarning {
+    color: var(--warning, #f59e0b);
+}
+
+.advancedDivider {
+    height: 1px;
+    background: var(--border-subtle);
+    margin: 14px 0;
+}
+
+/* ── Memory entry (updated for delete button) ── */
+.memoryEntryBody {
+    flex: 1;
+    min-width: 0;
+}
+
+.memoryDeleteBtn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-tertiary);
+    font-size: 12px;
+    padding: 2px 4px;
+    border-radius: 4px;
+    flex-shrink: 0;
+    line-height: 1;
+    transition: color 0.15s;
+}
+
+.memoryDeleteBtn:hover:not(:disabled) {
+    color: var(--error, #ef4444);
+}
+
+.memoryDeleteBtn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
 }

@@ -44,6 +44,9 @@ export function PersonaForm({
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [recallCrossThread, setRecallCrossThread] = useState(
+    editing?.recall_conversation_cross_thread ?? true,
+  );
 
   const setField =
     (k: keyof PersonaFormData) =>
@@ -87,6 +90,9 @@ export function PersonaForm({
         system_prompt: form.system_prompt.trim(),
         default_provider: form.default_provider || undefined,
         default_model: form.default_model || undefined,
+        ...(editing && !editing.is_default
+          ? { recall_conversation_cross_thread: recallCrossThread }
+          : {}),
       };
       if (editing) {
         await personasApi.update(editing.id, payload);
@@ -214,6 +220,61 @@ export function PersonaForm({
             <FieldHint>
               Defines the agent's core personality and behavior. Always
               prepended to the conversation context.
+            </FieldHint>
+            {editing && !editing.is_default && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  padding: "10px 12px",
+                  background: "var(--bg-primary)",
+                  borderRadius: 8,
+                  border: "1px solid var(--border-subtle)",
+                  marginTop: 8,
+                }}
+              >
+                <div>
+                  <div
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 500,
+                      color: "var(--text-primary)",
+                    }}
+                  >
+                    Cross-thread conversation recall
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: "var(--text-secondary)",
+                      marginTop: 2,
+                    }}
+                  >
+                    When enabled, <code>recall_conversation</code> searches
+                    across all threads using this persona. When disabled, it
+                    only looks back within the current thread.
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={recallCrossThread}
+                  onChange={(e) => setRecallCrossThread(e.target.checked)}
+                  style={{
+                    width: 16,
+                    height: 16,
+                    cursor: "pointer",
+                    flexShrink: 0,
+                    marginTop: 2,
+                  }}
+                />
+              </div>
+            )}
+            <FieldHint>
+              ℹ️ User profile context (role, location, timezone, about) is
+              automatically included in every conversation with this persona.
+              You don't need to repeat it here.
             </FieldHint>
           </div>
         </div>

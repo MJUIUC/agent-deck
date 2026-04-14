@@ -5,6 +5,7 @@ use axum::{
     Json,
 };
 use serde_json::json;
+use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 
 use crate::{
@@ -24,12 +25,14 @@ async fn get_user_id(state: &AppState) -> AppResult<String> {
 }
 
 /// GET /api/personas
-pub async fn list(State(state): State<AppState>) -> AppResult<impl IntoResponse> {
+pub async fn list(State(state): State<Arc<AppState>>) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
 
     let personas: Vec<AgentPersona> = sqlx::query_as(
         "SELECT id, user_id, name, emoji, avatar_path, system_prompt,
-                default_model, default_provider, created_at, updated_at
+                default_model, default_provider, is_default,
+                recall_conversation_cross_thread,
+                created_at, updated_at
          FROM agent_personas
          WHERE user_id = ?
          ORDER BY created_at ASC",
@@ -43,14 +46,16 @@ pub async fn list(State(state): State<AppState>) -> AppResult<impl IntoResponse>
 
 /// GET /api/personas/:id
 pub async fn get(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
 
     let persona: Option<AgentPersona> = sqlx::query_as(
         "SELECT id, user_id, name, emoji, avatar_path, system_prompt,
-                default_model, default_provider, created_at, updated_at
+                default_model, default_provider, is_default,
+                recall_conversation_cross_thread,
+                created_at, updated_at
          FROM agent_personas
          WHERE id = ? AND user_id = ?",
     )
@@ -67,7 +72,7 @@ pub async fn get(
 
 /// POST /api/personas
 pub async fn create(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Json(payload): Json<CreateAgentPersona>,
 ) -> AppResult<impl IntoResponse> {
     if payload.name.trim().is_empty() {
@@ -88,8 +93,10 @@ pub async fn create(
     sqlx::query(
         "INSERT INTO agent_personas
              (id, user_id, name, emoji, avatar_path, system_prompt,
-              default_model, default_provider, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+              is_default, default_model, default_provider,
+              recall_conversation_cross_thread,
+              created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&persona.id)
     .bind(&persona.user_id)
@@ -97,8 +104,10 @@ pub async fn create(
     .bind(&persona.emoji)
     .bind(&persona.avatar_path)
     .bind(&persona.system_prompt)
+    .bind(persona.is_default)
     .bind(&persona.default_model)
     .bind(&persona.default_provider)
+    .bind(persona.recall_conversation_cross_thread)
     .bind(&persona.created_at)
     .bind(&persona.updated_at)
     .execute(&state.pool)
@@ -125,7 +134,7 @@ pub async fn create(
 
 /// PUT /api/personas/:id
 pub async fn update(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     Json(payload): Json<UpdateAgentPersona>,
 ) -> AppResult<impl IntoResponse> {
@@ -133,7 +142,9 @@ pub async fn update(
 
     let existing: Option<AgentPersona> = sqlx::query_as(
         "SELECT id, user_id, name, emoji, avatar_path, system_prompt,
-                default_model, default_provider, created_at, updated_at
+                default_model, default_provider, is_default,
+                recall_conversation_cross_thread,
+                created_at, updated_at
          FROM agent_personas
          WHERE id = ? AND user_id = ?",
     )
@@ -146,6 +157,13 @@ pub async fn update(
         Some(p) => p,
         None => return Err(AppError::NotFound(format!("Persona '{}' not found", id))),
     };
+
+    // Guard: the Default persona is immutable.
+    if existing.is_default {
+        return Err(AppError::Forbidden(
+            "The Default persona cannot be modified".to_string(),
+        ));
+    }
 
     let name = payload.name.as_deref().unwrap_or(&existing.name);
     let emoji = payload.emoji.as_deref().unwrap_or(&existing.emoji);
@@ -170,6 +188,10 @@ pub async fn update(
         None => existing.default_provider.as_deref(),
     };
 
+    let recall_cross = payload
+        .recall_conversation_cross_thread
+        .unwrap_or(existing.recall_conversation_cross_thread);
+
     let now = chrono::Utc::now()
         .format("%Y-%m-%dT%H:%M:%S%.3fZ")
         .to_string();
@@ -177,7 +199,9 @@ pub async fn update(
     sqlx::query(
         "UPDATE agent_personas
          SET name = ?, emoji = ?, system_prompt = ?,
-             default_model = ?, default_provider = ?, updated_at = ?
+             default_model = ?, default_provider = ?,
+             recall_conversation_cross_thread = ?,
+             updated_at = ?
          WHERE id = ? AND user_id = ?",
     )
     .bind(name)
@@ -185,6 +209,7 @@ pub async fn update(
     .bind(system_prompt)
     .bind(default_model)
     .bind(default_provider)
+    .bind(recall_cross)
     .bind(&now)
     .bind(&id)
     .bind(&user_id)
@@ -200,6 +225,8 @@ pub async fn update(
         system_prompt: system_prompt.to_string(),
         default_model: default_model.map(str::to_string),
         default_provider: default_provider.map(str::to_string),
+        is_default: existing.is_default,
+        recall_conversation_cross_thread: recall_cross,
         created_at: existing.created_at,
         updated_at: now,
     };
@@ -225,20 +252,42 @@ pub async fn update(
 
 /// DELETE /api/personas/:id
 pub async fn delete(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
 
-    let result = sqlx::query("DELETE FROM agent_personas WHERE id = ? AND user_id = ?")
+    // Fetch the persona first so we can enforce the is_default guard.
+    let persona: Option<AgentPersona> = sqlx::query_as(
+        "SELECT id, user_id, name, emoji, avatar_path, system_prompt,
+                default_model, default_provider, is_default,
+                recall_conversation_cross_thread,
+                created_at, updated_at
+         FROM agent_personas
+         WHERE id = ? AND user_id = ?",
+    )
+    .bind(&id)
+    .bind(&user_id)
+    .fetch_optional(&state.pool)
+    .await?;
+
+    let persona = match persona {
+        Some(p) => p,
+        None => return Err(AppError::NotFound(format!("Persona '{}' not found", id))),
+    };
+
+    // Guard: the Default persona cannot be deleted.
+    if persona.is_default {
+        return Err(AppError::Forbidden(
+            "The Default persona cannot be deleted".to_string(),
+        ));
+    }
+
+    sqlx::query("DELETE FROM agent_personas WHERE id = ? AND user_id = ?")
         .bind(&id)
         .bind(&user_id)
         .execute(&state.pool)
         .await?;
-
-    if result.rows_affected() == 0 {
-        return Err(AppError::NotFound(format!("Persona '{}' not found", id)));
-    }
 
     // Mirror deletion to filesystem (best-effort).
     if let Err(e) = personas_service::delete_persona_dir(&state.config.personas_dir, &id).await {
@@ -259,7 +308,7 @@ pub async fn delete(
 /// Stores it in `data/avatars/<persona_id>.<ext>` and updates the persona's
 /// `avatar_path` field. Returns a serveable URL for the uploaded avatar.
 pub async fn upload_avatar(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
     mut multipart: Multipart,
 ) -> AppResult<impl IntoResponse> {
@@ -268,7 +317,9 @@ pub async fn upload_avatar(
     // Verify the persona exists and belongs to this user
     let persona: Option<AgentPersona> = sqlx::query_as(
         "SELECT id, user_id, name, emoji, avatar_path, system_prompt,
-                default_model, default_provider, created_at, updated_at
+                default_model, default_provider, is_default,
+                recall_conversation_cross_thread,
+                created_at, updated_at
          FROM agent_personas
          WHERE id = ? AND user_id = ?",
     )
@@ -277,8 +328,16 @@ pub async fn upload_avatar(
     .fetch_optional(&state.pool)
     .await?;
 
-    if persona.is_none() {
-        return Err(AppError::NotFound(format!("Persona '{}' not found", id)));
+    let persona = match persona {
+        Some(p) => p,
+        None => return Err(AppError::NotFound(format!("Persona '{}' not found", id))),
+    };
+
+    // Guard: the Default persona cannot be modified.
+    if persona.is_default {
+        return Err(AppError::Forbidden(
+            "The Default persona cannot be modified".to_string(),
+        ));
     }
 
     // Parse the first file field from the multipart form

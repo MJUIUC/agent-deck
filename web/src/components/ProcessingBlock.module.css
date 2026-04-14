@@ -1,0 +1,263 @@
+/* ── Bubble row wrapper ── */
+.row {
+    display: flex;
+    gap: 10px;
+    padding: 3px 18px;
+}
+
+/* ── Avatar ── */
+.avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    flex-shrink: 0;
+    margin-top: 2px;
+    background: var(--bg-elevated);
+}
+
+/* ── Column ── */
+.col {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+/* ── Bubble shell ── */
+.bubble {
+    max-width: 400px;
+    background: var(--bubble-agent);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px 12px 12px 4px;
+    overflow: hidden;
+}
+
+/* ── Meta label (name · time) ── */
+.bubbleMeta {
+    font-size: 0.6875rem;
+    color: var(--text-tertiary);
+    margin-top: 3px;
+    padding: 0 2px;
+}
+
+/* ── Block container ── */
+.block {
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.cancelled {
+    border-style: dashed;
+    color: var(--text-tertiary);
+}
+
+/* ── Header button ── */
+.header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    text-align: left;
+    width: 100%;
+}
+
+.header:hover {
+    background: var(--bg-elevated);
+}
+
+/* ── Status icon ── */
+.statusIcon {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+}
+
+/* ── Spinning animation ── */
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.spinning {
+    animation: spin 1s linear infinite;
+}
+
+/* ── Cog spinner (CSS ring, used in block header) ── */
+.cogSpinner {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 2px solid var(--border-subtle);
+    border-top-color: var(--accent-primary);
+    animation: spin 0.75s linear infinite;
+    flex-shrink: 0;
+}
+
+/* ── Tool row ring spinner (same style, smaller) ── */
+.toolSpinner {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 1.5px solid var(--border-subtle);
+    border-top-color: var(--accent-primary);
+    animation: spin 0.75s linear infinite;
+    flex-shrink: 0;
+}
+
+/* ── Icon colors ── */
+.done {
+    color: var(--accent-primary);
+}
+
+.mutedIcon {
+    color: var(--text-tertiary);
+}
+
+/* ── Label ── */
+.label {
+    flex: 1;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+/* ── Chevron ── */
+.chevron {
+    flex-shrink: 0;
+    color: var(--text-tertiary);
+    display: flex;
+    align-items: center;
+}
+
+/* ── Expanded body ── */
+.body {
+    padding: 0 10px 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+/* ── Round container ── */
+.round {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+/* ── Round header (multi-round only) ── */
+.roundHeader {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.72rem;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 6px 0 2px 0;
+}
+
+.roundDone {
+    color: var(--accent-primary);
+}
+
+/* ── Tool row ── */
+.toolRow {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 0;
+    font-size: 0.8rem;
+}
+
+.toolStatus {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+}
+
+.toolName {
+    color: var(--text-primary);
+    font-family: var(--font-mono, monospace);
+    font-size: 0.78rem;
+}
+
+.toolSep {
+    color: var(--text-tertiary);
+}
+
+.toolPreview {
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 220px;
+}
+
+/* ── Reasoning section ── */
+.reasoning {
+    margin: 6px 0;
+    padding-left: 10px;
+    border-left: 2px solid var(--border-subtle);
+}
+
+.reasoningLabel {
+    font-size: 0.7rem;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 2px;
+}
+
+.reasoningText {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+}
+
+/* ── Tool row wrapper (needed for result section below the row) ── */
+.toolRowWrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+/* ── Result section (collapsible tool output) ── */
+.resultSection {
+    margin: 2px 0 4px 20px;
+    padding-left: 10px;
+    border-left: 2px solid var(--border-subtle);
+}
+
+.resultContent {
+    font-family: var(--font-mono, monospace);
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    word-break: break-all;
+    margin: 0;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+/* ── Result / show-more toggle button ── */
+.resultToggle {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-tertiary);
+    font-size: 0.7rem;
+    padding: 0 4px;
+    margin-left: auto;
+}
+
+.resultToggle:hover {
+    color: var(--text-secondary);
+}
