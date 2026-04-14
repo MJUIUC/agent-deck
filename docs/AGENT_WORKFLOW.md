@@ -441,7 +441,7 @@ Never use `machine_secret` for credential encryption. Never return encrypted byt
 
 ### When to use this section
 
-When development commands arrive **from a mobile device** (i.e. via the agent-deck mobile UI), the agent must **never run `cargo run`, `npm run dev`, or any command that modifies the live server process**. Instead, all build-and-test work goes through the isolated Docker dev instance.
+Before any build-and-test work, check the `.agent-machine` file. If it contains `mac-mini`, all development goes through the isolated Docker dev instance. Otherwise, skip Docker dev entirely.
 
 ### The `.agent-machine` file
 
