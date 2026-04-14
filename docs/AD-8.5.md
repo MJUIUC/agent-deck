@@ -12,7 +12,7 @@ agent-deck runs on a headless local computer and is accessed exclusively over Ta
 
 - **Story 8.5a — Tailscale status and UI** — implement the specced-but-unbuilt Tailscale server API, surface live VPN status throughout the UI, expose the Funnel webhook address, give the agent the ability to answer questions about network connectivity, and add a guided Tailscale setup step to the first-run wizard
 - **Story 8.5b — Generic webhook trigger** — a single inbound webhook endpoint that routes any external event (GitHub, Stripe, CI/CD, IoT, etc.) into the existing `notify.rs` trigger infrastructure via HMAC secret matching, with a Funnel setup guide and per-thread binding management
-- **Story 8.5c — Install script and shell CLI** — a root-level `install.sh` that bootstraps all dependencies (Homebrew, Rust, Node, Tailscale) and deploys agent-deck; a `scripts/run-production.sh` canonical service runner; and an `agent-deck` shell CLI (start/stop/status/logs/open) sourced into the user's shell on install; a GitHub Actions release workflow that produces signed pre-built binaries for `aarch64` and `x86_64` macOS so users can install without cloning source
+- **Story 8.5c — Install script and shell CLI** — a root-level `install.sh` that bootstraps all dependencies (Homebrew, Rust, Node, Tailscale) and deploys agent-deck; a `scripts/run.sh` canonical service runner; and an `agent-deck` shell CLI (start/stop/status/logs/open) sourced into the user's shell on install; a GitHub Actions release workflow that produces signed pre-built binaries for `aarch64` and `x86_64` macOS so users can install without cloning source
 
 The stories can be sequenced: 8.5a first (foundation), then 8.5b (webhook trigger), then 8.5c (install script + CLI + release binary). 8.5c has no code dependencies on 8.5a or 8.5b and can be built in parallel.
 
@@ -557,7 +557,7 @@ A new skill file that teaches the agent how to:
 ```
 8.5a                              8.5b                            8.5c (parallel)
 ──────────────────────────────    ──────────────────────────────  ────────────────────────────
-services/tailscale.rs             services/webhook_formatters/    scripts/run-production.sh
+services/tailscale.rs             services/webhook_formatters/    scripts/run.sh
 routes/tailscale.rs               routes/webhooks.rs (public)     scripts/agent-deck-cli.sh
 AppState cache                    routes/webhook_bindings.rs      install.sh
 tools.rs (tailscale_status)  →    notify_internal refactor        .github/workflows/release.yml
@@ -618,7 +618,7 @@ Steps:
 
 ---
 
-### `scripts/run-production.sh`
+### `scripts/run.sh`
 
 Canonical script for running agent-deck in production. `agent-deck start` delegates to this.
 
@@ -669,7 +669,7 @@ Sourced shell file that defines the `agent-deck` shell function. Installed to `~
 
 | Subcommand | Behaviour |
 |---|---|
-| `agent-deck start` | If PID file exists and process is alive, print "already running". Otherwise exec `scripts/run-production.sh`. |
+| `agent-deck start` | If PID file exists and process is alive, print "already running". Otherwise exec `scripts/run.sh`. |
 | `agent-deck stop` | Read PID file, `kill $PID`, remove PID file, print "stopped". |
 | `agent-deck status` | Print running/stopped + PID. If `tailscale` is in PATH, also print Tailscale connected/disconnected. |
 | `agent-deck logs` | `tail -f ~/.agent-deck/server.log` |
@@ -703,7 +703,7 @@ Release body template includes SHA256 checksums and the one-liner install comman
 - [ ] `agent-deck stop` kills the process, removes the PID file, prints "stopped"
 - [ ] `agent-deck logs` tails `~/.agent-deck/server.log`
 - [ ] `agent-deck open` opens `http://localhost:7474` in the default browser
-- [ ] `scripts/run-production.sh` starts the binary as a background process with output redirected to the log file
+- [ ] `scripts/run.sh` starts the binary as a background process with output redirected to the log file
 - [ ] `release.yml` triggers on `v*` tag and produces two tarballs with SHA256s in the release body
 - [ ] `curl -fsSL .../install.sh | bash` on a clean machine completes and starts the server
 - [ ] Install script prints a clear summary at the end: local URL, Tailscale URL (if connected), and new-terminal reminder
