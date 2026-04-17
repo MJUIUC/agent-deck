@@ -736,4 +736,6 @@ export const tailscaleApi = {
     apiFetch("/api/tailscale/funnel/enable", { method: "POST" }),
   disableFunnel: (): Promise<{ data: TailscaleStatus }> =>
     apiFetch("/api/tailscale/funnel/disable", { method: "POST" }),
+  startServe: (): Promise<{ data: TailscaleStatus }> =>
+    apiFetch("/api/tailscale/serve", { method: "POST" }),
 };

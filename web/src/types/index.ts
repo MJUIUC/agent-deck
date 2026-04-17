@@ -360,10 +360,14 @@ export interface UserProfile {
 export interface TailscaleStatus {
   installed: boolean;
   connected: boolean;
+  needs_service: boolean;
   hostname: string | null;
   funnel_enabled: boolean;
   funnel_url: string | null;
   auth_url: string | null;
   version: string | null;
   ip_address: string | null;
+  serving: boolean;
+  serve_url: string | null;
+  message?: string;
 }

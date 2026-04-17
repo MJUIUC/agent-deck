@@ -29,6 +29,12 @@ pub fn log_status(status: &TailscaleStatus) {
     } else {
         info!("tailscale: connected — {} (funnel: off)", hostname);
     }
+    if status.serving {
+        let serve_url = status.serve_url.as_deref().unwrap_or("unknown URL");
+        info!("tailscale: serving at {}", serve_url);
+    } else if status.connected {
+        info!("tailscale: connected but not serving");
+    }
 }
 
 /// Returns true if the fields that are worth surfacing in logs have changed.
@@ -37,6 +43,8 @@ fn status_changed(old: &TailscaleStatus, new: &TailscaleStatus) -> bool {
         || old.connected != new.connected
         || old.funnel_enabled != new.funnel_enabled
         || old.funnel_url != new.funnel_url
+        || old.serving != new.serving
+        || old.serve_url != new.serve_url
 }
 
 pub async fn get_status(State(state): State<Arc<AppState>>) -> AppResult<impl IntoResponse> {
@@ -87,6 +95,15 @@ pub async fn enable_funnel(State(state): State<Arc<AppState>>) -> AppResult<impl
         *cache = None;
     }
 
+    Ok(Json(json!({ "data": status })))
+}
+
+pub async fn serve(State(state): State<Arc<AppState>>) -> AppResult<impl IntoResponse> {
+    let status = services::tailscale::enable_serve(state.server_port).await;
+    {
+        let mut cache = state.tailscale_status_cache.write().await;
+        *cache = None;
+    }
     Ok(Json(json!({ "data": status })))
 }
 

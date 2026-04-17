@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { tailscaleApi } from "@/api/client";
 import type { TailscaleStatus } from "@/types";
 
@@ -91,12 +91,19 @@ function GhostButton({
   );
 }
 
-export function TailscaleStatusCard({ onFunnelToggle }: TailscaleStatusCardProps) {
+export function TailscaleStatusCard({
+  onFunnelToggle,
+}: TailscaleStatusCardProps) {
   const [status, setStatus] = useState<TailscaleStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [authUrl, setAuthUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const pollingRef = useRef<ReturnType<typeof setInterval> | undefined>(
+    undefined,
+  );
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -116,6 +123,26 @@ export function TailscaleStatusCard({ onFunnelToggle }: TailscaleStatusCardProps
     fetchStatus();
   }, [fetchStatus]);
 
+  useEffect(() => {
+    if (authUrl && !status?.connected) {
+      pollingRef.current = setInterval(async () => {
+        try {
+          const result = await tailscaleApi.getStatus();
+          setStatus(result.data);
+          if (result.data.connected) {
+            setAuthUrl(null);
+            clearInterval(pollingRef.current);
+          }
+        } catch {
+          // keep polling
+        }
+      }, 4000);
+    } else {
+      clearInterval(pollingRef.current);
+    }
+    return () => clearInterval(pollingRef.current);
+  }, [authUrl, status?.connected]);
+
   const handleRefresh = useCallback(async () => {
     setLoading(true);
     await fetchStatus();
@@ -123,14 +150,17 @@ export function TailscaleStatusCard({ onFunnelToggle }: TailscaleStatusCardProps
 
   const handleConnect = useCallback(async () => {
     setActionLoading(true);
+    setError(null);
     try {
       const result = await tailscaleApi.connect();
       setStatus(result.data);
       if (result.data.auth_url) {
         setAuthUrl(result.data.auth_url);
+      } else if (!result.data.connected && result.data.message) {
+        setError(result.data.message);
       }
     } catch {
-      // leave status unchanged
+      setError("Could not reach the server. Check the logs.");
     } finally {
       setActionLoading(false);
     }
@@ -138,12 +168,13 @@ export function TailscaleStatusCard({ onFunnelToggle }: TailscaleStatusCardProps
 
   const handleEnableFunnel = useCallback(async () => {
     setActionLoading(true);
+    setError(null);
     try {
       const result = await tailscaleApi.enableFunnel();
       setStatus(result.data);
       onFunnelToggle?.();
     } catch {
-      // leave status unchanged
+      setError("Failed to update Tailscale Funnel. Check the logs.");
     } finally {
       setActionLoading(false);
     }
@@ -151,16 +182,30 @@ export function TailscaleStatusCard({ onFunnelToggle }: TailscaleStatusCardProps
 
   const handleDisableFunnel = useCallback(async () => {
     setActionLoading(true);
+    setError(null);
     try {
       const result = await tailscaleApi.disableFunnel();
       setStatus(result.data);
       onFunnelToggle?.();
     } catch {
-      // leave status unchanged
+      setError("Failed to update Tailscale Funnel. Check the logs.");
     } finally {
       setActionLoading(false);
     }
   }, [onFunnelToggle]);
+
+  const handleStartServe = useCallback(async () => {
+    setActionLoading(true);
+    setError(null);
+    try {
+      const result = await tailscaleApi.startServe();
+      setStatus(result.data);
+    } catch {
+      setError("Failed to start serving. Check the logs.");
+    } finally {
+      setActionLoading(false);
+    }
+  }, []);
 
   const handleCopyWebhookUrl = useCallback(async () => {
     if (!status?.funnel_url) return;
@@ -214,8 +259,14 @@ export function TailscaleStatusCard({ onFunnelToggle }: TailscaleStatusCardProps
             Refresh ⟳
           </button>
         </div>
-        {/* Loading skeleton */}
-        <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+        <div
+          style={{
+            marginTop: 10,
+            display: "flex",
+            flexDirection: "column",
+            gap: 6,
+          }}
+        >
           <div
             style={{
               height: 12,
@@ -248,16 +299,36 @@ export function TailscaleStatusCard({ onFunnelToggle }: TailscaleStatusCardProps
             Refresh ⟳
           </button>
         </div>
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginTop: 4 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 8,
+            marginTop: 4,
+          }}
+        >
           <StatusDot color={DOT_AMBER} />
           <div>
-            <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text-primary)" }}>
+            <div
+              style={{
+                fontSize: 13,
+                fontWeight: 500,
+                color: "var(--text-primary)",
+              }}
+            >
               Tailscale not found
             </div>
-            <div style={{ fontSize: 12, color: "var(--text-tertiary)", marginTop: 3, lineHeight: 1.5 }}>
+            <div
+              style={{
+                fontSize: 12,
+                color: "var(--text-tertiary)",
+                marginTop: 3,
+                lineHeight: 1.5,
+              }}
+            >
               Install via the agent-deck install script, or visit{" "}
               <a
-                href="https://tailscale.com"
+                href="https://tailscale.com/download"
                 target="_blank"
                 rel="noopener noreferrer"
                 style={{ color: "var(--accent-primary)" }}
@@ -280,31 +351,77 @@ export function TailscaleStatusCard({ onFunnelToggle }: TailscaleStatusCardProps
             Refresh ⟳
           </button>
         </div>
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 12 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 8,
+            marginBottom: 12,
+          }}
+        >
           <StatusDot color={DOT_RED} />
-          <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text-primary)" }}>
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 500,
+              color: "var(--text-primary)",
+            }}
+          >
             Not connected
           </div>
         </div>
         <ActionButton onClick={handleConnect} disabled={actionLoading}>
           {actionLoading ? "Connecting…" : "Connect to Tailscale"}
         </ActionButton>
+        {error && (
+          <div style={{ marginTop: 8, fontSize: 12, color: "#e05252" }}>
+            {error}
+          </div>
+        )}
         {authUrl && (
-          <div style={{ marginTop: 10 }}>
-            <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 4 }}>
-              Open this link to authenticate:
+          <div
+            style={{
+              marginTop: 12,
+              padding: "10px 12px",
+              background: "var(--bg-secondary)",
+              border: "1px solid var(--border-subtle)",
+              borderRadius: 8,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 12,
+                fontWeight: 600,
+                color: "var(--text-primary)",
+                marginBottom: 4,
+              }}
+            >
+              Authentication required
+            </div>
+            <div
+              style={{
+                fontSize: 12,
+                color: "var(--text-secondary)",
+                marginBottom: 8,
+                lineHeight: 1.5,
+              }}
+            >
+              Open the link below in your browser to sign in to Tailscale. This
+              card will update automatically once connected.
             </div>
             <a
               href={authUrl}
               target="_blank"
               rel="noopener noreferrer"
               style={{
+                display: "inline-block",
                 fontSize: 12,
                 color: "var(--accent-primary)",
+                fontWeight: 500,
                 wordBreak: "break-all",
               }}
             >
-              {authUrl}
+              Open Tailscale login →
             </a>
           </div>
         )}
@@ -313,7 +430,9 @@ export function TailscaleStatusCard({ onFunnelToggle }: TailscaleStatusCardProps
   }
 
   // Connected
-  const webhookUrl = status.funnel_url ? `${status.funnel_url}/api/webhooks` : null;
+  const webhookUrl = status.funnel_url
+    ? `${status.funnel_url}/api/webhooks`
+    : null;
 
   return (
     <div style={cardStyle}>
@@ -324,25 +443,86 @@ export function TailscaleStatusCard({ onFunnelToggle }: TailscaleStatusCardProps
         </button>
       </div>
 
-      {/* Connected status row */}
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 8 }}>
-        <StatusDot color={DOT_GREEN} />
+      {/* Serve status row */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          gap: 8,
+          marginBottom: 8,
+        }}
+      >
+        <StatusDot color={status.serving ? DOT_GREEN : DOT_AMBER} />
         <div>
-          <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text-primary)" }}>
-            Connected
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 500,
+              color: "var(--text-primary)",
+            }}
+          >
+            {status.serving ? "Serving" : "Connected — not serving"}
           </div>
-          {(status.hostname || status.ip_address) && (
-            <div style={{ fontSize: 12, color: "var(--text-tertiary)", marginTop: 2 }}>
-              {[status.hostname, status.ip_address].filter(Boolean).join(" · ")}
+          {status.serving && status.serve_url && (
+            <div
+              style={{
+                fontSize: 12,
+                color: "var(--text-tertiary)",
+                marginTop: 2,
+              }}
+            >
+              {status.serve_url}
             </div>
           )}
         </div>
       </div>
+      {!status.serving && (
+        <div style={{ marginBottom: 8 }}>
+          <ActionButton onClick={handleStartServe} disabled={actionLoading}>
+            {actionLoading ? "Starting…" : "Start Serving"}
+          </ActionButton>
+        </div>
+      )}
+      {error && (
+        <div style={{ marginTop: 8, fontSize: 12, color: "#e05252" }}>
+          {error}
+        </div>
+      )}
+
+      {/* Tailscale connection info row */}
+      {status.serving && (status.hostname || status.ip_address) && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 8,
+            marginTop: 8,
+            marginBottom: 12,
+          }}
+        >
+          <StatusDot color={DOT_GREEN} />
+          <div
+            style={{
+              fontSize: 12,
+              color: "var(--text-tertiary)",
+              marginTop: 1,
+            }}
+          >
+            {[status.hostname, status.ip_address].filter(Boolean).join(" · ")}
+          </div>
+        </div>
+      )}
 
       {/* Funnel section */}
       {status.funnel_enabled ? (
         <div style={{ marginBottom: 10 }}>
-          <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 6 }}>
+          <div
+            style={{
+              fontSize: 12,
+              color: "var(--text-secondary)",
+              marginBottom: 6,
+            }}
+          >
             Funnel:{" "}
             <span style={{ color: DOT_GREEN, fontWeight: 500 }}>enabled</span>
           </div>
@@ -394,7 +574,13 @@ export function TailscaleStatusCard({ onFunnelToggle }: TailscaleStatusCardProps
         </div>
       ) : (
         <div style={{ marginBottom: 10 }}>
-          <div style={{ fontSize: 12, color: "var(--text-tertiary)", marginBottom: 8 }}>
+          <div
+            style={{
+              fontSize: 12,
+              color: "var(--text-tertiary)",
+              marginBottom: 8,
+            }}
+          >
             Funnel: not enabled —{" "}
             <span style={{ color: DOT_AMBER }}>webhooks will not work</span>
           </div>
