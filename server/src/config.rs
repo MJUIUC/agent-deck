@@ -6,21 +6,36 @@ use std::path::PathBuf;
 ///
 /// ```
 /// ~/.agent-deck/          ← AGENT_DECK_DATA_DIR or default
-///   .database/
-///     agent-deck.db       ← SQLite database
+///   .process/
+///     .database/
+///       agent-deck.db     ← SQLite database
+///     bin/
+///     public/
+///     server.log
+///     agent-deck.pid
+///     run.sh
+///     agent-deck-cli.sh
 ///   mcp/                  ← one subdirectory per MCP server
 ///   personas/             ← one subdirectory per persona
+///   skills/               ← one subdirectory per skill
+///   workspaces/           ← one subdirectory per workspace
 /// ```
 #[derive(Debug, Clone)]
 pub struct Config {
     pub port: u16,
+    /// Absolute path to the hidden process directory (`data_dir/.process`).
+    pub process_dir: PathBuf,
     /// Absolute path to the top-level data directory.
     pub data_dir: PathBuf,
     /// Absolute path to the MCP servers directory (`data_dir/mcp`).
     pub mcp_dir: PathBuf,
     /// Absolute path to the personas directory (`data_dir/personas`).
     pub personas_dir: PathBuf,
-    /// SQLite connection URL: `sqlite:<data_dir>/.database/agent-deck.db`
+    /// Absolute path to the workspaces directory (`data_dir/workspaces`).
+    pub workspaces_dir: PathBuf,
+    /// Absolute path to the skills directory (`data_dir/skills`).
+    pub skills_dir: PathBuf,
+    /// SQLite connection URL: `sqlite:<process_dir>/.database/agent-deck.db`
     pub database_url: String,
     /// Directory to serve static frontend assets from.
     pub public_dir: String,
@@ -56,21 +71,28 @@ impl Config {
                 .join(".agent-deck")
         };
 
+        let process_dir = data_dir.join(".process");
         let mcp_dir = data_dir.join("mcp");
         let personas_dir = data_dir.join("personas");
+        let workspaces_dir = data_dir.join("workspaces");
+        let skills_dir = data_dir.join("skills");
 
-        let db_path = data_dir.join(".database").join("agent-deck.db");
+        let db_path = process_dir.join(".database").join("agent-deck.db");
         let database_url = format!("sqlite:{}", db_path.display());
 
-        let public_dir = std::env::var("PUBLIC_DIR").unwrap_or_else(|_| "./public".to_string());
+        let public_dir = std::env::var("PUBLIC_DIR")
+            .unwrap_or_else(|_| process_dir.join("public").to_string_lossy().into_owned());
 
         let fcm_service_account_json = std::env::var("FCM_SERVICE_ACCOUNT_JSON").ok();
 
         Ok(Self {
             port,
+            process_dir,
             data_dir,
             mcp_dir,
             personas_dir,
+            workspaces_dir,
+            skills_dir,
             database_url,
             public_dir,
             fcm_service_account_json,
@@ -119,13 +141,19 @@ mod tests {
         std::env::remove_var("AGENT_DECK_DATA_DIR");
 
         let base = PathBuf::from("/tmp/test-agent-deck-paths");
+        assert_eq!(config.process_dir, base.join(".process"));
         assert_eq!(config.mcp_dir, base.join("mcp"));
         assert_eq!(config.personas_dir, base.join("personas"));
+        assert_eq!(config.workspaces_dir, base.join("workspaces"));
+        assert_eq!(config.skills_dir, base.join("skills"));
         assert_eq!(
             config.database_url,
             format!(
                 "sqlite:{}",
-                base.join(".database").join("agent-deck.db").display()
+                base.join(".process")
+                    .join(".database")
+                    .join("agent-deck.db")
+                    .display()
             )
         );
     }

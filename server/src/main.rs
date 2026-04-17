@@ -31,32 +31,50 @@ async fn main() -> Result<()> {
 
     // ── Create data directory tree ────────────────────────────────────────────
     // Ensure all required directories exist before doing anything else.
-    let db_dir = config.data_dir.join(".database");
-    tokio::fs::create_dir_all(&db_dir).await?;
+    tokio::fs::create_dir_all(&config.process_dir).await?;
+    tokio::fs::create_dir_all(config.process_dir.join(".database")).await?;
     tokio::fs::create_dir_all(&config.mcp_dir).await?;
     tokio::fs::create_dir_all(&config.personas_dir).await?;
+    tokio::fs::create_dir_all(&config.workspaces_dir).await?;
+    tokio::fs::create_dir_all(&config.skills_dir).await?;
 
     info!("data_dir: {}", config.data_dir.display());
 
-    // ── Dev-path migration hint ───────────────────────────────────────────────
-    // If the old default SQLite file exists at ./data/agent-deck.db and the new
-    // path does not yet exist, warn the user and temporarily override the URL so
-    // existing dev data is not lost without an explicit migration step.
+    // ── Legacy migration hints ────────────────────────────────────────────────
+    // Check for databases from earlier layout variants. Checks are ordered from
+    // oldest to newest so that the most recent pre-migration path takes effect
+    // when multiple legacy files happen to exist.
     {
-        let legacy_path = std::path::Path::new("./data/agent-deck.db");
-        let new_db_path = config.data_dir.join(".database").join("agent-deck.db");
+        let new_db_path = config.process_dir.join(".database").join("agent-deck.db");
 
-        if legacy_path.exists() && !new_db_path.exists() {
+        // 1. Dev-era path: ./data/agent-deck.db
+        let dev_legacy_path = std::path::Path::new("./data/agent-deck.db");
+        if dev_legacy_path.exists() && !new_db_path.exists() {
             warn!(
                 "mcp: legacy database found at {} but new path {} does not exist yet. \
                  Using legacy path for this run. Copy or move the file to migrate: \
                  cp {} {}",
-                legacy_path.display(),
+                dev_legacy_path.display(),
                 new_db_path.display(),
-                legacy_path.display(),
+                dev_legacy_path.display(),
                 new_db_path.display(),
             );
-            config.database_url = format!("sqlite:{}", legacy_path.display());
+            config.database_url = format!("sqlite:{}", dev_legacy_path.display());
+        }
+
+        // 2. Pre-.process layout: data_dir/.database/agent-deck.db
+        let pre_process_legacy_path = config.data_dir.join(".database").join("agent-deck.db");
+        if pre_process_legacy_path.exists() && !new_db_path.exists() {
+            warn!(
+                "mcp: legacy database found at {} but new path {} does not exist yet. \
+                 Using legacy path for this run. Copy or move the file to migrate: \
+                 cp {} {}",
+                pre_process_legacy_path.display(),
+                new_db_path.display(),
+                pre_process_legacy_path.display(),
+                new_db_path.display(),
+            );
+            config.database_url = format!("sqlite:{}", pre_process_legacy_path.display());
         }
     }
 

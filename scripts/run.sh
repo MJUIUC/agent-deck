@@ -2,9 +2,10 @@
 set -euo pipefail
 
 AGENT_DECK_HOME="${AGENT_DECK_HOME:-$HOME/.agent-deck}"
-LOG_FILE="$AGENT_DECK_HOME/server.log"
-PID_FILE="$AGENT_DECK_HOME/agent-deck.pid"
-BINARY="$AGENT_DECK_HOME/bin/agent-deck"
+PROCESS_DIR="$AGENT_DECK_HOME/.process"
+LOG_FILE="$PROCESS_DIR/server.log"
+PID_FILE="$PROCESS_DIR/agent-deck.pid"
+BINARY="$PROCESS_DIR/bin/agent-deck"
 PORT="${AGENT_DECK_PORT:-7474}"
 
 if [ ! -f "$BINARY" ]; then
@@ -13,9 +14,9 @@ if [ ! -f "$BINARY" ]; then
   exit 1
 fi
 
-mkdir -p "$AGENT_DECK_HOME"
+mkdir -p "$PROCESS_DIR"
 
-PUBLIC_DIR="$AGENT_DECK_HOME/public" \
+export PUBLIC_DIR="$PROCESS_DIR/public"
 nohup "$BINARY" >> "$LOG_FILE" 2>&1 &
 
 echo $! > "$PID_FILE"

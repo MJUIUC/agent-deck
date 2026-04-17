@@ -239,6 +239,15 @@ pub async fn build_router(
         tokio::spawn(async move {
             let status = crate::services::tailscale::get_status(state.server_port).await;
             crate::routes::tailscale::log_status(&status);
+            let status = if status.connected && !status.serving {
+                tracing::info!(
+                    "tailscale: auto-starting serve on port {}",
+                    state.server_port
+                );
+                crate::services::tailscale::enable_serve(state.server_port).await
+            } else {
+                status
+            };
             let mut cache = state.tailscale_status_cache.write().await;
             *cache = Some((status, std::time::Instant::now()));
         });
@@ -436,6 +445,10 @@ pub async fn build_router(
             axum::routing::post(tailscale::connect),
         )
         .route(
+            "/api/tailscale/serve",
+            axum::routing::post(tailscale::serve),
+        )
+        .route(
             "/api/tailscale/funnel/enable",
             axum::routing::post(tailscale::enable_funnel),
         )
@@ -561,9 +574,12 @@ mod tests {
 
         let config = Config {
             port: 7474,
+            process_dir: std::path::PathBuf::from("/tmp/test-deck/.process"),
             data_dir: std::path::PathBuf::from("/tmp/test-deck"),
             mcp_dir: std::path::PathBuf::from("/tmp/test-deck/mcp"),
             personas_dir: std::path::PathBuf::from("/tmp/test-deck/personas"),
+            workspaces_dir: std::path::PathBuf::from("/tmp/test-deck/workspaces"),
+            skills_dir: std::path::PathBuf::from("/tmp/test-deck/skills"),
             database_url: "sqlite::memory:".to_string(),
             public_dir: "./public".to_string(),
             fcm_service_account_json: None,
@@ -753,9 +769,12 @@ mod tests {
             pool,
             config: Config {
                 port: 7474,
+                process_dir: std::path::PathBuf::from("/tmp/test-deck/.process"),
                 data_dir: std::path::PathBuf::from("/tmp/test-deck"),
                 mcp_dir: std::path::PathBuf::from("/tmp/test-deck/mcp"),
                 personas_dir: std::path::PathBuf::from("/tmp/test-deck/personas"),
+                workspaces_dir: std::path::PathBuf::from("/tmp/test-deck/workspaces"),
+                skills_dir: std::path::PathBuf::from("/tmp/test-deck/skills"),
                 database_url: "sqlite::memory:".to_string(),
                 public_dir: "./public".to_string(),
                 fcm_service_account_json: None,
@@ -805,9 +824,12 @@ mod tests {
             pool,
             config: Config {
                 port: 7474,
+                process_dir: std::path::PathBuf::from("/tmp/test-deck/.process"),
                 data_dir: std::path::PathBuf::from("/tmp/test-deck"),
                 mcp_dir: std::path::PathBuf::from("/tmp/test-deck/mcp"),
                 personas_dir: std::path::PathBuf::from("/tmp/test-deck/personas"),
+                workspaces_dir: std::path::PathBuf::from("/tmp/test-deck/workspaces"),
+                skills_dir: std::path::PathBuf::from("/tmp/test-deck/skills"),
                 database_url: "sqlite::memory:".to_string(),
                 public_dir: "./public".to_string(),
                 fcm_service_account_json: None,
@@ -868,9 +890,12 @@ mod tests {
             pool,
             config: Config {
                 port: 7474,
+                process_dir: std::path::PathBuf::from("/tmp/test-deck/.process"),
                 data_dir: std::path::PathBuf::from("/tmp/test-deck"),
                 mcp_dir: std::path::PathBuf::from("/tmp/test-deck/mcp"),
                 personas_dir: std::path::PathBuf::from("/tmp/test-deck/personas"),
+                workspaces_dir: std::path::PathBuf::from("/tmp/test-deck/workspaces"),
+                skills_dir: std::path::PathBuf::from("/tmp/test-deck/skills"),
                 database_url: "sqlite::memory:".to_string(),
                 public_dir: "./public".to_string(),
                 fcm_service_account_json: None,

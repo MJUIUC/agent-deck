@@ -549,28 +549,18 @@ async fn run_inner(
     // Resolve the thread's workspace directory. Created if it doesn't exist.
     // Skipped for routine runs — routines don't need file-sharing instructions.
     let workspace_path: Option<String> = if !is_routine {
-        match dirs::home_dir() {
-            Some(home) => {
-                let workspace_dir = home.join(".agent-deck").join("workspaces").join(thread_id);
-                if let Err(e) = tokio::fs::create_dir_all(&workspace_dir).await {
-                    warn!(thread_id = %thread_id, error = %e, "Failed to create workspace dir; continuing without it");
-                    None
-                } else {
-                    // Update workspace meta.json with the thread's human-readable title
-                    let workspaces_root = home.join(".agent-deck").join("workspaces");
-                    crate::routes::fs::update_workspace_meta(
-                        &workspaces_root,
-                        thread_id,
-                        &thread.title,
-                    )
-                    .await;
-                    Some(workspace_dir.to_string_lossy().into_owned())
-                }
-            }
-            None => {
-                warn!(thread_id = %thread_id, "Could not determine home directory; workspace path skipped");
-                None
-            }
+        let workspace_dir = state.config.workspaces_dir.join(thread_id);
+        if let Err(e) = tokio::fs::create_dir_all(&workspace_dir).await {
+            warn!(thread_id = %thread_id, error = %e, "Failed to create workspace dir; continuing without it");
+            None
+        } else {
+            crate::routes::fs::update_workspace_meta(
+                &state.config.workspaces_dir,
+                thread_id,
+                &thread.title,
+            )
+            .await;
+            Some(workspace_dir.to_string_lossy().into_owned())
         }
     } else {
         None

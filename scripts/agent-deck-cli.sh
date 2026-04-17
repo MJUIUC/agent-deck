@@ -4,9 +4,10 @@
 
 agent-deck() {
   local AGENT_DECK_HOME="${AGENT_DECK_HOME:-$HOME/.agent-deck}"
-  local PID_FILE="$AGENT_DECK_HOME/agent-deck.pid"
-  local LOG_FILE="$AGENT_DECK_HOME/server.log"
-  local RUN_SCRIPT="$AGENT_DECK_HOME/run.sh"
+  local PROCESS_DIR="$AGENT_DECK_HOME/.process"
+  local PID_FILE="$PROCESS_DIR/agent-deck.pid"
+  local LOG_FILE="$PROCESS_DIR/server.log"
+  local RUN_SCRIPT="$PROCESS_DIR/run.sh"
 
   case "${1:-help}" in
     start)
@@ -17,18 +18,26 @@ agent-deck() {
       fi
       ;;
     stop)
+      local PORT="${AGENT_DECK_PORT:-7474}"
+      local stopped=false
       if [ -f "$PID_FILE" ]; then
         local PID
         PID=$(cat "$PID_FILE")
         if kill -0 "$PID" 2>/dev/null; then
           kill "$PID"
-          rm -f "$PID_FILE"
           echo "agent-deck stopped (PID $PID)"
-        else
-          echo "agent-deck is not running (stale PID file removed)"
-          rm -f "$PID_FILE"
+          stopped=true
         fi
-      else
+        rm -f "$PID_FILE"
+      fi
+      # Fallback: kill anything still holding the port (e.g. started via cargo run)
+      local PORT_PIDS
+      PORT_PIDS=$(lsof -ti ":$PORT" 2>/dev/null || true)
+      if [ -n "$PORT_PIDS" ]; then
+        echo "$PORT_PIDS" | xargs kill 2>/dev/null || true
+        stopped=true
+      fi
+      if [ "$stopped" = false ]; then
         echo "agent-deck is not running"
       fi
       ;;
@@ -56,7 +65,11 @@ agent-deck() {
       fi
       ;;
     open)
-      open "http://localhost:${AGENT_DECK_PORT:-7474}"
+      if [[ "$(uname)" == "Darwin" ]]; then
+        open "http://localhost:${AGENT_DECK_PORT:-7474}"
+      else
+        xdg-open "http://localhost:${AGENT_DECK_PORT:-7474}"
+      fi
       ;;
     help|--help|-h)
       echo "Usage: agent-deck <command>"
