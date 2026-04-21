@@ -38,6 +38,53 @@ async fn main() -> Result<()> {
     tokio::fs::create_dir_all(&config.workspaces_dir).await?;
     tokio::fs::create_dir_all(&config.skills_dir).await?;
 
+    // ── Write README.md into data_dir ────────────────────────────────────────
+    // Written once on first run so the directory is self-documenting.
+    {
+        let readme_path = config.data_dir.join("README.md");
+        if tokio::fs::metadata(&readme_path).await.is_err() {
+            let readme_content = "# ~/.agent-deck
+
+This directory is the home of your agent-deck installation.
+
+## Directories
+
+| Directory    | Purpose                                                  |
+|--------------|----------------------------------------------------------|
+| mcp/         | MCP server configs and locally installed MCP binaries    |
+| personas/    | Persona avatars and assets                               |
+| skills/      | Skill definitions                                        |
+| workspaces/  | Per-thread file workspaces used by the agent at runtime  |
+| .process/    | Runtime internals — binary, database, logs, assets       |
+
+## .process/
+
+This hidden directory is agent-deck's action space for the lifetime of the
+installation. It is created and managed by the server automatically. You
+should not need to modify anything inside it directly.
+
+| Path                    | Purpose                        |
+|-------------------------|--------------------------------|
+| .process/bin/           | The agent-deck server binary   |
+| .process/.database/     | SQLite database                |
+| .process/public/        | Web frontend assets            |
+| .process/server.log     | Server log file                |
+| .process/agent-deck.pid | PID of the running server      |
+
+## Data
+
+Your conversations, personas, memory, and credentials are stored in the
+SQLite database at `.process/.database/agent-deck.db`.
+
+Workspaces created by the agent during conversations are in `workspaces/`,
+organised by thread ID.
+";
+            if let Err(error) = tokio::fs::write(&readme_path, readme_content).await {
+                warn!("Failed to write README.md to data_dir: {}", error);
+            }
+        }
+    }
+
     info!("data_dir: {}", config.data_dir.display());
 
     // ── Legacy migration hints ────────────────────────────────────────────────

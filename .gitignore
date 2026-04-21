@@ -63,3 +63,8 @@ data/avatars/
 
 # Vendor — copilot-api is a git submodule, not ignored
 # vendor/copilot-api is tracked via .gitmodules
+#
+
+# Build documentation
+docs/
+mockups/

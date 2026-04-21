@@ -6,8 +6,10 @@ import { ProviderSettings } from "./ProviderSettings";
 import { PersonaSettings } from "./PersonaSettings";
 import { CredentialsSettings } from "./CredentialsSettings";
 import { McpServerSettings } from "./McpServerSettings";
-
-import { GeneralSettings } from "./GeneralSettings";
+import { ProfileSettings } from "./ProfileSettings";
+import { AppearanceSettings } from "./AppearanceSettings";
+import { TailscaleSettings } from "./TailscaleSettings";
+import { AccessSettings } from "./AccessSettings";
 import { ArchivedThreadsSettings } from "./ArchivedThreadsSettings";
 
 export interface SettingsModalProps {
@@ -170,8 +172,10 @@ export function SettingsModal({
                 <PersonaSettings onDataChanged={handleDataChanged} />
               )}
               {tab === "mcp-servers" && <McpServerSettings />}
-
-              {tab === "general" && <GeneralSettings />}
+              {tab === "profile" && <ProfileSettings />}
+              {tab === "appearance" && <AppearanceSettings />}
+              {tab === "tailscale" && <TailscaleSettings />}
+              {tab === "access" && <AccessSettings />}
               {tab === "archived-threads" && <ArchivedThreadsSettings />}
             </div>
           </div>

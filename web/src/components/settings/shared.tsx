@@ -8,7 +8,10 @@ export type SettingsTab =
   | "credentials"
   | "personas"
   | "mcp-servers"
-  | "general"
+  | "profile"
+  | "appearance"
+  | "tailscale"
+  | "access"
   | "archived-threads";
 
 export type ProviderFormData = {
@@ -271,6 +274,130 @@ export const EMOJI_CATEGORIES: { label: string; emojis: string[] }[] = [
     ],
   },
 ];
+
+// ─── SectionCard ─────────────────────────────────────────────────────────────
+
+export function SectionCard({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        background: "var(--bg-tertiary)",
+        border: "1px solid var(--border-subtle)",
+        borderRadius: 10,
+        padding: "16px 18px",
+        marginBottom: 16,
+      }}
+    >
+      <div style={{ marginBottom: children ? 12 : 0 }}>
+        <div
+          style={{
+            fontSize: 13,
+            fontWeight: 600,
+            color: "var(--text-primary)",
+            marginBottom: subtitle ? 3 : 0,
+          }}
+        >
+          {title}
+        </div>
+        {subtitle && (
+          <div style={{ fontSize: 12, color: "var(--text-tertiary)" }}>
+            {subtitle}
+          </div>
+        )}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+// ─── ToggleRow ────────────────────────────────────────────────────────────────
+
+export function ToggleRow({
+  title,
+  description,
+  value,
+  onChange,
+  disabled,
+}: {
+  title: string;
+  description?: string;
+  value: boolean;
+  onChange: (v: boolean) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 16,
+        paddingBottom: 12,
+        marginBottom: 12,
+        borderBottom: "1px solid var(--border-subtle)",
+      }}
+    >
+      <div>
+        <div
+          style={{
+            fontSize: 13,
+            fontWeight: 500,
+            color: "var(--text-primary)",
+            marginBottom: description ? 2 : 0,
+          }}
+        >
+          {title}
+        </div>
+        {description && (
+          <div style={{ fontSize: 12, color: "var(--text-tertiary)" }}>
+            {description}
+          </div>
+        )}
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={value}
+        onClick={() => !disabled && onChange(!value)}
+        disabled={disabled}
+        style={{
+          width: 36,
+          height: 20,
+          borderRadius: 10,
+          border: "none",
+          background: value ? "var(--accent-primary)" : "var(--bg-elevated)",
+          cursor: disabled ? "default" : "pointer",
+          position: "relative",
+          flexShrink: 0,
+          transition: "background 0.2s",
+          outline: "none",
+          opacity: disabled ? 0.5 : 1,
+        }}
+      >
+        <span
+          style={{
+            position: "absolute",
+            top: 3,
+            left: value ? 19 : 3,
+            width: 14,
+            height: 14,
+            borderRadius: "50%",
+            background: value ? "var(--text-inverse)" : "var(--text-tertiary)",
+            transition: "left 0.2s, background 0.2s",
+          }}
+        />
+      </button>
+    </div>
+  );
+}
 
 // ─── Shared field primitives ──────────────────────────────────────────────────
 
