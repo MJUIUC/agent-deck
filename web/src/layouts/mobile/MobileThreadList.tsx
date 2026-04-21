@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useThreadStore } from "@/stores/useThreadStore";
 import { formatThreadTime } from "@/hooks/useTimeFormat";
 import type { Thread } from "@/types";
-import { tailscaleApi } from "@/api/client";
+
 import styles from "./MobileThreadList.module.css";
 
 interface MobileThreadListProps {
@@ -87,23 +87,6 @@ export function MobileThreadList({
   const activeThreadId = useThreadStore((s) => s.activeThreadId);
   const isLoading = useThreadStore((s) => s.isLoading);
 
-  const [vpnConnected, setVpnConnected] = useState(false);
-
-  useEffect(() => {
-    const fetchVpnStatus = async () => {
-      try {
-        const result = await tailscaleApi.getStatus();
-        setVpnConnected(result.data.connected);
-      } catch {
-        // leave state unchanged
-      }
-    };
-
-    fetchVpnStatus();
-    const interval = setInterval(fetchVpnStatus, 60_000);
-    return () => clearInterval(interval);
-  }, []);
-
   const isEmpty = !isLoading && threads.length === 0;
 
   return (
@@ -111,21 +94,6 @@ export function MobileThreadList({
       {/* ── Nav bar ── */}
       <nav className={styles.navBar} aria-label="Thread list navigation">
         <span className={styles.navTitle}>agent-deck</span>
-        <span
-          title={
-            vpnConnected ? "Tailscale connected" : "Tailscale not connected"
-          }
-          style={{
-            display: "inline-block",
-            width: 8,
-            height: 8,
-            borderRadius: "50%",
-            background: vpnConnected ? "#4caf7d" : "#f5a623",
-            marginLeft: 6,
-            flexShrink: 0,
-            alignSelf: "center",
-          }}
-        />
         <div className={styles.navActions}>
           <button
             className={styles.navIconBtn}
