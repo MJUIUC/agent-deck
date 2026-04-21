@@ -133,6 +133,33 @@
     text-overflow: ellipsis;
     letter-spacing: -0.01em;
     line-height: 1.2;
+    cursor: pointer;
+}
+
+.agentName:hover {
+    text-decoration: underline dotted var(--text-tertiary);
+    text-underline-offset: 3px;
+}
+
+.agentNameInput {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+    background: transparent;
+    border: none;
+    border-bottom: 1.5px solid var(--accent-primary);
+    outline: none;
+    padding: 0;
+    width: 100%;
+    min-width: 0;
+    font-family: inherit;
+}
+
+.agentNameInput:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 
 .agentStatus {
