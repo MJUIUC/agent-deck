@@ -209,9 +209,3 @@ The project is built in phases. See `PLAN.md` §10 for the full execution plan.
 | 6 — Push Notifications | ⏳ Pending | FCM integration |
 | 7 — MCP Depth | ⏳ Pending | Tool inspector, local process management |
 | 8 — Polish | ⏳ Pending | Error handling, empty states, hardening |
-
----
-
-## License
-
-Private project. All rights reserved.
