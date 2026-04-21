@@ -1657,10 +1657,15 @@ async fn execute_tool_calls(
 
                 if let Some(tool) = maybe_built_in {
                     // ── Built-in tool ──────────────────────────────────────────
-                    let args: serde_json::Value = match serde_json::from_str(&tool_args) {
+                    let args_str = if tool_args.trim().is_empty() {
+                        "{}"
+                    } else {
+                        &tool_args
+                    };
+                    let args: serde_json::Value = match serde_json::from_str(args_str) {
                         Ok(v) => v,
                         Err(e) => {
-                            return (tool_json_parse_error(&tool_name, &e, &tool_args), vec![]);
+                            return (tool_json_parse_error(&tool_name, &e, args_str), vec![]);
                         }
                     };
                     let context = ToolContext {
