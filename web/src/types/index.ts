@@ -30,6 +30,7 @@ export interface Thread {
   summary_updated_at: string | null;
   summary_message_count: number;
   auto_summarize: boolean;
+  auto_retitle: boolean;
   created_at: string;
   updated_at: string;
   // Joined client-side for display convenience

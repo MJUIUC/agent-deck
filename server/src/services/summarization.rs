@@ -80,10 +80,11 @@ pub async fn summarize_thread(state: &AppState, thread_id: &str) -> Result<()> {
         Option<String>,
         Option<String>,
         Option<String>,
+        bool,
     )> = sqlx::query_as(
         "SELECT user_id, summary, summary_message_count, auto_summarize,
                 active_provider, active_model, persona_id,
-                summary_updated_at
+                summary_updated_at, auto_retitle
          FROM threads WHERE id = ?",
     )
     .bind(thread_id)
@@ -100,6 +101,7 @@ pub async fn summarize_thread(state: &AppState, thread_id: &str) -> Result<()> {
         active_model,
         persona_id,
         _summary_updated_at,
+        auto_retitle,
     ) = match thread_row {
         Some(r) => r,
         None => {
@@ -329,6 +331,57 @@ pub async fn summarize_thread(state: &AppState, thread_id: &str) -> Result<()> {
         to_seq = new_to_seq,
         "summarize_thread: summary updated successfully"
     );
+
+    // ── 8. Auto-retitle from summary ──────────────────────────────────────────
+    // If auto_retitle is enabled, regenerate the thread title from the new summary.
+    if auto_retitle {
+        let retitle_prompt = format!(
+            "Generate a chat title no longer than 7 words based on this conversation summary.\n\
+             Reply with only the title — no punctuation, no quotes, no explanation.\n\n\
+             Summary: {}",
+            new_summary
+        );
+
+        let retitle_messages = vec![async_openai::types::ChatCompletionRequestMessage::User(
+            async_openai::types::ChatCompletionRequestUserMessageArgs::default()
+                .content(retitle_prompt.as_str())
+                .build()
+                .unwrap(),
+        )];
+
+        match provider.complete(&model_id, retitle_messages, vec![]).await {
+            Ok(raw_title) => {
+                let generated_title = crate::services::title::truncate_title(
+                    raw_title.trim().trim_matches('"').trim_matches('\'').trim(),
+                );
+
+                if let Err(e) =
+                    sqlx::query("UPDATE threads SET title = ?, updated_at = ? WHERE id = ?")
+                        .bind(&generated_title)
+                        .bind(&now)
+                        .bind(thread_id)
+                        .execute(&state.pool)
+                        .await
+                {
+                    warn!(thread_id = %thread_id, error = %e, "summarize_thread: auto-retitle failed to update title");
+                } else {
+                    tracing::info!(thread_id = %thread_id, title = %generated_title, "summarize_thread: auto-retitle updated title");
+
+                    if let Err(e) = state.send_global_event(
+                        crate::services::copilot::GlobalEvent::TitleUpdated {
+                            thread_id: thread_id.to_string(),
+                            title: generated_title,
+                        },
+                    ) {
+                        tracing::debug!(thread_id = %thread_id, error = %e, "auto-retitle TitleUpdated broadcast had no receivers");
+                    }
+                }
+            }
+            Err(e) => {
+                warn!(thread_id = %thread_id, error = %e, "summarize_thread: auto-retitle LLM call failed");
+            }
+        }
+    }
 
     Ok(())
 }

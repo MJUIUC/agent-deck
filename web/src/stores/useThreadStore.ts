@@ -20,6 +20,7 @@ export function makeDraftThread(persona: AgentPersona): Thread {
     summary_updated_at: null,
     summary_message_count: 0,
     auto_summarize: false,
+    auto_retitle: false,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     persona,

@@ -53,7 +53,7 @@ pub async fn list(
         "SELECT id, user_id, persona_id, title, active_model, active_provider,
                 system_prompt_addendum, status, show_tool_activity, show_system_events,
                 summary, summary_updated_at, summary_message_count, auto_summarize,
-                created_at, updated_at
+                auto_retitle, created_at, updated_at
          FROM threads
          WHERE user_id = ? AND status = ?
          ORDER BY updated_at DESC",
@@ -132,7 +132,7 @@ pub async fn get(
         "SELECT id, user_id, persona_id, title, active_model, active_provider,
                 system_prompt_addendum, status, show_tool_activity, show_system_events,
                 summary, summary_updated_at, summary_message_count, auto_summarize,
-                created_at, updated_at
+                auto_retitle, created_at, updated_at
          FROM threads
          WHERE id = ? AND user_id = ?",
     )
@@ -197,8 +197,8 @@ pub async fn create(
              (id, user_id, persona_id, title, active_model, active_provider,
               system_prompt_addendum, status, show_tool_activity, show_system_events,
               summary, summary_updated_at, summary_message_count, auto_summarize,
-              created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+              auto_retitle, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&thread.id)
     .bind(&thread.user_id)
@@ -214,6 +214,7 @@ pub async fn create(
     .bind(&thread.summary_updated_at)
     .bind(thread.summary_message_count)
     .bind(thread.auto_summarize)
+    .bind(thread.auto_retitle)
     .bind(&thread.created_at)
     .bind(&thread.updated_at)
     .execute(&state.pool)
@@ -258,7 +259,7 @@ pub async fn update(
         "SELECT id, user_id, persona_id, title, active_model, active_provider,
                 system_prompt_addendum, status, show_tool_activity, show_system_events,
                 summary, summary_updated_at, summary_message_count, auto_summarize,
-                created_at, updated_at
+                auto_retitle, created_at, updated_at
          FROM threads
          WHERE id = ? AND user_id = ?",
     )
@@ -298,6 +299,7 @@ pub async fn update(
         .unwrap_or(existing.show_system_events);
 
     let auto_summarize = payload.auto_summarize.unwrap_or(existing.auto_summarize);
+    let auto_retitle = payload.auto_retitle.unwrap_or(existing.auto_retitle);
 
     let now = chrono::Utc::now()
         .format("%Y-%m-%dT%H:%M:%S%.3fZ")
@@ -307,7 +309,7 @@ pub async fn update(
         "UPDATE threads
          SET title = ?, active_model = ?, active_provider = ?,
              system_prompt_addendum = ?, show_tool_activity = ?,
-             show_system_events = ?, auto_summarize = ?, updated_at = ?
+             show_system_events = ?, auto_summarize = ?, auto_retitle = ?, updated_at = ?
          WHERE id = ? AND user_id = ?",
     )
     .bind(title)
@@ -317,6 +319,7 @@ pub async fn update(
     .bind(show_tool_activity)
     .bind(show_system_events)
     .bind(auto_summarize)
+    .bind(auto_retitle)
     .bind(&now)
     .bind(&id)
     .bind(&user_id)
@@ -338,6 +341,7 @@ pub async fn update(
         summary_updated_at: existing.summary_updated_at,
         summary_message_count: existing.summary_message_count,
         auto_summarize,
+        auto_retitle,
         created_at: existing.created_at,
         updated_at: now,
     };
@@ -574,7 +578,7 @@ async fn verify_thread_ownership(
         "SELECT id, user_id, persona_id, title, active_model, active_provider,
                 system_prompt_addendum, status, show_tool_activity, show_system_events,
                 summary, summary_updated_at, summary_message_count, auto_summarize,
-                created_at, updated_at
+                auto_retitle, created_at, updated_at
          FROM threads
          WHERE id = ? AND user_id = ?",
     )

@@ -35,6 +35,7 @@ function makeThread(id: string, updatedAt: string): Thread {
     summary_updated_at: null,
     summary_message_count: 0,
     auto_summarize: false,
+    auto_retitle: false,
     created_at: "2024-01-01T00:00:00.000Z",
     updated_at: updatedAt,
   };

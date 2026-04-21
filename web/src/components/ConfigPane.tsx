@@ -506,6 +506,10 @@ export function ConfigPane({
   );
   const [isSavingAutoSummarize, setIsSavingAutoSummarize] = useState(false);
 
+  // ── Auto-retitle ──
+  const [autoRetitle, setAutoRetitle] = useState(thread.auto_retitle ?? false);
+  const [isSavingAutoRetitle, setIsSavingAutoRetitle] = useState(false);
+
   // ── MCP servers ──
   const lastMcpStatusChange = useSseStore((s) => s.lastMcpStatusChange);
 
@@ -551,6 +555,7 @@ export function ConfigPane({
     setAddendum(thread.system_prompt_addendum ?? "");
     setShowSystemEvents(thread.show_system_events ?? false);
     setAutoSummarize(thread.auto_summarize ?? true);
+    setAutoRetitle(thread.auto_retitle ?? false);
     setShowAttachPicker(false);
     setShowArchiveConfirm(false);
     // Reset routines form state on thread switch
@@ -569,6 +574,7 @@ export function ConfigPane({
     thread.system_prompt_addendum,
     thread.show_system_events,
     thread.auto_summarize,
+    thread.auto_retitle,
   ]);
 
   // Load attached MCP servers whenever the pane opens or thread changes
@@ -750,6 +756,23 @@ export function ConfigPane({
       setAutoSummarize(!val); // revert on error
     } finally {
       setIsSavingAutoSummarize(false);
+    }
+  };
+
+  const handleAutoRetitleChange = async (val: boolean) => {
+    setAutoRetitle(val);
+    setIsSavingAutoRetitle(true);
+    try {
+      const res = await threadsApi.update(thread.id, {
+        auto_retitle: val,
+      });
+      if (res.data) {
+        onThreadUpdated(res.data);
+      }
+    } catch {
+      setAutoRetitle(!val); // revert on error
+    } finally {
+      setIsSavingAutoRetitle(false);
     }
   };
 
@@ -1363,6 +1386,26 @@ export function ConfigPane({
                     disabled={isSavingAutoSummarize}
                   />
                 </div>
+
+                {/* Auto-retitle toggle — only shown when auto_summarize is on */}
+                {autoSummarize && (
+                  <div className={styles.toolActivityRow}>
+                    <div className={styles.toolActivityInfo}>
+                      <div className={styles.toolActivityLabel}>
+                        Auto-retitle from summary
+                      </div>
+                      <div className={styles.toolActivityHint}>
+                        Regenerate the thread title each time a new compaction
+                        summary is written
+                      </div>
+                    </div>
+                    <Toggle
+                      checked={autoRetitle}
+                      onChange={handleAutoRetitleChange}
+                      disabled={isSavingAutoRetitle}
+                    />
+                  </div>
+                )}
 
                 {/* Last summarized hint */}
                 {thread.summary && thread.summary_updated_at && (

@@ -17,6 +17,7 @@ pub struct Thread {
     pub summary_updated_at: Option<String>,
     pub summary_message_count: i64,
     pub auto_summarize: bool,
+    pub auto_retitle: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -40,6 +41,7 @@ pub struct UpdateThread {
     pub show_tool_activity: Option<bool>,
     pub show_system_events: Option<bool>,
     pub auto_summarize: Option<bool>,
+    pub auto_retitle: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -79,6 +81,7 @@ impl Thread {
             summary_updated_at: None,
             summary_message_count: 0,
             auto_summarize: true,
+            auto_retitle: false,
             created_at: now.clone(),
             updated_at: now,
         }
