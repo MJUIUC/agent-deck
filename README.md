@@ -214,4 +214,16 @@ The project is built in phases. See `PLAN.md` §10 for the full execution plan.
 
 ## License
 
-Private project. All rights reserved.
+This project is licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)**.
+
+See [LICENSE](LICENSE) for the full text.
+
+### Why AGPL?
+
+Agent-deck is inspired by and builds upon the open-source work of [Zed](https://github.com/zed-industries/zed), which is licensed under AGPL v3. We've chosen the same license to:
+
+- **Honor Zed's licensing requirements** for derived or influenced work
+- **Close the SaaS loophole**: Anyone who runs a modified version of this software as a network service must share their source code with users
+- **Ensure software freedom** for everyone who uses or deploys agent-deck
+
+If you modify agent-deck and make it available over a network (including Tailscale, the public internet, or any other remote access), you must provide the complete source code of your modified version to your users under the same AGPL v3 license.
