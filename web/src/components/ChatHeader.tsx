@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import type { Thread, Provider, Model } from "@/types";
+import { useThreadStore } from "@/stores/useThreadStore";
 import { providersApi, modelsApi, threadsApi } from "@/api/client";
 import { Menu, FolderOpen } from "lucide-react";
 import styles from "./ChatHeader.module.css";
@@ -10,7 +11,7 @@ interface ChatHeaderProps {
   onToggleConfig?: () => void;
   onMobileMenuOpen?: () => void;
   onOpenExplorer?: () => void;
-  onTitleUpdate?: (newTitle: string) => void;
+  onTitleUpdate?: (updated: Thread) => void;
 }
 
 // Module-level cache so all ChatHeader instances share one fetch per session.
@@ -135,8 +136,9 @@ export function ChatHeader({
 
     setSaving(true);
     try {
-      await threadsApi.update(thread.id, { title: trimmed });
-      onTitleUpdate?.(trimmed);
+      const res = await threadsApi.update(thread.id, { title: trimmed });
+      useThreadStore.getState().upsertThread(res.data);
+      onTitleUpdate?.(res.data);
     } catch {
       // Leave editing mode even on failure — the caller's state will not update,
       // so the title will revert to the previous value on next render.
