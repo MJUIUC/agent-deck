@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Plus } from "lucide-react";
 import { Webhook } from "@carbon/icons-react";
-import { webhookBindingsApi } from "@/api/client";
+import { webhookBindingsApi, tailscaleApi } from "@/api/client";
 import type { WebhookBinding } from "@/api/client";
 import {
   Btn,
@@ -10,7 +10,6 @@ import {
   FieldSelect,
   FieldTextarea,
   FieldHint,
-  SectionCard,
 } from "./shared";
 
 // ─── Source badge ─────────────────────────────────────────────────────────────
@@ -160,11 +159,17 @@ function SecretPanel({
   webhookUrl,
   secret,
   warning,
+  funnelEnabled,
+  onEnableFunnel,
+  funnelLoading,
   onDone,
 }: {
   webhookUrl: string;
   secret: string;
   warning?: string;
+  funnelEnabled?: boolean;
+  onEnableFunnel?: () => void;
+  funnelLoading?: boolean;
   onDone: () => void;
 }) {
   return (
@@ -271,7 +276,7 @@ function SecretPanel({
       </div>
 
       {/* Optional server warning */}
-      {warning && (
+      {warning && !funnelEnabled && (
         <div
           style={{
             padding: "8px 12px",
@@ -283,7 +288,38 @@ function SecretPanel({
             marginBottom: 14,
           }}
         >
-          {warning}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              flexWrap: "wrap",
+            }}
+          >
+            <span style={{ flex: 1 }}>{warning}</span>
+            {onEnableFunnel && (
+              <button
+                type="button"
+                onClick={onEnableFunnel}
+                disabled={funnelLoading}
+                style={{
+                  padding: "4px 10px",
+                  borderRadius: 6,
+                  background: "rgba(196,90,90,0.15)",
+                  border: "1px solid rgba(196,90,90,0.4)",
+                  color: "var(--error)",
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: funnelLoading ? "default" : "pointer",
+                  opacity: funnelLoading ? 0.6 : 1,
+                  fontFamily: "inherit",
+                  flexShrink: 0,
+                }}
+              >
+                {funnelLoading ? "Enabling…" : "Enable Funnel"}
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -554,10 +590,14 @@ function WebhookCard({
   binding,
   onEdit,
   onDelete,
+  onToggle,
+  toggling,
 }: {
   binding: WebhookBinding;
   onEdit: () => void;
   onDelete: () => void;
+  onToggle: () => void;
+  toggling?: boolean;
 }) {
   const promptPreview = binding.prompt
     ? binding.prompt.length > 100
@@ -635,6 +675,9 @@ function WebhookCard({
           borderTop: "1px solid var(--border-subtle)",
         }}
       >
+        <Btn variant="ghost" sm onClick={onToggle} disabled={toggling}>
+          {binding.enabled ? "Disable" : "Enable"}
+        </Btn>
         <Btn variant="ghost" sm onClick={onEdit}>
           Edit
         </Btn>
@@ -667,6 +710,13 @@ export function WebhookSettings() {
     warning?: string;
   } | null>(null);
 
+  // ── Toggle state ────────────────────────────────────────────────────────────
+  const [toggling, setToggling] = useState<string | null>(null);
+
+  // ── Funnel state ────────────────────────────────────────────────────────────
+  const [funnelEnabled, setFunnelEnabled] = useState<boolean | null>(null);
+  const [funnelLoading, setFunnelLoading] = useState(false);
+
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
@@ -684,7 +734,48 @@ export function WebhookSettings() {
 
   useEffect(() => {
     load();
+    tailscaleApi
+      .getStatus()
+      .then((res) => setFunnelEnabled(res.data.funnel_enabled))
+      .catch(() => {});
   }, [load]);
+
+  const handleToggle = async (binding: WebhookBinding) => {
+    setToggling(binding.id);
+    // Optimistic update
+    setBindings((prev) =>
+      prev.map((b) =>
+        b.id === binding.id ? { ...b, enabled: !b.enabled } : b,
+      ),
+    );
+    try {
+      const res = await webhookBindingsApi.toggle(binding.id);
+      setBindings((prev) =>
+        prev.map((b) => (b.id === binding.id ? res.data : b)),
+      );
+    } catch {
+      // Revert on error
+      setBindings((prev) =>
+        prev.map((b) =>
+          b.id === binding.id ? { ...b, enabled: binding.enabled } : b,
+        ),
+      );
+    } finally {
+      setToggling(null);
+    }
+  };
+
+  const handleEnableFunnel = async () => {
+    setFunnelLoading(true);
+    try {
+      const res = await tailscaleApi.enableFunnel();
+      setFunnelEnabled(res.data.funnel_enabled);
+    } catch {
+      // leave state unchanged
+    } finally {
+      setFunnelLoading(false);
+    }
+  };
 
   const handleAdd = () => {
     setFormInitial(null);
@@ -773,6 +864,9 @@ export function WebhookSettings() {
           webhookUrl={pendingSecret.url}
           secret={pendingSecret.secret}
           warning={pendingSecret.warning}
+          funnelEnabled={funnelEnabled ?? true}
+          onEnableFunnel={handleEnableFunnel}
+          funnelLoading={funnelLoading}
           onDone={() => setPendingSecret(null)}
         />
       )}
@@ -879,6 +973,8 @@ export function WebhookSettings() {
                 binding={binding}
                 onEdit={() => handleEdit(binding)}
                 onDelete={() => handleDeleteClick(binding)}
+                onToggle={() => handleToggle(binding)}
+                toggling={toggling === binding.id}
               />
             ),
           )}

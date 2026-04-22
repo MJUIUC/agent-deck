@@ -22,6 +22,52 @@ fn is_service_not_running(stderr: &str) -> bool {
     stderr.contains("failed to connect to local Tailscale service")
 }
 
+/// Parse the JSON output of `tailscale status --json` into (connected, hostname, ip_address).
+pub(crate) fn parse_status_json(json: &str) -> (bool, Option<String>, Option<String>) {
+    let parsed: serde_json::Value = match serde_json::from_str(json) {
+        Ok(value) => value,
+        Err(_) => return (false, None, None),
+    };
+
+    let backend_state = parsed
+        .get("BackendState")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let connected = backend_state == "Running";
+
+    let hostname = parsed
+        .get("Self")
+        .and_then(|s| s.get("DNSName"))
+        .and_then(|v| v.as_str())
+        .map(|name| name.trim_end_matches('.').to_string());
+
+    let ip_address = parsed
+        .get("Self")
+        .and_then(|s| s.get("TailscaleIPs"))
+        .and_then(|ips| ips.as_array())
+        .and_then(|ips| ips.first())
+        .and_then(|v| v.as_str())
+        .map(|ip| ip.to_string());
+
+    (connected, hostname, ip_address)
+}
+
+/// Extract the first `https://` URL from `tailscale funnel status` text output.
+pub(crate) fn extract_funnel_url(text: &str) -> Option<String> {
+    for line in text.lines() {
+        if line.contains("https://") {
+            let url = line
+                .split_whitespace()
+                .find(|token| token.starts_with("https://"))
+                .map(|token| token.trim_end_matches('/').to_string());
+            if url.is_some() {
+                return url;
+            }
+        }
+    }
+    None
+}
+
 /// Query live Tailscale status. Never panics — errors are logged and converted
 /// to a safe default TailscaleStatus with installed/connected = false.
 pub async fn get_status(port: u16) -> TailscaleStatus {
@@ -75,36 +121,19 @@ pub async fn get_status(port: u16) -> TailscaleStatus {
     }
 
     let raw_json = String::from_utf8_lossy(&status_output.stdout);
-    let parsed: serde_json::Value = match serde_json::from_str(&raw_json) {
-        Ok(value) => value,
-        Err(_) => {
+    let (connected, hostname, ip_address) = {
+        let result = parse_status_json(&raw_json);
+        if raw_json.trim().is_empty()
+            || serde_json::from_str::<serde_json::Value>(&raw_json).is_err()
+        {
             return TailscaleStatus {
                 installed: true,
                 version,
                 ..Default::default()
             };
         }
+        result
     };
-
-    let backend_state = parsed
-        .get("BackendState")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    let connected = backend_state == "Running";
-
-    let hostname = parsed
-        .get("Self")
-        .and_then(|s| s.get("DNSName"))
-        .and_then(|v| v.as_str())
-        .map(|name| name.trim_end_matches('.').to_string());
-
-    let ip_address = parsed
-        .get("Self")
-        .and_then(|s| s.get("TailscaleIPs"))
-        .and_then(|ips| ips.as_array())
-        .and_then(|ips| ips.first())
-        .and_then(|v| v.as_str())
-        .map(|ip| ip.to_string());
 
     let (funnel_enabled, funnel_url) = check_funnel(port).await;
 
@@ -220,16 +249,9 @@ pub async fn check_funnel(port: u16) -> (bool, Option<String>) {
     }
 
     // Extract the https:// URL from the output.
-    for line in stdout.lines() {
-        if line.contains("https://") {
-            let url = line
-                .split_whitespace()
-                .find(|token| token.starts_with("https://"))
-                .map(|token| token.trim_end_matches('/').to_string());
-            if let Some(url) = url {
-                return (true, Some(url));
-            }
-        }
+    let url = extract_funnel_url(&stdout);
+    if url.is_some() {
+        return (true, url);
     }
 
     // Port is referenced but no URL found — still treat as enabled.
@@ -334,6 +356,72 @@ pub async fn enable_funnel(port: u16) -> TailscaleStatus {
     }
 
     get_status(port).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{extract_funnel_url, parse_status_json};
+
+    #[test]
+    fn parse_status_connected() {
+        let json = r#"{
+            "BackendState": "Running",
+            "Self": {
+                "DNSName": "mac-mini.tail1234.ts.net.",
+                "TailscaleIPs": ["100.64.1.2"]
+            }
+        }"#;
+        let (connected, hostname, ip_address) = parse_status_json(json);
+        assert!(connected);
+        assert_eq!(hostname, Some("mac-mini.tail1234.ts.net".to_string()));
+        assert_eq!(ip_address, Some("100.64.1.2".to_string()));
+    }
+
+    #[test]
+    fn parse_status_disconnected() {
+        let json = r#"{
+            "BackendState": "Stopped",
+            "Self": {
+                "DNSName": "mac-mini.tail1234.ts.net.",
+                "TailscaleIPs": ["100.64.1.2"]
+            }
+        }"#;
+        let (connected, _, _) = parse_status_json(json);
+        assert!(!connected);
+    }
+
+    #[test]
+    fn parse_status_not_running() {
+        let json = r#"{
+            "BackendState": "NeedsLogin",
+            "Self": {
+                "DNSName": "mac-mini.tail1234.ts.net.",
+                "TailscaleIPs": ["100.64.1.2"]
+            }
+        }"#;
+        let (connected, _, _) = parse_status_json(json);
+        assert!(!connected);
+    }
+
+    #[test]
+    fn extract_funnel_url_present() {
+        let output = "\
+# Funnel on:\n\
+  - https://mac-mini.tail1234.ts.net 443 -> 8080\n\
+";
+        let url = extract_funnel_url(output);
+        assert_eq!(url, Some("https://mac-mini.tail1234.ts.net".to_string()));
+    }
+
+    #[test]
+    fn extract_funnel_url_absent() {
+        let output = "\
+# Funnel off\n\
+No tunnels active.\n\
+";
+        let url = extract_funnel_url(output);
+        assert_eq!(url, None);
+    }
 }
 
 /// Disable Tailscale Funnel for the given port.

@@ -13,9 +13,11 @@ import {
   credentialsApi,
   mcpServersApi,
   personasApi,
+  webhookBindingsApi,
   type Credential,
   type CredentialType,
   type McpServerConfig,
+  type WebhookBinding,
 } from "../../api/client";
 import { usePlatform } from "../../hooks/usePlatform";
 import { useSseStore } from "../../stores/useSseStore";
@@ -264,6 +266,9 @@ export function MobileSettings() {
   const [credShowSecretWarning, setCredShowSecretWarning] = useState(false);
   const [credError, setCredError] = useState("");
 
+  // ── Webhook Bindings ─────────────────────────────────────────────────────────
+  const [webhookBindings, setWebhookBindings] = useState<WebhookBinding[]>([]);
+
   // ── MCP Servers ──────────────────────────────────────────────────────────────
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [mcpDrawerOpen, setMcpDrawerOpen] = useState(false);
@@ -314,6 +319,10 @@ export function MobileSettings() {
     personasApi
       .list()
       .then((res) => setPersonas(res.data))
+      .catch(() => {});
+    webhookBindingsApi
+      .list()
+      .then((res) => setWebhookBindings(res.data))
       .catch(() => {});
   }, []);
 
@@ -978,6 +987,27 @@ export function MobileSettings() {
             >
               + Add Server
             </button>
+          </div>
+        </section>
+
+        {/* ── Webhooks ── */}
+        <section className={styles.section}>
+          <div className={styles.sectionLabel}>Webhooks</div>
+          <div className={styles.sectionCard}>
+            <div className={styles.listRow}>
+              <div className={styles.listRowLabel}>
+                <div className={styles.listRowName}>
+                  {(() => {
+                    const activeCount = webhookBindings.filter(
+                      (b) => b.enabled,
+                    ).length;
+                    return activeCount > 0
+                      ? `Webhooks — ${activeCount} active`
+                      : "Webhooks — none";
+                  })()}
+                </div>
+              </div>
+            </div>
           </div>
         </section>
 
