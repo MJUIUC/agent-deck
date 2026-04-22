@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { Pencil, Eye, EyeOff } from "lucide-react";
 import { TailscaleStatusCard } from "../../components/settings/TailscaleStatusCard";
 import {
   useThemeStore,
@@ -32,6 +33,24 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuffer> {
     output[i] = rawData.charCodeAt(i);
   }
   return output;
+}
+
+// ─── Credential helpers ───────────────────────────────────────────────────────
+
+function slugify(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .replace(/__+/g, "_");
+}
+
+function sanitizeKey(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, "")
+    .replace(/^_+/, "")
+    .replace(/__+/g, "_");
 }
 
 function mcpStatusDotClass(status: McpServer["status"]): string {
@@ -138,6 +157,47 @@ const ANDROID_STEPS: ReactNode[] = [
 
 // ─── Theme palettes ───────────────────────────────────────────────────────────
 
+// ─── Credential type config ───────────────────────────────────────────────────
+
+const CREDENTIAL_TYPE_CONFIG: Record<
+  CredentialType,
+  { label: string; keyLabel: string; keyPlaceholder: string }
+> = {
+  api_key: {
+    label: "API Key",
+    keyLabel: "API Key",
+    keyPlaceholder: "Paste API key…",
+  },
+  pat: {
+    label: "Personal Access Token",
+    keyLabel: "API Key",
+    keyPlaceholder: "Paste token…",
+  },
+  bearer_token: {
+    label: "Bearer Token",
+    keyLabel: "API Key",
+    keyPlaceholder: "Paste token…",
+  },
+  key_secret_pair: {
+    label: "Key / Secret Pair",
+    keyLabel: "API Key",
+    keyPlaceholder: "Paste API key…",
+  },
+  service_account: {
+    label: "Service Account",
+    keyLabel: "Password",
+    keyPlaceholder: "Paste password…",
+  },
+};
+
+const CRED_TYPE_LABELS: Record<string, string> = {
+  api_key: "API Key",
+  pat: "PAT",
+  bearer_token: "Bearer",
+  key_secret_pair: "Key/Secret",
+  service_account: "Service Account",
+};
+
 const PALETTES: { id: Palette; label: string; accent: string }[] = [
   { id: "olive", label: "Olive", accent: "#7c8c5a" },
   { id: "slate", label: "Slate", accent: "#58a6ff" },
@@ -186,12 +246,23 @@ export function MobileSettings() {
   >(null);
   const [credKey, setCredKey] = useState("");
   const [credDisplayName, setCredDisplayName] = useState("");
-  const [credService, setCredService] = useState("");
   const [credType, setCredType] = useState<CredentialType>("api_key");
   const [credSecret, setCredSecret] = useState("");
   const [credKeyError, setCredKeyError] = useState("");
   const [credDisplayNameError, setCredDisplayNameError] = useState("");
   const [credSaving, setCredSaving] = useState(false);
+  const [credServiceUrl, setCredServiceUrl] = useState("");
+  const [credUsername, setCredUsername] = useState("");
+  const [credEmail, setCredEmail] = useState("");
+  const [credPassword, setCredPassword] = useState("");
+  const [credShowSecret, setCredShowSecret] = useState(false);
+  const [credShowPassword, setCredShowPassword] = useState(false);
+  const [credKeyTouched, setCredKeyTouched] = useState(false);
+  const [editingCredential, setEditingCredential] = useState<Credential | null>(
+    null,
+  );
+  const [credShowSecretWarning, setCredShowSecretWarning] = useState(false);
+  const [credError, setCredError] = useState("");
 
   // ── MCP Servers ──────────────────────────────────────────────────────────────
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
@@ -416,16 +487,52 @@ export function MobileSettings() {
   function resetCredentialForm() {
     setCredKey("");
     setCredDisplayName("");
-    setCredService("");
     setCredType("api_key");
     setCredSecret("");
     setCredKeyError("");
     setCredDisplayNameError("");
+    setCredServiceUrl("");
+    setCredUsername("");
+    setCredEmail("");
+    setCredPassword("");
+    setCredShowSecret(false);
+    setCredShowPassword(false);
+    setCredKeyTouched(false);
+    setEditingCredential(null);
+    setCredShowSecretWarning(false);
+    setCredError("");
+  }
+
+  function handleEditCredential(credential: Credential) {
+    setEditingCredential(credential);
+    setCredKey(credential.key);
+    setCredDisplayName(credential.display_name);
+    setCredServiceUrl(credential.service_url ?? "");
+    setCredType(credential.credential_type as CredentialType);
+    setCredUsername(credential.username ?? "");
+    setCredEmail(credential.email ?? "");
+    setCredSecret("");
+    setCredPassword("");
+    setCredShowSecret(false);
+    setCredShowPassword(false);
+    setCredKeyTouched(false);
+    setCredKeyError("");
+    setCredDisplayNameError("");
+    setCredShowSecretWarning(false);
+    setCredError("");
+    setCredentialDrawerOpen(true);
+  }
+
+  function handleCredDisplayNameBlur() {
+    if (!editingCredential && !credKeyTouched && credDisplayName.trim()) {
+      const generated = slugify(credDisplayName.trim());
+      if (generated) setCredKey(generated);
+    }
   }
 
   async function handleSaveCredential() {
     let hasError = false;
-    if (!credKey.trim()) {
+    if (!editingCredential && !credKey.trim()) {
       setCredKeyError("Key is required");
       hasError = true;
     }
@@ -433,22 +540,56 @@ export function MobileSettings() {
       setCredDisplayNameError("Display name is required");
       hasError = true;
     }
+    if (
+      credType === "service_account" &&
+      !credUsername.trim() &&
+      !credEmail.trim()
+    ) {
+      setCredError("A service account must have at least a username or email.");
+      hasError = true;
+    }
     if (hasError) return;
 
+    const secretIsDirty =
+      !!editingCredential && (!!credSecret || !!credPassword);
+    if (secretIsDirty && !credShowSecretWarning) {
+      setCredShowSecretWarning(true);
+      return;
+    }
+
     setCredSaving(true);
+    setCredError("");
     try {
-      await credentialsApi.create({
-        key: credKey.trim(),
-        display_name: credDisplayName.trim(),
-        credential_type: credType,
-        secret: credSecret || undefined,
-      });
+      if (editingCredential) {
+        const payload: Record<string, string | undefined> = {
+          display_name: credDisplayName.trim(),
+          credential_type: credType,
+          service_url: credServiceUrl.trim() || undefined,
+          username: credUsername.trim() || undefined,
+          email: credEmail.trim() || undefined,
+        };
+        if (credSecret) payload.secret = credSecret;
+        if (credPassword) payload.password = credPassword;
+        await credentialsApi.update(editingCredential.id, payload);
+      } else {
+        await credentialsApi.create({
+          key: credKey.trim(),
+          display_name: credDisplayName.trim(),
+          credential_type: credType,
+          service_url: credServiceUrl.trim() || undefined,
+          username: credUsername.trim() || undefined,
+          email: credEmail.trim() || undefined,
+          secret: credSecret || undefined,
+          password: credPassword || undefined,
+        });
+      }
       const refreshed = await credentialsApi.list();
       setCredentials(refreshed);
       setCredentialDrawerOpen(false);
       resetCredentialForm();
     } catch (err) {
       console.error("Save credential failed:", err);
+      setCredError(err instanceof Error ? err.message : "Save failed.");
     } finally {
       setCredSaving(false);
     }
@@ -726,10 +867,11 @@ export function MobileSettings() {
                     {credential.display_name}
                   </div>
                   <div className={styles.listRowSub}>
-                    {credential.key}
-                    {credential.service && (
-                      <span className={styles.badge}>{credential.service}</span>
-                    )}
+                    {credential.key}{" "}
+                    <span className={styles.badge}>
+                      {CRED_TYPE_LABELS[credential.credential_type] ??
+                        credential.credential_type}
+                    </span>
                   </div>
                 </div>
                 {pendingDeleteCredentialKey === credential.id ? (
@@ -749,12 +891,23 @@ export function MobileSettings() {
                     </button>
                   </div>
                 ) : (
-                  <button
-                    className={styles.deleteButton}
-                    onClick={() => setPendingDeleteCredentialKey(credential.id)}
-                  >
-                    ✕
-                  </button>
+                  <>
+                    <button
+                      className={styles.editButton}
+                      onClick={() => handleEditCredential(credential)}
+                      title="Edit"
+                    >
+                      <Pencil size={13} />
+                    </button>
+                    <button
+                      className={styles.deleteButton}
+                      onClick={() =>
+                        setPendingDeleteCredentialKey(credential.id)
+                      }
+                    >
+                      ✕
+                    </button>
+                  </>
                 )}
               </div>
             ))}
@@ -1041,7 +1194,9 @@ export function MobileSettings() {
         className={`${styles.drawer} ${credentialDrawerOpen ? styles.drawerOpen : ""}`}
       >
         <div className={styles.drawerHeader}>
-          <span className={styles.drawerTitle}>Add Credential</span>
+          <span className={styles.drawerTitle}>
+            {editingCredential ? "Edit Credential" : "Add Credential"}
+          </span>
           <button
             className={styles.drawerCloseBtn}
             onClick={() => {
@@ -1053,22 +1208,7 @@ export function MobileSettings() {
           </button>
         </div>
         <div className={styles.drawerBody}>
-          <div className={styles.formGroup}>
-            <label className={styles.formLabel}>Key</label>
-            <input
-              className={styles.formInput}
-              type="text"
-              value={credKey}
-              onChange={(e) => {
-                setCredKey(e.target.value);
-                if (credKeyError) setCredKeyError("");
-              }}
-              placeholder="MY_API_KEY"
-            />
-            {credKeyError && (
-              <div className={styles.formError}>{credKeyError}</div>
-            )}
-          </div>
+          {/* Display Name */}
           <div className={styles.formGroup}>
             <label className={styles.formLabel}>Display Name</label>
             <input
@@ -1079,53 +1219,265 @@ export function MobileSettings() {
                 setCredDisplayName(e.target.value);
                 if (credDisplayNameError) setCredDisplayNameError("");
               }}
-              placeholder="My API Key"
+              onBlur={handleCredDisplayNameBlur}
+              placeholder="e.g. My GitHub PAT"
             />
             {credDisplayNameError && (
               <div className={styles.formError}>{credDisplayNameError}</div>
             )}
           </div>
+
+          {/* Credential Type */}
           <div className={styles.formGroup}>
-            <label className={styles.formLabel}>Service (optional)</label>
-            <input
-              className={styles.formInput}
-              type="text"
-              value={credService}
-              onChange={(e) => setCredService(e.target.value)}
-              placeholder="e.g. github, openai"
-            />
-          </div>
-          <div className={styles.formGroup}>
-            <label className={styles.formLabel}>Type</label>
+            <label className={styles.formLabel}>Credential Type</label>
             <select
               className={styles.formSelect}
               value={credType}
               onChange={(e) => setCredType(e.target.value as CredentialType)}
+              disabled={!!editingCredential}
             >
-              <option value="api_key">API Key</option>
-              <option value="pat">Personal Access Token</option>
-              <option value="bearer_token">Bearer Token</option>
+              {(
+                Object.entries(CREDENTIAL_TYPE_CONFIG) as [
+                  CredentialType,
+                  { label: string; keyLabel: string; keyPlaceholder: string },
+                ][]
+              ).map(([val, cfg]) => (
+                <option key={val} value={val}>
+                  {cfg.label}
+                </option>
+              ))}
             </select>
+            {editingCredential && (
+              <div className={styles.formHint}>
+                Credential type cannot be changed after creation.
+              </div>
+            )}
           </div>
+
+          {/* Service URL */}
           <div className={styles.formGroup}>
-            <label className={styles.formLabel}>Secret</label>
+            <label className={styles.formLabel}>Service URL (optional)</label>
             <input
               className={styles.formInput}
-              type="password"
-              value={credSecret}
-              onChange={(e) => setCredSecret(e.target.value)}
-              autoComplete="new-password"
+              type="text"
+              value={credServiceUrl}
+              onChange={(e) => setCredServiceUrl(e.target.value)}
+              placeholder="https://github.com"
             />
           </div>
+
+          {/* Key — create mode only */}
+          {!editingCredential && (
+            <div className={styles.formGroup}>
+              <label className={styles.formLabel}>Key</label>
+              <input
+                className={styles.formInput}
+                type="text"
+                value={credKey}
+                onChange={(e) => {
+                  setCredKeyTouched(true);
+                  setCredKey(sanitizeKey(e.target.value));
+                  if (credKeyError) setCredKeyError("");
+                }}
+                placeholder="Generated from display name…"
+              />
+              {credKeyError && (
+                <div className={styles.formError}>{credKeyError}</div>
+              )}
+              <div className={styles.formHint}>
+                Auto-generated from your display name. Used internally to
+                reference this credential.
+              </div>
+            </div>
+          )}
+
+          {/* service_account fields: Username, Email, Password */}
+          {credType === "service_account" && (
+            <>
+              <div className={styles.formGroup}>
+                <label className={styles.formLabel}>Username</label>
+                <input
+                  className={styles.formInput}
+                  type="text"
+                  value={credUsername}
+                  onChange={(e) => setCredUsername(e.target.value)}
+                  placeholder="johndoe"
+                />
+              </div>
+              <div className={styles.formGroup}>
+                <label className={styles.formLabel}>Email</label>
+                <input
+                  className={styles.formInput}
+                  type="text"
+                  value={credEmail}
+                  onChange={(e) => setCredEmail(e.target.value)}
+                  placeholder="john@example.com"
+                />
+              </div>
+              <div className={styles.formGroup}>
+                <label className={styles.formLabel}>Password</label>
+                <div className={styles.formInputWrapper}>
+                  <input
+                    className={styles.formInput}
+                    type={credShowPassword ? "text" : "password"}
+                    value={credPassword}
+                    onChange={(e) => setCredPassword(e.target.value)}
+                    placeholder={
+                      editingCredential
+                        ? "Leave blank to keep existing"
+                        : "Paste password…"
+                    }
+                    autoComplete="new-password"
+                  />
+                  <button
+                    type="button"
+                    className={styles.eyeToggleBtn}
+                    onClick={() => setCredShowPassword((v) => !v)}
+                    tabIndex={-1}
+                  >
+                    {credShowPassword ? (
+                      <EyeOff size={16} />
+                    ) : (
+                      <Eye size={16} />
+                    )}
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Primary secret field — all types except service_account */}
+          {credType !== "service_account" && (
+            <div className={styles.formGroup}>
+              <label className={styles.formLabel}>
+                {CREDENTIAL_TYPE_CONFIG[credType].keyLabel}
+              </label>
+              <div className={styles.formInputWrapper}>
+                <input
+                  className={styles.formInput}
+                  type={credShowSecret ? "text" : "password"}
+                  value={credSecret}
+                  onChange={(e) => setCredSecret(e.target.value)}
+                  placeholder={
+                    editingCredential
+                      ? "Leave blank to keep existing"
+                      : CREDENTIAL_TYPE_CONFIG[credType].keyPlaceholder
+                  }
+                  autoComplete="new-password"
+                />
+                <button
+                  type="button"
+                  className={styles.eyeToggleBtn}
+                  onClick={() => setCredShowSecret((v) => !v)}
+                  tabIndex={-1}
+                >
+                  {credShowSecret ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* API Secret — key_secret_pair only */}
+          {credType === "key_secret_pair" && (
+            <div className={styles.formGroup}>
+              <label className={styles.formLabel}>API Secret</label>
+              <div className={styles.formInputWrapper}>
+                <input
+                  className={styles.formInput}
+                  type={credShowPassword ? "text" : "password"}
+                  value={credPassword}
+                  onChange={(e) => setCredPassword(e.target.value)}
+                  placeholder={
+                    editingCredential
+                      ? "Leave blank to keep existing"
+                      : "Paste API secret…"
+                  }
+                  autoComplete="new-password"
+                />
+                <button
+                  type="button"
+                  className={styles.eyeToggleBtn}
+                  onClick={() => setCredShowPassword((v) => !v)}
+                  tabIndex={-1}
+                >
+                  {credShowPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Inline error */}
+          {credError && (
+            <div className={styles.formError} style={{ marginBottom: 12 }}>
+              {credError}
+            </div>
+          )}
+
+          {/* Secret replacement warning */}
+          {credShowSecretWarning && (
+            <div className={styles.warningBox}>
+              <div className={styles.warningBoxTitle}>
+                ⚠ Replace existing secret?
+              </div>
+              <p className={styles.warningBoxBody}>
+                The existing secret will be permanently overwritten and cannot
+                be recovered. Make sure you have the new value saved somewhere
+                safe before continuing.
+              </p>
+              <div className={styles.warningBoxActions}>
+                <button
+                  className={styles.dangerBtn}
+                  onClick={handleSaveCredential}
+                  disabled={credSaving}
+                >
+                  {credSaving ? "Saving…" : "Yes, replace it"}
+                </button>
+                <button
+                  className={styles.ghostBtn}
+                  style={{
+                    flex: "none",
+                    padding: "8px 14px",
+                    fontSize: "0.8125rem",
+                  }}
+                  onClick={() => setCredShowSecretWarning(false)}
+                  disabled={credSaving}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
         </div>
         <div className={styles.drawerFooter}>
-          <button
-            className={styles.primaryBtn}
-            onClick={handleSaveCredential}
-            disabled={credSaving}
-          >
-            Save
-          </button>
+          {editingCredential ? (
+            <div className={styles.drawerFooterRow}>
+              <button
+                className={styles.ghostBtn}
+                onClick={() => {
+                  setCredentialDrawerOpen(false);
+                  resetCredentialForm();
+                }}
+                disabled={credSaving}
+              >
+                Cancel
+              </button>
+              <button
+                className={styles.primaryBtn}
+                onClick={handleSaveCredential}
+                disabled={credSaving}
+              >
+                {credSaving ? "Saving…" : "Save Changes"}
+              </button>
+            </div>
+          ) : (
+            <button
+              className={styles.primaryBtn}
+              onClick={handleSaveCredential}
+              disabled={credSaving}
+            >
+              {credSaving ? "Saving…" : "Add Credential"}
+            </button>
+          )}
         </div>
       </div>
 
