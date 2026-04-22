@@ -24,7 +24,7 @@ pub enum AppError {
     Conflict(String),
 
     #[error("Database error: {0}")]
-    Database(#[from] sqlx::Error),
+    Database(sqlx::Error),
 
     #[error("Internal error: {0}")]
     Internal(#[from] anyhow::Error),
@@ -36,6 +36,21 @@ pub enum AppError {
     Validation(String),
 }
 
+impl From<sqlx::Error> for AppError {
+    #[track_caller]
+    fn from(e: sqlx::Error) -> Self {
+        let location = std::panic::Location::caller();
+        tracing::error!(
+            error = ?e,
+            error.display = %e,
+            file = %location.file(),
+            line = %location.line(),
+            "sqlx::Error at {}:{}", location.file(), location.line()
+        );
+        AppError::Database(e)
+    }
+}
+
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, message) = match &self {
@@ -44,17 +59,10 @@ impl IntoResponse for AppError {
             AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "Unauthorized".to_string()),
             AppError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg.clone()),
             AppError::Conflict(msg) => (StatusCode::CONFLICT, msg.clone()),
-            AppError::Database(e) => {
-                tracing::error!(
-                    error = ?e,
-                    error.display = %e,
-                    "Database error in request handler"
-                );
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "A database error occurred".to_string(),
-                )
-            }
+            AppError::Database(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("A database error occurred: {e}"),
+            ),
             AppError::Internal(e) => {
                 tracing::error!("Internal error: {:?}", e);
                 (
