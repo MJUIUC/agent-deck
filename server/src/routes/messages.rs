@@ -33,7 +33,7 @@ pub(crate) async fn verify_thread_ownership(
         "SELECT id, user_id, persona_id, title, active_model, active_provider,
                 system_prompt_addendum, status, show_tool_activity, show_system_events,
                 summary, summary_updated_at, summary_message_count, auto_summarize,
-                created_at, updated_at
+                auto_retitle, created_at, updated_at
          FROM threads
          WHERE id = ? AND user_id = ?",
     )
