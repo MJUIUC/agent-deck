@@ -14,6 +14,7 @@ import { FolderOpen } from "lucide-react";
 import type { Thread } from "@/types";
 import { useMessageStore } from "@/stores/useMessageStore";
 import { useSseStore } from "@/stores/useSseStore";
+import { useThreadStore } from "@/stores/useThreadStore";
 import { fsApi, threadsApi } from "@/api/client";
 import { resolveDisplayNames } from "@/components/ChatHeader";
 import { MessageBubble, StreamingBubble } from "@/components/MessageBubble";
@@ -364,7 +365,8 @@ export function MobileChatView({
     }
     setTitleSaving(true);
     try {
-      await threadsApi.update(thread.id, { title: trimmed });
+      const res = await threadsApi.update(thread.id, { title: trimmed });
+      useThreadStore.getState().upsertThread(res.data);
     } catch {
       // revert silently — thread title from store will re-render on next update
     } finally {
