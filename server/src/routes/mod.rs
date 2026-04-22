@@ -47,6 +47,8 @@ pub mod sse;
 pub mod tailscale;
 pub mod threads;
 pub mod tokens;
+pub mod webhook_bindings;
+pub mod webhooks;
 
 /// A unit of work — kept for compatibility with any remaining references,
 /// but the channel-based agent dispatch has been replaced with per-thread
@@ -272,7 +274,8 @@ pub async fn build_router(
         .route(
             "/api/push/vapid-public-key",
             get(push::get_vapid_public_key),
-        );
+        )
+        .route("/api/webhooks", axum::routing::post(webhooks::receive));
 
     // Protected API routes (auth required)
     let protected_api = Router::new()
@@ -455,6 +458,29 @@ pub async fn build_router(
         .route(
             "/api/tailscale/funnel/disable",
             axum::routing::post(tailscale::disable_funnel),
+        )
+        // Webhook bindings — global registry
+        .route(
+            "/api/webhook-bindings",
+            get(webhook_bindings::list_global).post(webhook_bindings::create_global),
+        )
+        .route(
+            "/api/webhook-bindings/:id",
+            axum::routing::delete(webhook_bindings::delete_global),
+        )
+        .route(
+            "/api/webhook-bindings/:id/toggle",
+            axum::routing::patch(webhook_bindings::toggle_global),
+        )
+        // Webhook bindings — thread attachments
+        .route(
+            "/api/threads/:id/webhook-bindings",
+            get(webhook_bindings::list_attachments).post(webhook_bindings::attach),
+        )
+        .route(
+            "/api/threads/:id/webhook-bindings/:attachment_id",
+            axum::routing::delete(webhook_bindings::detach)
+                .patch(webhook_bindings::update_attachment),
         )
         .layer(middleware::from_fn_with_state(
             state.clone(),

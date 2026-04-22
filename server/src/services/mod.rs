@@ -16,3 +16,4 @@ pub mod terminal_mcp_install;
 pub mod title;
 pub mod tools;
 pub mod vapid;
+pub mod webhook_formatters;

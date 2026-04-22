@@ -597,6 +597,7 @@ async fn run_inner(
         },
         mcp_tools: mcp_tool_defs.clone(),
         workspace_path: workspace_path.clone(),
+        skills_dir: Some(state.config.skills_dir.to_string_lossy().into_owned()),
     });
 
     // ── 5. Generation loop — with reactive summarization on context-length error ──
@@ -705,6 +706,7 @@ async fn run_inner(
                     },
                     mcp_tools: mcp_tool_defs.clone(),
                     workspace_path: workspace_path.clone(),
+                    skills_dir: Some(state.config.skills_dir.to_string_lossy().into_owned()),
                 });
                 continue;
             }

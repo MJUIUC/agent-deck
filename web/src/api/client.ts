@@ -740,3 +740,83 @@ export const tailscaleApi = {
   startServe: (): Promise<{ data: TailscaleStatus }> =>
     apiFetch("/api/tailscale/serve", { method: "POST" }),
 };
+
+// ── Webhook Bindings ──────────────────────────────────────────────────────────
+
+export interface WebhookBinding {
+  id: string;
+  name: string;
+  source: string;
+  event_type: string;
+  enabled: boolean;
+  created_at: string;
+  // only on create response:
+  webhook_url?: string;
+  secret?: string;
+}
+
+export interface ThreadWebhookBinding {
+  id: string; // attachment id
+  webhook_binding_id: string;
+  name: string;
+  source: string;
+  event_type: string;
+  enabled: boolean; // from global binding
+  prompt?: string | null;
+  created_at: string;
+}
+
+export const webhookBindingsApi = {
+  list: () => apiFetch<{ data: WebhookBinding[] }>("/api/webhook-bindings"),
+
+  create: (name: string, source: string, event_type: string) =>
+    apiFetch<{
+      data: WebhookBinding & { webhook_url: string; secret: string };
+      warning?: string;
+    }>("/api/webhook-bindings", {
+      method: "POST",
+      body: JSON.stringify({ name, source, event_type }),
+    }),
+
+  delete: (id: string) =>
+    apiFetch<{ data: { deleted: boolean } }>(`/api/webhook-bindings/${id}`, {
+      method: "DELETE",
+    }),
+
+  toggle: (id: string) =>
+    apiFetch<{ data: WebhookBinding }>(`/api/webhook-bindings/${id}/toggle`, {
+      method: "PATCH",
+    }),
+};
+
+export const threadWebhookBindingsApi = {
+  list: (threadId: string) =>
+    apiFetch<{ data: ThreadWebhookBinding[] }>(
+      `/api/threads/${threadId}/webhook-bindings`,
+    ),
+
+  attach: (threadId: string, webhookBindingId: string, prompt?: string) =>
+    apiFetch<{ data: ThreadWebhookBinding }>(
+      `/api/threads/${threadId}/webhook-bindings`,
+      {
+        method: "POST",
+        body: JSON.stringify({ webhook_binding_id: webhookBindingId, prompt }),
+      },
+    ),
+
+  detach: (threadId: string, attachmentId: string) =>
+    apiFetch<{ data: { detached: boolean } }>(
+      `/api/threads/${threadId}/webhook-bindings/${attachmentId}`,
+      { method: "DELETE" },
+    ),
+
+  updatePrompt: (
+    threadId: string,
+    attachmentId: string,
+    prompt: string | null,
+  ) =>
+    apiFetch<{ data: ThreadWebhookBinding }>(
+      `/api/threads/${threadId}/webhook-bindings/${attachmentId}`,
+      { method: "PATCH", body: JSON.stringify({ prompt }) },
+    ),
+};
