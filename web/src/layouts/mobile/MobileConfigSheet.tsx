@@ -36,6 +36,7 @@ interface MobileConfigSheetProps {
   thread: Thread;
   isOpen: boolean;
   onClose: () => void;
+  onArchive?: () => void;
 }
 
 // ─── Toggle sub-component ─────────────────────────────────────────────────────
@@ -185,6 +186,7 @@ export function MobileConfigSheet({
   thread,
   isOpen,
   onClose,
+  onArchive,
 }: MobileConfigSheetProps) {
   // ── Routines state ───────────────────────────────────────────────────────
   const [routines, setRoutines] = useState<Routine[]>([]);
@@ -208,6 +210,10 @@ export function MobileConfigSheet({
   const [mcpLoading, setMcpLoading] = useState(false);
   const [showMcpPicker, setShowMcpPicker] = useState(false);
 
+  // ── Archive state ─────────────────────────────────────────────────────────
+  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
+  const [isArchiving, setIsArchiving] = useState(false);
+
   // ── SSE ───────────────────────────────────────────────────────────────────
   const lastMcpStatusChange = useSseStore((s) => s.lastMcpStatusChange);
 
@@ -222,6 +228,9 @@ export function MobileConfigSheet({
   useEffect(() => {
     if (isOpen) {
       hasOpenedRef.current = true;
+    } else {
+      // Reset archive confirm state when sheet closes
+      setShowArchiveConfirm(false);
     }
   }, [isOpen]);
 
@@ -463,6 +472,21 @@ export function MobileConfigSheet({
     },
     [thread.id, mcpServersMap],
   );
+
+  // ── Archive handler ───────────────────────────────────────────────────────
+  const handleArchiveConfirm = useCallback(async () => {
+    setIsArchiving(true);
+    try {
+      await useThreadStore.getState().archiveThread(thread.id);
+      onClose();
+      onArchive?.();
+    } catch {
+      // Silent fail — store will not update, user can retry
+    } finally {
+      setIsArchiving(false);
+      setShowArchiveConfirm(false);
+    }
+  }, [thread.id, onClose, onArchive]);
 
   const handleAttachServer = useCallback(
     async (server: McpServer) => {
@@ -816,6 +840,47 @@ export function MobileConfigSheet({
                   </div>
                 );
               })()}
+          </section>
+
+          {/* ── Archive ──────────────────────────────────────────────── */}
+          <section className={styles.section}>
+            {showArchiveConfirm ? (
+              <div className={styles.archiveConfirm}>
+                <p className={styles.archiveConfirmText}>
+                  Archive this thread?
+                </p>
+                <p className={styles.archiveConfirmHint}>
+                  It will be moved to Archived Threads in Settings and can be
+                  restored at any time.
+                </p>
+                <div className={styles.archiveConfirmActions}>
+                  <button
+                    type="button"
+                    className={styles.archiveCancelBtn}
+                    onClick={() => setShowArchiveConfirm(false)}
+                    disabled={isArchiving}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.archiveConfirmBtn}
+                    onClick={handleArchiveConfirm}
+                    disabled={isArchiving}
+                  >
+                    {isArchiving ? "Archiving…" : "Archive"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className={styles.archiveBtn}
+                onClick={() => setShowArchiveConfirm(true)}
+              >
+                Archive Thread
+              </button>
+            )}
           </section>
         </div>
         {/* /body */}

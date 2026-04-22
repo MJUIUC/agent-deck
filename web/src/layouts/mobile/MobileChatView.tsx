@@ -670,6 +670,10 @@ export function MobileChatView({
         thread={thread}
         isOpen={configSheetOpen}
         onClose={() => setConfigSheetOpen(false)}
+        onArchive={() => {
+          setConfigSheetOpen(false);
+          onBack();
+        }}
       />
 
       <FileExplorerModal
