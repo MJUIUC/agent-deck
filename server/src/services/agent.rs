@@ -299,25 +299,14 @@ async fn run_inner(
 ) -> Result<()> {
     // ── 1. Fetch the thread and its persona ────────────────────────────────────
     debug!(thread_id = %thread_id, "run_inner: fetching thread");
-    let thread: crate::models::thread::Thread = sqlx::query_as(
-        "SELECT id, user_id, persona_id, title, active_model, active_provider,
-                system_prompt_addendum, status, show_tool_activity, show_system_events,
-                summary, summary_updated_at, summary_message_count, auto_summarize,
-                auto_retitle, created_at, updated_at
-         FROM threads WHERE id = ?",
-    )
-    .bind(thread_id)
-    .fetch_one(&state.pool)
-    .await
-    .map_err(|e| {
-        error!(
-            thread_id = %thread_id,
-            error = ?e,
-            error.display = %e,
-            "run_inner: failed to fetch thread"
-        );
-        anyhow!("Failed to load thread {}: {}", thread_id, e)
-    })?;
+    let thread: crate::models::thread::Thread =
+        crate::db::threads::fetch_by_id(&state.pool, thread_id)
+            .await
+            .map_err(|e| {
+                error!(thread_id = %thread_id, error = ?e, error.display = %e, "run_inner: failed to fetch thread");
+                anyhow!("Failed to load thread {}: {}", thread_id, e)
+            })?
+            .ok_or_else(|| anyhow!("Thread {} not found", thread_id))?;
     debug!(thread_id = %thread_id, "run_inner: thread fetched successfully");
 
     let user_id = &thread.user_id;
@@ -643,16 +632,12 @@ async fn run_inner(
                 let _ = crate::services::summarization::summarize_thread(state, thread_id).await;
 
                 // Reload thread with updated summary fields
-                let updated: crate::models::thread::Thread = match sqlx::query_as(
-                    "SELECT id, user_id, persona_id, title, active_model, active_provider,
-                            system_prompt_addendum, status, show_tool_activity, show_system_events,
-                            summary, summary_updated_at, summary_message_count, auto_summarize,
-                            auto_retitle, created_at, updated_at
-                     FROM threads WHERE id = ?",
+                let updated: crate::models::thread::Thread = match crate::db::threads::fetch_by_id(
+                    &state.pool,
+                    thread_id,
                 )
-                .bind(thread_id)
-                .fetch_one(&state.pool)
                 .await
+                .and_then(|opt| opt.ok_or(sqlx::Error::RowNotFound))
                 {
                     Ok(t) => t,
                     Err(e) => {

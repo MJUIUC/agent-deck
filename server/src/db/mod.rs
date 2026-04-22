@@ -1,3 +1,5 @@
+pub mod threads;
+
 use anyhow::Result;
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqlitePoolOptions},

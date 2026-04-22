@@ -52,29 +52,12 @@ pub async fn list(
     }
 
     debug!(user_id = %user_id, status = %status, "list: fetching threads");
-    let threads: Vec<Thread> = sqlx::query_as(
-        "SELECT id, user_id, persona_id, title, active_model, active_provider,
-                system_prompt_addendum, status, show_tool_activity, show_system_events,
-                summary, summary_updated_at, summary_message_count, auto_summarize,
-                auto_retitle, created_at, updated_at
-         FROM threads
-         WHERE user_id = ? AND status = ?
-         ORDER BY updated_at DESC",
-    )
-    .bind(&user_id)
-    .bind(status)
-    .fetch_all(&state.pool)
-    .await
-    .map_err(|e| {
-        error!(
-            user_id = %user_id,
-            status = %status,
-            error = ?e,
-            error.display = %e,
-            "list: failed to fetch threads"
-        );
-        e
-    })?;
+    let threads: Vec<Thread> = crate::db::threads::list_by_user_and_status(&state.pool, &user_id, status)
+        .await
+        .map_err(|e| {
+            error!(user_id = %user_id, status = %status, error = ?e, error.display = %e, "list: failed to fetch threads");
+            e
+        })?;
     debug!(user_id = %user_id, count = threads.len(), "list: fetched threads successfully");
 
     // Fetch the last visible message content for each thread in one query,
@@ -143,28 +126,12 @@ pub async fn get(
     let user_id = get_user_id(&state).await?;
 
     debug!(thread_id = %id, user_id = %user_id, "get: fetching thread");
-    let thread: Option<Thread> = sqlx::query_as(
-        "SELECT id, user_id, persona_id, title, active_model, active_provider,
-                system_prompt_addendum, status, show_tool_activity, show_system_events,
-                summary, summary_updated_at, summary_message_count, auto_summarize,
-                auto_retitle, created_at, updated_at
-         FROM threads
-         WHERE id = ? AND user_id = ?",
-    )
-    .bind(&id)
-    .bind(&user_id)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|e| {
-        error!(
-            thread_id = %id,
-            user_id = %user_id,
-            error = ?e,
-            error.display = %e,
-            "get: failed to fetch thread"
-        );
-        e
-    })?;
+    let thread: Option<Thread> = crate::db::threads::fetch_by_id_and_user(&state.pool, &id, &user_id)
+        .await
+        .map_err(|e| {
+            error!(thread_id = %id, user_id = %user_id, error = ?e, error.display = %e, "get: failed to fetch thread");
+            e
+        })?;
 
     match thread {
         Some(t) => Ok((StatusCode::OK, Json(json!({ "data": t })))),
@@ -281,28 +248,12 @@ pub async fn update(
     let user_id = get_user_id(&state).await?;
 
     debug!(thread_id = %id, user_id = %user_id, "update: fetching existing thread");
-    let existing: Option<Thread> = sqlx::query_as(
-        "SELECT id, user_id, persona_id, title, active_model, active_provider,
-                system_prompt_addendum, status, show_tool_activity, show_system_events,
-                summary, summary_updated_at, summary_message_count, auto_summarize,
-                auto_retitle, created_at, updated_at
-         FROM threads
-         WHERE id = ? AND user_id = ?",
-    )
-    .bind(&id)
-    .bind(&user_id)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|e| {
-        error!(
-            thread_id = %id,
-            user_id = %user_id,
-            error = ?e,
-            error.display = %e,
-            "update: failed to fetch existing thread"
-        );
-        e
-    })?;
+    let existing: Option<Thread> = crate::db::threads::fetch_by_id_and_user(&state.pool, &id, &user_id)
+        .await
+        .map_err(|e| {
+            error!(thread_id = %id, user_id = %user_id, error = ?e, error.display = %e, "update: failed to fetch existing thread");
+            e
+        })?;
 
     let existing = match existing {
         Some(t) => t,
@@ -611,28 +562,12 @@ async fn verify_thread_ownership(
     user_id: &str,
 ) -> AppResult<Thread> {
     debug!(thread_id = %thread_id, user_id = %user_id, "verify_thread_ownership: fetching thread");
-    let thread: Option<Thread> = sqlx::query_as(
-        "SELECT id, user_id, persona_id, title, active_model, active_provider,
-                system_prompt_addendum, status, show_tool_activity, show_system_events,
-                summary, summary_updated_at, summary_message_count, auto_summarize,
-                auto_retitle, created_at, updated_at
-         FROM threads
-         WHERE id = ? AND user_id = ?",
-    )
-    .bind(thread_id)
-    .bind(user_id)
-    .fetch_optional(&state.pool)
-    .await
-    .map_err(|e| {
-        error!(
-            thread_id = %thread_id,
-            user_id = %user_id,
-            error = ?e,
-            error.display = %e,
-            "verify_thread_ownership: failed to fetch thread"
-        );
-        e
-    })?;
+    let thread: Option<Thread> = crate::db::threads::fetch_by_id_and_user(&state.pool, thread_id, user_id)
+        .await
+        .map_err(|e| {
+            error!(thread_id = %thread_id, user_id = %user_id, error = ?e, error.display = %e, "verify_thread_ownership: failed to fetch thread");
+            e
+        })?;
 
     thread.ok_or_else(|| AppError::NotFound(format!("Thread '{}' not found", thread_id)))
 }
