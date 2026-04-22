@@ -76,7 +76,50 @@ pub async fn init(database_url: &str) -> Result<SqlitePool> {
         info!("Migrations complete");
     }
 
+    // ── Post-migration schema integrity check ─────────────────────────────────
+    // Verifies that critical columns added by incremental migrations actually
+    // exist in the live schema. This catches the case where _sqlx_migrations
+    // has a stale "applied" record but the ALTER TABLE never landed (e.g. after
+    // a crash, partial restore, or DB path change during a layout migration).
+    verify_schema(&pool).await?;
+
     Ok(pool)
+}
+
+/// Spot-check critical columns that are added by incremental migrations.
+/// Returns an error with a clear message if any are missing, so the server
+/// fails fast at startup rather than returning cryptic 500s at runtime.
+async fn verify_schema(pool: &SqlitePool) -> Result<()> {
+    let checks: &[(&str, &str)] = &[
+        // (table, column) — add a row here whenever a migration adds a column
+        // that is queried unconditionally by the server.
+        ("threads", "auto_retitle"),
+        ("threads", "show_system_events"),
+        ("threads", "summary"),
+        ("threads", "auto_summarize"),
+    ];
+
+    for (table, column) in checks {
+        let exists: bool = sqlx::query_scalar(&format!(
+            "SELECT COUNT(*) > 0 FROM pragma_table_info('{table}') WHERE name = '{column}'"
+        ))
+        .fetch_one(pool)
+        .await?;
+
+        if !exists {
+            anyhow::bail!(
+                "Schema integrity check failed: column `{column}` is missing from table \
+                 `{table}`. The _sqlx_migrations table likely has a stale record for the \
+                 migration that adds this column. Fix: delete the stale row from \
+                 _sqlx_migrations and restart the server so the migration re-runs, or \
+                 apply the column manually: \
+                 ALTER TABLE {table} ADD COLUMN {column} ...",
+            );
+        }
+    }
+
+    info!("Schema integrity check passed");
+    Ok(())
 }
 
 #[cfg(test)]

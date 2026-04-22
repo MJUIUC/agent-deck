@@ -139,6 +139,13 @@ if [ -d "$AGENT_DECK_HOME/public" ] && [ ! -d "$AGENT_DECK_HOME/.process/public"
   print_done "Assets migrated"
 fi
 
+if [ -f "$AGENT_DECK_HOME/.database/agent-deck.db" ] && [ ! -f "$AGENT_DECK_HOME/.process/.database/agent-deck.db" ]; then
+  print_step "Migrating database to .process/.database/..."
+  mkdir -p "$AGENT_DECK_HOME/.process/.database"
+  cp "$AGENT_DECK_HOME/.database/agent-deck.db" "$AGENT_DECK_HOME/.process/.database/agent-deck.db"
+  print_done "Database migrated"
+fi
+
 if [ -f "$AGENT_DECK_HOME/server.log" ] && [ ! -f "$AGENT_DECK_HOME/.process/server.log" ]; then
   mkdir -p "$AGENT_DECK_HOME/.process"
   mv "$AGENT_DECK_HOME/server.log" "$AGENT_DECK_HOME/.process/server.log" 2>/dev/null || true
