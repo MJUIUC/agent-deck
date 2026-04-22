@@ -6,7 +6,7 @@
 //! injected into every future context window in place of the oldest messages.
 
 use anyhow::Result;
-use tracing::warn;
+use tracing::{debug, error, warn};
 use uuid::Uuid;
 
 use crate::routes::AppState;
@@ -90,7 +90,17 @@ pub async fn summarize_thread(state: &AppState, thread_id: &str) -> Result<()> {
     .bind(thread_id)
     .fetch_optional(&state.pool)
     .await
-    .unwrap_or(None);
+    .map_err(|e| {
+        error!(
+            thread_id = %thread_id,
+            error = ?e,
+            error.display = %e,
+            "summarize_thread: failed to fetch thread row"
+        );
+        e
+    })
+    .ok()
+    .flatten();
 
     let (
         user_id,
@@ -103,7 +113,10 @@ pub async fn summarize_thread(state: &AppState, thread_id: &str) -> Result<()> {
         _summary_updated_at,
         auto_retitle,
     ) = match thread_row {
-        Some(r) => r,
+        Some(r) => {
+            debug!(thread_id = %thread_id, "summarize_thread: thread row fetched successfully");
+            r
+        }
         None => {
             warn!(thread_id = %thread_id, "summarize_thread: thread not found");
             return Ok(());

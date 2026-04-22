@@ -23,7 +23,7 @@ use futures::StreamExt;
 use sqlx::SqlitePool;
 use std::sync::Arc;
 
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::services::copilot::GlobalEvent;
 use crate::{
@@ -298,6 +298,7 @@ async fn run_inner(
     is_routine: bool,
 ) -> Result<()> {
     // ── 1. Fetch the thread and its persona ────────────────────────────────────
+    debug!(thread_id = %thread_id, "run_inner: fetching thread");
     let thread: crate::models::thread::Thread = sqlx::query_as(
         "SELECT id, user_id, persona_id, title, active_model, active_provider,
                 system_prompt_addendum, status, show_tool_activity, show_system_events,
@@ -308,7 +309,16 @@ async fn run_inner(
     .bind(thread_id)
     .fetch_one(&state.pool)
     .await
-    .map_err(|e| anyhow!("Failed to load thread {}: {}", thread_id, e))?;
+    .map_err(|e| {
+        error!(
+            thread_id = %thread_id,
+            error = ?e,
+            error.display = %e,
+            "run_inner: failed to fetch thread"
+        );
+        anyhow!("Failed to load thread {}: {}", thread_id, e)
+    })?;
+    debug!(thread_id = %thread_id, "run_inner: thread fetched successfully");
 
     let user_id = &thread.user_id;
     let persona_id = &thread.persona_id;

@@ -45,7 +45,11 @@ impl IntoResponse for AppError {
             AppError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg.clone()),
             AppError::Conflict(msg) => (StatusCode::CONFLICT, msg.clone()),
             AppError::Database(e) => {
-                tracing::error!("Database error: {:?}", e);
+                tracing::error!(
+                    error = ?e,
+                    error.display = %e,
+                    "Database error in request handler"
+                );
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "A database error occurred".to_string(),
