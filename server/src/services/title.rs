@@ -159,16 +159,7 @@ pub async fn try_llm_title(
         }
     };
 
-    let prompt = format!(
-        "Generate a chat title no longer than 7 words that describes the intent \
-         of the conversation below. Reply with only the title — no punctuation, \
-         no quotes, no explanation. If the messages are unclear, invent a \
-         plausible short title rather than asking for more context.\n\n\
-         User: {}\n\
-         Assistant: {}",
-        user_content.chars().take(500).collect::<String>(),
-        assistant_content.chars().take(500).collect::<String>(),
-    );
+    let prompt = build_title_prompt(user_content, assistant_content);
 
     let messages = vec![async_openai::types::ChatCompletionRequestMessage::User(
         async_openai::types::ChatCompletionRequestUserMessageArgs::default()
@@ -191,6 +182,23 @@ pub async fn try_llm_title(
             fallback
         }
     }
+}
+
+/// Build the LLM prompt used to generate a thread title from the first exchange.
+///
+/// Exposed as a pure function so it can be unit-tested independently of the
+/// database and provider machinery in [`try_llm_title`].
+pub fn build_title_prompt(user_content: &str, assistant_content: &str) -> String {
+    format!(
+        "Generate a chat title no longer than 7 words that describes the intent \
+         of the conversation below. Reply with only the title — no punctuation, \
+         no quotes, no explanation. If the messages are unclear, invent a \
+         plausible short title rather than asking for more context.\n\n\
+         User: {}\n\
+         Assistant: {}",
+        user_content.chars().take(500).collect::<String>(),
+        assistant_content.chars().take(500).collect::<String>(),
+    )
 }
 
 /// Truncate a title string to at most 60 characters, breaking at a word
@@ -218,7 +226,7 @@ pub fn truncate_title(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::truncate_title;
+    use super::{build_title_prompt, truncate_title};
 
     #[test]
     fn short_title_is_unchanged() {
@@ -250,5 +258,52 @@ mod tests {
         let s: String = "a".repeat(80);
         let result = truncate_title(&s);
         assert!(result.ends_with('…'));
+    }
+
+    // ── build_title_prompt ────────────────────────────────────────────────────
+
+    #[test]
+    fn title_prompt_contains_user_and_assistant_content() {
+        let prompt = build_title_prompt("Hello there", "Hi, how can I help?");
+        assert!(prompt.contains("Hello there"));
+        assert!(prompt.contains("Hi, how can I help?"));
+    }
+
+    #[test]
+    fn title_prompt_truncates_long_user_content_to_500_chars() {
+        let long = "u".repeat(600);
+        let prompt = build_title_prompt(&long, "");
+        // The 600-char string should be truncated to 500 in the prompt
+        let user_section = prompt
+            .split("User: ")
+            .nth(1)
+            .unwrap()
+            .split('\n')
+            .next()
+            .unwrap();
+        assert_eq!(user_section.chars().count(), 500);
+    }
+
+    #[test]
+    fn title_prompt_truncates_long_assistant_content_to_500_chars() {
+        let long = "a".repeat(600);
+        let prompt = build_title_prompt("Hi", &long);
+        let assistant_section = prompt.split("Assistant: ").nth(1).unwrap();
+        assert_eq!(assistant_section.chars().count(), 500);
+    }
+
+    #[test]
+    fn title_prompt_includes_instruction_keywords() {
+        let prompt = build_title_prompt("anything", "anything");
+        assert!(prompt.contains("7 words"));
+        assert!(prompt.contains("no punctuation"));
+        assert!(prompt.contains("no quotes"));
+    }
+
+    #[test]
+    fn title_prompt_empty_assistant_content_is_valid() {
+        let prompt = build_title_prompt("What is Rust?", "");
+        assert!(prompt.contains("What is Rust?"));
+        assert!(prompt.contains("Assistant: \n") || prompt.ends_with("Assistant: "));
     }
 }
