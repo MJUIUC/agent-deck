@@ -375,7 +375,10 @@ function WebhookForm({
         if (name.trim() !== initial.name) patchPayload.name = name.trim();
         if (prompt.trim() !== initial.prompt)
           patchPayload.prompt = prompt.trim();
-        if (source === "other" && signatureHeader.trim() !== (initial.signature_header ?? "")) {
+        if (
+          source === "other" &&
+          signatureHeader.trim() !== (initial.signature_header ?? "")
+        ) {
           patchPayload.signature_header = signatureHeader.trim();
         }
         const res = await webhookBindingsApi.update(initial.id, patchPayload);
@@ -419,7 +422,14 @@ function WebhookForm({
       </div>
 
       {/* Name */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 12 }}>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 5,
+          marginBottom: 12,
+        }}
+      >
         <FieldLabel>Name *</FieldLabel>
         <FieldInput
           placeholder="e.g. my-repo PRs"
@@ -430,7 +440,14 @@ function WebhookForm({
       </div>
 
       {/* Source */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 12 }}>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 5,
+          marginBottom: 12,
+        }}
+      >
         <FieldLabel>Source</FieldLabel>
         <FieldSelect
           value={source}
@@ -447,7 +464,14 @@ function WebhookForm({
 
       {/* Signature header — only for "other" */}
       {source === "other" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 12 }}>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 5,
+            marginBottom: 12,
+          }}
+        >
           <FieldLabel>Signature header *</FieldLabel>
           <FieldInput
             mono
@@ -463,7 +487,14 @@ function WebhookForm({
       )}
 
       {/* Default prompt */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 14 }}>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 5,
+          marginBottom: 14,
+        }}
+      >
         <FieldLabel>
           {source === "other" ? "Default prompt (required)" : "Default prompt"}
         </FieldLabel>
@@ -719,36 +750,21 @@ export function WebhookSettings() {
   return (
     <div>
       {/* Section header */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "flex-start",
-          justifyContent: "space-between",
-          marginBottom: 18,
-        }}
-      >
-        <div>
-          <div
-            style={{
-              fontSize: 16,
-              fontWeight: 700,
-              color: "var(--text-primary)",
-              marginBottom: 4,
-            }}
-          >
-            Webhook Bindings
-          </div>
-          <div style={{ fontSize: 12, color: "var(--text-tertiary)" }}>
-            Receive events from GitHub, GitLab, or other services and route them
-            to agent threads.
-          </div>
+      <div style={{ marginBottom: 18 }}>
+        <div
+          style={{
+            fontSize: 16,
+            fontWeight: 700,
+            color: "var(--text-primary)",
+            marginBottom: 4,
+          }}
+        >
+          Webhook Bindings
         </div>
-        {formMode === "hidden" && !pendingSecret && (
-          <Btn variant="primary" sm onClick={handleAdd}>
-            <Plus size={13} />
-            New Binding
-          </Btn>
-        )}
+        <div style={{ fontSize: 12, color: "var(--text-tertiary)" }}>
+          Receive events from GitHub, GitLab, or other services and route them
+          to agent threads.
+        </div>
       </div>
 
       {/* Secret panel (shown after creation) */}
@@ -853,7 +869,8 @@ export function WebhookSettings() {
         )}
 
       {/* Binding list */}
-      {!loading && !pendingSecret && bindings.length > 0 && (
+      {/* Server list */}
+      {!loading && !loadError && bindings.length > 0 && (
         <div>
           {bindings.map((binding) =>
             formMode === "edit" && formInitial?.id === binding.id ? null : (
@@ -865,7 +882,7 @@ export function WebhookSettings() {
               />
             ),
           )}
-          {formMode === "hidden" && (
+          {formMode === "hidden" && !pendingSecret && (
             <div style={{ marginTop: 14 }}>
               <Btn variant="ghost" onClick={handleAdd}>
                 <Plus size={13} />
