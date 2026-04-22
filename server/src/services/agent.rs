@@ -116,12 +116,17 @@ fn retry_strategy_for(error: &anyhow::Error) -> RetryStrategy {
         };
     }
 
-    // Context-length errors — summarize history and retry
+    // Context-length errors — summarize history and retry.
+    // Also covers HTTP 413 (Payload Too Large / Request Entity Too Large) which
+    // some providers return when the request body exceeds their size limit.
     if msg.contains("context_length_exceeded")
         || msg.contains("context window")
         || msg.contains("maximum context length")
         || msg.contains("prompt is too long")
         || msg.contains("context_window_exceeded")
+        || msg.contains("413")
+        || msg.contains("Payload Too Large")
+        || msg.contains("Request Entity Too Large")
     {
         return RetryStrategy::SummarizeAndRetry;
     }
@@ -2336,6 +2341,24 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn retry_strategy_413_is_summarize_and_retry() {
+        let err = anyhow::anyhow!("Provider X returned 413 — Request Entity Too Large");
+        assert_eq!(retry_strategy_for(&err), RetryStrategy::SummarizeAndRetry);
+    }
+
+    #[test]
+    fn retry_strategy_payload_too_large_is_summarize_and_retry() {
+        let err = anyhow::anyhow!("Provider X returned 413 — Payload Too Large");
+        assert_eq!(retry_strategy_for(&err), RetryStrategy::SummarizeAndRetry);
+    }
+
+    #[test]
+    fn retry_strategy_request_entity_too_large_is_summarize_and_retry() {
+        let err = anyhow::anyhow!("Request Entity Too Large");
+        assert_eq!(retry_strategy_for(&err), RetryStrategy::SummarizeAndRetry);
     }
 
     #[test]
