@@ -10,6 +10,7 @@ import {
   ColorPalette,
   Network_3,
   Certificate,
+  Webhook,
 } from "@carbon/icons-react";
 import type { SettingsTab } from "./shared";
 
@@ -164,6 +165,12 @@ export function SettingsSidebar({
         label="MCP Servers"
         active={tab === "mcp-servers"}
         onClick={() => onTabChange("mcp-servers")}
+      />
+      <NavItem
+        icon={<Webhook size={16} />}
+        label="Webhooks"
+        active={tab === "webhooks"}
+        onClick={() => onTabChange("webhooks")}
       />
 
       <NavItem

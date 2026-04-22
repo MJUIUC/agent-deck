@@ -190,7 +190,7 @@ pub fn format_gitlab(payload: &serde_json::Value, event: &str) -> String {
     }
 }
 
-pub fn format_generic(payload: &serde_json::Value, source: &str) -> String {
+pub fn format_other(payload: &serde_json::Value, source: &str) -> String {
     let pretty = serde_json::to_string_pretty(payload).unwrap_or_default();
     let truncated = if pretty.len() > 500 {
         format!("{}…", &pretty[..500])
@@ -204,7 +204,7 @@ pub fn format(payload: &serde_json::Value, source: &str, event: &str) -> String 
     match source {
         "github" => format_github(payload, event),
         "gitlab" => format_gitlab(payload, event),
-        _ => format_generic(payload, source),
+        _ => format_other(payload, source),
     }
 }
 
@@ -388,9 +388,9 @@ mod tests {
     }
 
     #[test]
-    fn format_generic_basic_output() {
+    fn format_other_basic_output() {
         let payload = json!({ "key": "value" });
-        let result = format_generic(&payload, "stripe");
+        let result = format_other(&payload, "stripe");
         assert!(
             result.starts_with("Webhook received from stripe:"),
             "expected source prefix: {}",
@@ -404,10 +404,10 @@ mod tests {
     }
 
     #[test]
-    fn format_generic_truncates_long_payload() {
+    fn format_other_truncates_long_payload() {
         let long_string: String = "x".repeat(1000);
         let payload = json!({ "data": long_string });
-        let result = format_generic(&payload, "custom");
+        let result = format_other(&payload, "custom");
         assert!(
             result.len() < 700,
             "expected truncation, got length {}",
@@ -436,12 +436,12 @@ mod tests {
     }
 
     #[test]
-    fn format_dispatcher_routes_unknown_source_to_generic() {
+    fn format_dispatcher_routes_unknown_source_to_other() {
         let payload = json!({ "event": "payment.succeeded" });
         let result = format(&payload, "stripe", "charge");
         assert!(
             result.starts_with("Webhook received from stripe:"),
-            "should route to generic formatter"
+            "should route to other formatter"
         );
     }
 

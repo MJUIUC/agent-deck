@@ -466,7 +466,8 @@ pub async fn build_router(
         )
         .route(
             "/api/webhook-bindings/:id",
-            axum::routing::delete(webhook_bindings::delete_global),
+            axum::routing::delete(webhook_bindings::delete_global)
+                .patch(webhook_bindings::update_global),
         )
         .route(
             "/api/webhook-bindings/:id/toggle",

@@ -16,7 +16,8 @@ type HmacSha256 = Hmac<Sha256>;
 struct WebhookBinding {
     id: String,
     source: String,
-    event_type: String,
+    signature_header: Option<String>,
+    prompt: String,
     secret: String,
 }
 
@@ -35,7 +36,7 @@ pub async fn receive(
     body: Bytes,
 ) -> AppResult<impl IntoResponse> {
     let bindings: Vec<WebhookBinding> = sqlx::query_as(
-        "SELECT id, source, event_type, secret
+        "SELECT id, source, signature_header, prompt, secret
          FROM webhook_bindings
          WHERE enabled = 1",
     )
@@ -56,7 +57,13 @@ pub async fn receive(
         match binding.source.as_str() {
             "github" => verify_github_hmac(plaintext_secret.as_bytes(), &body, &headers),
             "gitlab" => verify_gitlab_signature(plaintext_secret.as_bytes(), &body, &headers),
-            _ => verify_generic_hmac(plaintext_secret.as_bytes(), &body, &headers),
+            _ => {
+                if let Some(ref header_name) = binding.signature_header {
+                    verify_other_hmac(plaintext_secret.as_bytes(), &body, &headers, header_name)
+                } else {
+                    verify_generic_hmac(plaintext_secret.as_bytes(), &body, &headers)
+                }
+            }
         }
     });
 
@@ -76,13 +83,8 @@ pub async fn receive(
             .and_then(|v| v.to_str().ok())
             .unwrap_or("unknown")
             .to_string(),
-        _ => binding.event_type.clone(),
+        _ => "webhook".to_string(),
     };
-
-    let event_matches = binding.event_type == "*" || binding.event_type == event_name;
-    if !event_matches {
-        return Ok(StatusCode::ACCEPTED.into_response());
-    }
 
     let payload_json: serde_json::Value =
         serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
@@ -104,9 +106,31 @@ pub async fn receive(
 
     // Fire notify_internal for each attached thread (fire-and-forget)
     for attachment in &attachments {
-        let message = match attachment.prompt.as_deref().map(str::trim) {
-            Some(p) if !p.is_empty() => format!("{}\n\n{}", event_summary, p),
-            _ => event_summary.clone(),
+        let message = {
+            // Per-thread prompt takes priority; fall back to binding's default prompt
+            let instructions = if let Some(ref p) = attachment.prompt {
+                let t = p.trim();
+                if !t.is_empty() {
+                    Some(t)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+            .or_else(|| {
+                let t = binding.prompt.trim();
+                if !t.is_empty() {
+                    Some(t)
+                } else {
+                    None
+                }
+            });
+
+            match instructions {
+                Some(p) => format!("{}\n\n{}", event_summary, p),
+                None => event_summary.clone(),
+            }
         };
         // Ignore errors per-thread — one bad thread should not block others
         let _ = crate::routes::notify::notify_internal(
@@ -183,6 +207,27 @@ fn verify_gitlab_signature(secret: &[u8], body: &[u8], headers: &HeaderMap) -> b
     false
 }
 
+/// For 'other' sources: reads the configured header name, decodes raw hex, verifies HMAC-SHA256.
+/// No `sha256=` prefix is expected — the header value is a plain hex-encoded HMAC digest.
+fn verify_other_hmac(secret: &[u8], body: &[u8], headers: &HeaderMap, header_name: &str) -> bool {
+    let signature_value = match headers.get(header_name).and_then(|v| v.to_str().ok()) {
+        Some(s) => s,
+        None => return false,
+    };
+
+    let expected_bytes = match hex::decode(signature_value) {
+        Ok(b) => b,
+        Err(_) => return false,
+    };
+
+    let mut mac = match HmacSha256::new_from_slice(secret) {
+        Ok(m) => m,
+        Err(_) => return false,
+    };
+    mac.update(body);
+    mac.verify_slice(&expected_bytes).is_ok()
+}
+
 fn verify_generic_hmac(secret: &[u8], body: &[u8], headers: &HeaderMap) -> bool {
     let signature_header = match headers
         .get("X-Webhook-Signature")
@@ -231,6 +276,12 @@ mod tests {
         mac.update(body);
         let result = mac.finalize();
         format!("sha256={}", hex::encode(result.into_bytes()))
+    }
+
+    fn compute_raw_hmac_hex(secret: &[u8], body: &[u8]) -> String {
+        let mut mac = HmacSha256::new_from_slice(secret).expect("HMAC accepts any key size");
+        mac.update(body);
+        hex::encode(mac.finalize().into_bytes())
     }
 
     // ── GitHub tests ─────────────────────────────────────────────────────────
@@ -415,6 +466,76 @@ mod tests {
         assert!(
             !verify_gitlab_signature(secret, tampered_body, &headers),
             "GitLab HMAC should reject a signature computed over a different body"
+        );
+    }
+
+    // ── verify_other_hmac tests ───────────────────────────────────────────────
+
+    #[test]
+    fn verify_other_hmac_matches_known_vector() {
+        let secret = b"linear-secret";
+        let body = b"{\"type\":\"Issue\",\"action\":\"create\"}";
+        let hex_sig = compute_raw_hmac_hex(secret, body);
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "X-Linear-Signature",
+            hex_sig.parse().expect("valid header value"),
+        );
+
+        assert!(
+            verify_other_hmac(secret, body, &headers, "X-Linear-Signature"),
+            "other HMAC should verify against a freshly-computed raw hex signature"
+        );
+    }
+
+    #[test]
+    fn verify_other_hmac_rejects_tampered_body() {
+        let secret = b"linear-secret";
+        let original_body = b"{\"type\":\"Issue\",\"action\":\"create\"}";
+        let tampered_body = b"{\"type\":\"Issue\",\"action\":\"delete\"}";
+        let hex_sig = compute_raw_hmac_hex(secret, original_body);
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "X-Linear-Signature",
+            hex_sig.parse().expect("valid header value"),
+        );
+
+        assert!(
+            !verify_other_hmac(secret, tampered_body, &headers, "X-Linear-Signature"),
+            "other HMAC should reject a signature computed over a different body"
+        );
+    }
+
+    #[test]
+    fn verify_other_hmac_rejects_missing_header() {
+        let secret = b"linear-secret";
+        let body = b"{}";
+        let headers = HeaderMap::new();
+
+        assert!(
+            !verify_other_hmac(secret, body, &headers, "X-Linear-Signature"),
+            "other HMAC should reject when the configured header is absent"
+        );
+    }
+
+    #[test]
+    fn verify_other_hmac_rejects_wrong_header_name() {
+        let secret = b"linear-secret";
+        let body = b"{\"type\":\"Issue\"}";
+        let hex_sig = compute_raw_hmac_hex(secret, body);
+
+        let mut headers = HeaderMap::new();
+        // Signature is in X-Linear-Signature but we look for X-Other-Signature
+        headers.insert(
+            "X-Linear-Signature",
+            hex_sig.parse().expect("valid header value"),
+        );
+
+        assert!(
+            !verify_other_hmac(secret, body, &headers, "X-Other-Signature"),
+            "other HMAC should reject when looking at a different header name"
         );
     }
 

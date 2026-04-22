@@ -488,16 +488,6 @@ function AttachWebhookPicker({
 }) {
   const [allBindings, setAllBindings] = useState<WebhookBinding[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showCreate, setShowCreate] = useState(false);
-  const [createName, setCreateName] = useState("");
-  const [createSource, setCreateSource] = useState("github");
-  const [createEventType, setCreateEventType] = useState("*");
-  const [creating, setCreating] = useState(false);
-  const [newBindingSecret, setNewBindingSecret] = useState<{
-    url: string;
-    secret: string;
-    warning?: string;
-  } | null>(null);
 
   useEffect(() => {
     webhookBindingsApi
@@ -511,151 +501,6 @@ function AttachWebhookPicker({
 
   const available = allBindings.filter((b) => !attachedIds.has(b.id));
 
-  async function handleCreate() {
-    if (!createName.trim()) return;
-    setCreating(true);
-    try {
-      const res = await webhookBindingsApi.create(
-        createName.trim(),
-        createSource,
-        createEventType,
-      );
-      setNewBindingSecret({
-        url: res.data.webhook_url ?? "",
-        secret: res.data.secret ?? "",
-        warning: res.warning,
-      });
-      setAllBindings((prev) => [...prev, res.data]);
-    } finally {
-      setCreating(false);
-    }
-  }
-
-  function handleSecretDone() {
-    setNewBindingSecret(null);
-    setShowCreate(false);
-    setCreateName("");
-    setCreateSource("github");
-    setCreateEventType("*");
-  }
-
-  if (newBindingSecret) {
-    return (
-      <div className={styles.routineForm}>
-        <div className={styles.routineFormTitle}>
-          ⚠ Copy this secret now — it won't be shown again.
-        </div>
-        <label className={styles.routineFormLabel}>Webhook URL</label>
-        <div
-          style={{
-            display: "flex",
-            gap: 6,
-            alignItems: "center",
-            marginBottom: 8,
-          }}
-        >
-          <code style={{ flex: 1, fontSize: 11, wordBreak: "break-all" }}>
-            {newBindingSecret.url}
-          </code>
-          <button
-            className={styles.addBtn}
-            onClick={() => navigator.clipboard.writeText(newBindingSecret.url)}
-          >
-            Copy
-          </button>
-        </div>
-        <label className={styles.routineFormLabel}>Secret</label>
-        <div
-          style={{
-            display: "flex",
-            gap: 6,
-            alignItems: "center",
-            marginBottom: 8,
-          }}
-        >
-          <code style={{ flex: 1, fontSize: 11, wordBreak: "break-all" }}>
-            {newBindingSecret.secret}
-          </code>
-          <button
-            className={styles.addBtn}
-            onClick={() =>
-              navigator.clipboard.writeText(newBindingSecret.secret)
-            }
-          >
-            Copy
-          </button>
-        </div>
-        {newBindingSecret.warning && (
-          <div className={styles.routineFormError}>
-            {newBindingSecret.warning}
-          </div>
-        )}
-        <div className={styles.routineFormActions}>
-          <button className={styles.routineFormSave} onClick={handleSecretDone}>
-            Done
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (showCreate) {
-    return (
-      <div className={styles.routineForm}>
-        <div className={styles.routineFormTitle}>New Webhook Binding</div>
-        <label className={styles.routineFormLabel}>Name</label>
-        <input
-          className={styles.routineFormInput}
-          placeholder="e.g. my-repo PRs"
-          value={createName}
-          onChange={(e) => setCreateName(e.target.value)}
-          disabled={creating}
-        />
-        <label className={styles.routineFormLabel}>Source</label>
-        <select
-          className={styles.routineFormInput}
-          value={createSource}
-          onChange={(e) => setCreateSource(e.target.value)}
-          disabled={creating}
-        >
-          <option value="github">GitHub</option>
-          <option value="gitlab">GitLab</option>
-          <option value="generic">Generic</option>
-        </select>
-        <label className={styles.routineFormLabel}>Event type</label>
-        <select
-          className={styles.routineFormInput}
-          value={createEventType}
-          onChange={(e) => setCreateEventType(e.target.value)}
-          disabled={creating}
-        >
-          <option value="*">All events</option>
-          <option value="pull_request">pull_request</option>
-          <option value="push">push</option>
-          <option value="issues">issues</option>
-          <option value="issue_comment">issue_comment</option>
-          <option value="merge_request">merge_request (GitLab)</option>
-        </select>
-        <div className={styles.routineFormActions}>
-          <button
-            className={styles.cancelBtn}
-            onClick={() => setShowCreate(false)}
-            disabled={creating}
-          >
-            Cancel
-          </button>
-          <button
-            className={styles.routineFormSave}
-            onClick={handleCreate}
-            disabled={creating || !createName.trim()}
-          >
-            {creating ? "Creating…" : "Create"}
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className={styles.pickerOverlay}>
       <div className={styles.pickerTitle}>Attach Webhook</div>
@@ -665,7 +510,7 @@ function AttachWebhookPicker({
         ) : available.length === 0 ? (
           <div className={styles.pickerEmpty}>
             {allBindings.length === 0
-              ? "No webhook bindings configured yet."
+              ? "No webhook bindings configured. Add one in Settings → Webhooks."
               : "All configured webhooks are already attached."}
           </div>
         ) : (
@@ -677,19 +522,12 @@ function AttachWebhookPicker({
             >
               <span style={{ fontWeight: 500 }}>{b.name}</span>
               <span style={{ color: "#888", fontSize: 11, marginLeft: 6 }}>
-                {b.source} · {b.event_type}
+                {b.source}
               </span>
             </button>
           ))
         )}
       </div>
-      <button
-        className={styles.addBtn}
-        style={{ margin: "8px 0 0" }}
-        onClick={() => setShowCreate(true)}
-      >
-        ＋ Create new binding
-      </button>
     </div>
   );
 }
@@ -1558,8 +1396,7 @@ export function ConfigPane({
                       <div className={styles.routineCardInfo}>
                         <div className={styles.routineName}>{w.name}</div>
                         <div className={styles.routineCron}>
-                          {w.source} · {w.event_type} ·{" "}
-                          {w.enabled ? "● active" : "○ disabled"}
+                          {w.source} · {w.enabled ? "● active" : "○ disabled"}
                         </div>
                       </div>
                       <div className={styles.routineCardActions}>

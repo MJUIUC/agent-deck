@@ -6,6 +6,7 @@ import { ProviderSettings } from "./ProviderSettings";
 import { PersonaSettings } from "./PersonaSettings";
 import { CredentialsSettings } from "./CredentialsSettings";
 import { McpServerSettings } from "./McpServerSettings";
+import { WebhookSettings } from "./WebhookSettings";
 import { ProfileSettings } from "./ProfileSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { TailscaleSettings } from "./TailscaleSettings";
@@ -172,6 +173,7 @@ export function SettingsModal({
                 <PersonaSettings onDataChanged={handleDataChanged} />
               )}
               {tab === "mcp-servers" && <McpServerSettings />}
+              {tab === "webhooks" && <WebhookSettings />}
               {tab === "profile" && <ProfileSettings />}
               {tab === "appearance" && <AppearanceSettings />}
               {tab === "tailscale" && <TailscaleSettings />}

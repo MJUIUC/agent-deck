@@ -747,7 +747,8 @@ export interface WebhookBinding {
   id: string;
   name: string;
   source: string;
-  event_type: string;
+  signature_header?: string | null;
+  prompt: string;
   enabled: boolean;
   created_at: string;
   // only on create response:
@@ -760,7 +761,6 @@ export interface ThreadWebhookBinding {
   webhook_binding_id: string;
   name: string;
   source: string;
-  event_type: string;
   enabled: boolean; // from global binding
   prompt?: string | null;
   created_at: string;
@@ -769,13 +769,32 @@ export interface ThreadWebhookBinding {
 export const webhookBindingsApi = {
   list: () => apiFetch<{ data: WebhookBinding[] }>("/api/webhook-bindings"),
 
-  create: (name: string, source: string, event_type: string) =>
+  create: (payload: {
+    name: string;
+    source: string;
+    signature_header?: string;
+    prompt: string;
+  }) =>
     apiFetch<{
       data: WebhookBinding & { webhook_url: string; secret: string };
       warning?: string;
     }>("/api/webhook-bindings", {
       method: "POST",
-      body: JSON.stringify({ name, source, event_type }),
+      body: JSON.stringify(payload),
+    }),
+
+  update: (
+    id: string,
+    payload: {
+      name?: string;
+      prompt?: string;
+      signature_header?: string;
+      enabled?: boolean;
+    },
+  ) =>
+    apiFetch<{ data: WebhookBinding }>(`/api/webhook-bindings/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
     }),
 
   delete: (id: string) =>

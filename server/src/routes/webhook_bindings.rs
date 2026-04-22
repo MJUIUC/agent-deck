@@ -26,7 +26,8 @@ pub struct WebhookBindingPublic {
     pub id: String,
     pub name: String,
     pub source: String,
-    pub event_type: String,
+    pub signature_header: Option<String>,
+    pub prompt: String,
     pub enabled: bool,
     pub created_at: String,
 }
@@ -38,7 +39,6 @@ pub struct ThreadWebhookBindingPublic {
     pub webhook_binding_id: String,
     pub name: String,             // from webhook_bindings
     pub source: String,
-    pub event_type: String,
     pub enabled: bool,            // from webhook_bindings (global)
     pub prompt: Option<String>,   // from thread_webhook_bindings
     pub created_at: String,       // thread_webhook_bindings.created_at
@@ -53,7 +53,7 @@ pub async fn list_global(
     let user_id = get_user_id(&state).await?;
 
     let bindings: Vec<WebhookBindingPublic> = sqlx::query_as(
-        "SELECT id, name, source, event_type, enabled, created_at
+        "SELECT id, name, source, signature_header, prompt, enabled, created_at
          FROM webhook_bindings
          WHERE user_id = ?
          ORDER BY created_at ASC",
@@ -69,7 +69,8 @@ pub async fn list_global(
 pub struct CreateWebhookBindingRequest {
     pub name: String,
     pub source: String,
-    pub event_type: String,
+    pub signature_header: Option<String>,
+    pub prompt: String,
 }
 
 /// `POST /api/webhook-bindings`
@@ -84,6 +85,25 @@ pub async fn create_global(
 
     if body.name.trim().is_empty() {
         return Err(AppError::BadRequest("name must not be empty".to_string()));
+    }
+
+    // Normalize source: treat legacy "generic" as "other"
+    let source = if body.source == "generic" {
+        "other".to_string()
+    } else {
+        body.source.clone()
+    };
+
+    // For "other" source, signature_header is required
+    if source == "other" {
+        match body.signature_header.as_deref().map(str::trim) {
+            None | Some("") => {
+                return Err(AppError::BadRequest(
+                    "signature_header is required for source 'other'".to_string(),
+                ));
+            }
+            _ => {}
+        }
     }
 
     let plaintext_secret = {
@@ -101,14 +121,15 @@ pub async fn create_global(
         .to_string();
 
     sqlx::query(
-        "INSERT INTO webhook_bindings (id, user_id, name, source, event_type, secret, enabled, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, 1, ?)",
+        "INSERT INTO webhook_bindings (id, user_id, name, source, signature_header, prompt, secret, enabled, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)",
     )
     .bind(&binding_id)
     .bind(&user_id)
     .bind(&body.name)
-    .bind(&body.source)
-    .bind(&body.event_type)
+    .bind(&source)
+    .bind(body.signature_header.as_deref())
+    .bind(&body.prompt)
     .bind(&encrypted_secret)
     .bind(&now)
     .execute(&state.pool)
@@ -131,8 +152,9 @@ pub async fn create_global(
         "data": {
             "id": binding_id,
             "name": body.name,
-            "source": body.source,
-            "event_type": body.event_type,
+            "source": source,
+            "signature_header": body.signature_header,
+            "prompt": body.prompt,
             "webhook_url": webhook_url,
             "secret": plaintext_secret,
             "enabled": true,
@@ -195,7 +217,100 @@ pub async fn toggle_global(
     }
 
     let binding: WebhookBindingPublic = sqlx::query_as(
-        "SELECT id, name, source, event_type, enabled, created_at
+        "SELECT id, name, source, signature_header, prompt, enabled, created_at
+         FROM webhook_bindings
+         WHERE id = ?",
+    )
+    .bind(&binding_id)
+    .fetch_one(&state.pool)
+    .await?;
+
+    Ok((StatusCode::OK, Json(json!({ "data": binding }))))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateWebhookBindingRequest {
+    pub name: Option<String>,
+    pub prompt: Option<String>,
+    pub signature_header: Option<String>,
+    pub enabled: Option<bool>,
+}
+
+/// `PATCH /api/webhook-bindings/:id`
+pub async fn update_global(
+    State(state): State<Arc<AppState>>,
+    Path(binding_id): Path<String>,
+    Json(body): Json<UpdateWebhookBindingRequest>,
+) -> AppResult<impl IntoResponse> {
+    let user_id = get_user_id(&state).await?;
+
+    // Verify binding exists and belongs to this user
+    let exists: Option<(String,)> = sqlx::query_as(
+        "SELECT id FROM webhook_bindings WHERE id = ? AND user_id = ?",
+    )
+    .bind(&binding_id)
+    .bind(&user_id)
+    .fetch_optional(&state.pool)
+    .await?;
+
+    if exists.is_none() {
+        return Err(AppError::NotFound(format!(
+            "Webhook binding '{}' not found",
+            binding_id
+        )));
+    }
+
+    if let Some(ref name) = body.name {
+        sqlx::query(
+            "UPDATE webhook_bindings SET name = ? WHERE id = ? AND user_id = ?",
+        )
+        .bind(name)
+        .bind(&binding_id)
+        .bind(&user_id)
+        .execute(&state.pool)
+        .await?;
+    }
+
+    if let Some(ref prompt) = body.prompt {
+        sqlx::query(
+            "UPDATE webhook_bindings SET prompt = ? WHERE id = ? AND user_id = ?",
+        )
+        .bind(prompt)
+        .bind(&binding_id)
+        .bind(&user_id)
+        .execute(&state.pool)
+        .await?;
+    }
+
+    if let Some(ref signature_header) = body.signature_header {
+        let header_value = if signature_header.trim().is_empty() {
+            None
+        } else {
+            Some(signature_header.as_str())
+        };
+        sqlx::query(
+            "UPDATE webhook_bindings SET signature_header = ? WHERE id = ? AND user_id = ?",
+        )
+        .bind(header_value)
+        .bind(&binding_id)
+        .bind(&user_id)
+        .execute(&state.pool)
+        .await?;
+    }
+
+    if let Some(enabled) = body.enabled {
+        sqlx::query(
+            "UPDATE webhook_bindings SET enabled = ? WHERE id = ? AND user_id = ?",
+        )
+        .bind(enabled as i64)
+        .bind(&binding_id)
+        .bind(&user_id)
+        .execute(&state.pool)
+        .await?;
+    }
+
+    let binding: WebhookBindingPublic = sqlx::query_as(
+        "SELECT id, name, source, signature_header, prompt, enabled, created_at
          FROM webhook_bindings
          WHERE id = ?",
     )
@@ -217,7 +332,7 @@ pub async fn list_attachments(
     verify_thread_ownership(&state, &thread_id, &user_id).await?;
 
     let attachments: Vec<ThreadWebhookBindingPublic> = sqlx::query_as(
-        "SELECT twb.id, twb.webhook_binding_id, wb.name, wb.source, wb.event_type,
+        "SELECT twb.id, twb.webhook_binding_id, wb.name, wb.source,
                 wb.enabled, twb.prompt, twb.created_at
          FROM thread_webhook_bindings twb
          JOIN webhook_bindings wb ON wb.id = twb.webhook_binding_id
@@ -290,7 +405,7 @@ pub async fn attach(
     }
 
     let attachment: ThreadWebhookBindingPublic = sqlx::query_as(
-        "SELECT twb.id, twb.webhook_binding_id, wb.name, wb.source, wb.event_type,
+        "SELECT twb.id, twb.webhook_binding_id, wb.name, wb.source,
                 wb.enabled, twb.prompt, twb.created_at
          FROM thread_webhook_bindings twb
          JOIN webhook_bindings wb ON wb.id = twb.webhook_binding_id
@@ -359,7 +474,7 @@ pub async fn update_attachment(
     }
 
     let attachment: ThreadWebhookBindingPublic = sqlx::query_as(
-        "SELECT twb.id, twb.webhook_binding_id, wb.name, wb.source, wb.event_type,
+        "SELECT twb.id, twb.webhook_binding_id, wb.name, wb.source,
                 wb.enabled, twb.prompt, twb.created_at
          FROM thread_webhook_bindings twb
          JOIN webhook_bindings wb ON wb.id = twb.webhook_binding_id

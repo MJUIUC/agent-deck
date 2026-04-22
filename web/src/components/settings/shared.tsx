@@ -8,6 +8,7 @@ export type SettingsTab =
   | "credentials"
   | "personas"
   | "mcp-servers"
+  | "webhooks"
   | "profile"
   | "appearance"
   | "tailscale"
