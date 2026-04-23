@@ -16,7 +16,9 @@ use crate::services::scheduler::SchedulerCommand;
 
 use crate::{
     error::{AppError, AppResult},
-    models::thread::{AttachMcpServer, CreateThread, Thread, ThreadMcpServer, UpdateThread},
+    models::thread::{
+        AttachMcpServer, CreateThread, Thread, ThreadMcpServer, UpdateThread, UpdateThreadMcpServer,
+    },
     routes::AppState,
 };
 
@@ -476,7 +478,7 @@ pub async fn list_mcp_servers(
     let _thread = verify_thread_ownership(&state, &thread_id, &user_id).await?;
 
     let servers: Vec<ThreadMcpServer> = sqlx::query_as(
-        "SELECT id, thread_id, mcp_server_id, enabled
+        "SELECT id, thread_id, mcp_server_id, enabled, disabled_tools, tool_call_timeout_secs
          FROM thread_mcp_servers
          WHERE thread_id = ?",
     )
@@ -514,17 +516,84 @@ pub async fn attach_mcp(
     let entry = ThreadMcpServer::new(&thread_id, &payload.mcp_server_id);
 
     sqlx::query(
-        "INSERT OR IGNORE INTO thread_mcp_servers (id, thread_id, mcp_server_id, enabled)
-         VALUES (?, ?, ?, ?)",
+        "INSERT OR IGNORE INTO thread_mcp_servers (id, thread_id, mcp_server_id, enabled, disabled_tools, tool_call_timeout_secs)
+         VALUES (?, ?, ?, ?, ?, ?)",
     )
     .bind(&entry.id)
     .bind(&entry.thread_id)
     .bind(&entry.mcp_server_id)
     .bind(entry.enabled)
+    .bind(&entry.disabled_tools)
+    .bind(entry.tool_call_timeout_secs)
     .execute(&state.pool)
     .await?;
 
     Ok((StatusCode::CREATED, Json(json!({ "data": entry }))))
+}
+
+/// PATCH /api/threads/:id/mcp-servers/:mcp_id
+///
+/// Update per-thread settings for an attached MCP server.
+/// Accepts: { disabled_tools?: string[], tool_call_timeout_secs?: number | null }
+pub async fn update_thread_mcp(
+    State(state): State<Arc<AppState>>,
+    Path((thread_id, mcp_id)): Path<(String, String)>,
+    Json(payload): Json<UpdateThreadMcpServer>,
+) -> AppResult<impl IntoResponse> {
+    let user_id = get_user_id(&state).await?;
+    let _thread = verify_thread_ownership(&state, &thread_id, &user_id).await?;
+
+    // Fetch existing row
+    let existing: Option<ThreadMcpServer> = sqlx::query_as(
+        "SELECT id, thread_id, mcp_server_id, enabled, disabled_tools, tool_call_timeout_secs
+         FROM thread_mcp_servers
+         WHERE thread_id = ? AND mcp_server_id = ?",
+    )
+    .bind(&thread_id)
+    .bind(&mcp_id)
+    .fetch_optional(&state.pool)
+    .await?;
+
+    let existing = match existing {
+        Some(e) => e,
+        None => {
+            return Err(AppError::NotFound(format!(
+                "MCP server '{}' not attached to thread '{}'",
+                mcp_id, thread_id
+            )))
+        }
+    };
+
+    let new_disabled_tools = match &payload.disabled_tools {
+        None => existing.disabled_tools.clone(),
+        Some(v) => serde_json::to_string(v).unwrap_or_else(|_| "[]".to_string()),
+    };
+
+    let new_timeout: Option<i64> = match &payload.tool_call_timeout_secs {
+        None => existing.tool_call_timeout_secs,
+        Some(v) if v.is_null() => None,
+        Some(v) => v.as_i64(),
+    };
+
+    sqlx::query(
+        "UPDATE thread_mcp_servers
+         SET disabled_tools = ?, tool_call_timeout_secs = ?
+         WHERE thread_id = ? AND mcp_server_id = ?",
+    )
+    .bind(&new_disabled_tools)
+    .bind(new_timeout)
+    .bind(&thread_id)
+    .bind(&mcp_id)
+    .execute(&state.pool)
+    .await?;
+
+    let updated = ThreadMcpServer {
+        disabled_tools: new_disabled_tools,
+        tool_call_timeout_secs: new_timeout,
+        ..existing
+    };
+
+    Ok((StatusCode::OK, Json(json!({ "data": updated }))))
 }
 
 /// DELETE /api/threads/:id/mcp-servers/:mcp_id

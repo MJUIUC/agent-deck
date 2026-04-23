@@ -109,9 +109,13 @@ function StatusBadge({
 function ToolInspector({
   serverId,
   serverStatus,
+  disabledTools,
+  onDisabledToolsChange,
 }: {
   serverId: string;
   serverStatus: string;
+  disabledTools: string[];
+  onDisabledToolsChange: (updated: string[]) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [tools, setTools] = useState<McpTool[]>([]);
@@ -184,7 +188,8 @@ function ToolInspector({
         <span>Tools</span>
         {fetched && (
           <span style={{ color: "var(--text-tertiary)", fontSize: 10 }}>
-            ({tools.length})
+            ({tools.filter((t) => !disabledTools.includes(t.name)).length}/
+            {tools.length})
           </span>
         )}
       </button>
@@ -211,36 +216,60 @@ function ToolInspector({
           )}
           {!loading &&
             tools.map((tool) => (
-              <div
+              <label
                 key={tool.name}
                 style={{
                   display: "flex",
                   gap: 8,
                   padding: "4px 0",
                   borderBottom: "1px solid var(--border-subtle)",
+                  alignItems: "flex-start",
+                  cursor: "pointer",
                 }}
               >
-                <span
-                  style={{
-                    fontSize: 12,
-                    fontFamily: '"SF Mono","Fira Code",monospace',
-                    color: "var(--accent-primary)",
-                    flexShrink: 0,
-                    minWidth: 140,
+                <input
+                  type="checkbox"
+                  checked={!disabledTools.includes(tool.name)}
+                  onChange={() => {
+                    const isCurrentlyDisabled = disabledTools.includes(
+                      tool.name,
+                    );
+                    const newList = isCurrentlyDisabled
+                      ? disabledTools.filter((n) => n !== tool.name)
+                      : [...disabledTools, tool.name];
+                    onDisabledToolsChange(newList);
+                    mcpServersApi
+                      .update(serverId, { disabled_tools: newList })
+                      .catch(console.error);
                   }}
-                >
-                  {tool.name}
-                </span>
-                <span
-                  style={{
-                    fontSize: 12,
-                    color: "var(--text-secondary)",
-                    lineHeight: 1.4,
-                  }}
-                >
-                  {tool.description}
-                </span>
-              </div>
+                  style={{ marginTop: 2, flexShrink: 0 }}
+                />
+                <div style={{ flex: 1 }}>
+                  <span
+                    style={{
+                      fontSize: 12,
+                      fontFamily: '"SF Mono","Fira Code",monospace',
+                      color: disabledTools.includes(tool.name)
+                        ? "var(--text-tertiary)"
+                        : "var(--accent-primary)",
+                      display: "block",
+                    }}
+                  >
+                    {tool.name}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: disabledTools.includes(tool.name)
+                        ? "var(--text-tertiary)"
+                        : "var(--text-secondary)",
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    {tool.description}
+                  </span>
+                </div>
+              </label>
             ))}
         </div>
       )}
@@ -443,6 +472,7 @@ interface FormState {
   server_type: "local" | "remote";
   local: LocalFormState;
   remote: RemoteFormState;
+  toolCallTimeoutSecs: string; // empty string = no timeout; numeric string = seconds
 }
 
 const EMPTY_FORM: FormState = {
@@ -459,6 +489,7 @@ const EMPTY_FORM: FormState = {
     credential_key: "",
     headerPairs: [],
   },
+  toolCallTimeoutSecs: "",
 };
 
 function serverToFormState(server: McpServer): FormState {
@@ -501,6 +532,10 @@ function serverToFormState(server: McpServer): FormState {
     server_type: server.server_type as "local" | "remote",
     local,
     remote,
+    toolCallTimeoutSecs:
+      server.tool_call_timeout_secs != null
+        ? String(server.tool_call_timeout_secs)
+        : "",
   };
 }
 
@@ -660,6 +695,9 @@ function McpForm({
         source_url: form.source_url.trim() || undefined,
         server_type: form.server_type,
         config: formStateToConfig(form),
+        tool_call_timeout_secs: form.toolCallTimeoutSecs.trim()
+          ? parseInt(form.toolCallTimeoutSecs, 10) || null
+          : null,
       };
 
       let result: McpServer;
@@ -1142,6 +1180,30 @@ function McpForm({
         </div>
       )}
 
+      {/* Tool Call Timeout */}
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 4,
+          marginTop: 14,
+        }}
+      >
+        <FieldLabel>Tool Call Timeout (seconds)</FieldLabel>
+        <FieldInput
+          type="number"
+          min="1"
+          value={form.toolCallTimeoutSecs}
+          onChange={(e) => set("toolCallTimeoutSecs", e.target.value)}
+          placeholder="e.g. 30 (leave blank for no timeout)"
+          style={{ width: 200 }}
+        />
+        <FieldHint>
+          Maximum time in seconds for a single tool call. Leave blank to
+          disable.
+        </FieldHint>
+      </div>
+
       {/* Error */}
       {error && (
         <div
@@ -1191,10 +1253,12 @@ function McpServerCard({
   server,
   onEdit,
   onDelete,
+  onServerUpdate,
 }: {
   server: McpServer;
   onEdit: (server: McpServer) => void;
   onDelete: (server: McpServer) => void;
+  onServerUpdate: (server: McpServer) => void;
 }) {
   const isError = server.status === "error";
 
@@ -1292,8 +1356,22 @@ function McpServerCard({
         </div>
       )}
 
+      {/* Timeout badge */}
+      {server.tool_call_timeout_secs != null && (
+        <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
+          ⏱ {server.tool_call_timeout_secs}s timeout
+        </span>
+      )}
+
       {/* Tool inspector */}
-      <ToolInspector serverId={server.id} serverStatus={server.status} />
+      <ToolInspector
+        serverId={server.id}
+        serverStatus={server.status}
+        disabledTools={server.disabled_tools}
+        onDisabledToolsChange={(updated) =>
+          onServerUpdate({ ...server, disabled_tools: updated })
+        }
+      />
 
       {/* Actions */}
       <div
@@ -1520,6 +1598,11 @@ export function McpServerSettings() {
                 server={server}
                 onEdit={handleEdit}
                 onDelete={handleDeleteClick}
+                onServerUpdate={(updated) => {
+                  setServers((prev) =>
+                    prev.map((s) => (s.id === updated.id ? updated : s)),
+                  );
+                }}
               />
             ),
           )}

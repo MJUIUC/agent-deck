@@ -21,7 +21,7 @@ import {
 } from "../../api/client";
 import { usePlatform } from "../../hooks/usePlatform";
 import { useSseStore } from "../../stores/useSseStore";
-import type { Provider, McpServer, AgentPersona } from "../../types";
+import type { Provider, McpServer, AgentPersona, McpTool } from "../../types";
 import styles from "./MobileSettings.module.css";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -283,6 +283,9 @@ export function MobileSettings() {
   const [mcpCredentialKey, setMcpCredentialKey] = useState("");
   const [mcpNameError, setMcpNameError] = useState("");
   const [mcpSaving, setMcpSaving] = useState(false);
+  const [mcpTimeoutSecs, setMcpTimeoutSecs] = useState("");
+  const [expandedMcpTools, setExpandedMcpTools] = useState<string | null>(null);
+  const [mcpToolsMap, setMcpToolsMap] = useState<Record<string, McpTool[]>>({});
 
   // ── Personas ─────────────────────────────────────────────────────────────────
   const [personas, setPersonas] = useState<AgentPersona[]>([]);
@@ -624,6 +627,7 @@ export function MobileSettings() {
     setMcpUrl("");
     setMcpCredentialKey("");
     setMcpNameError("");
+    setMcpTimeoutSecs("");
   }
 
   async function handleSaveMcpServer() {
@@ -650,6 +654,9 @@ export function MobileSettings() {
         name: mcpName.trim(),
         server_type: mcpType,
         config,
+        tool_call_timeout_secs: mcpTimeoutSecs.trim()
+          ? parseInt(mcpTimeoutSecs, 10) || null
+          : null,
       });
       const refreshed = await mcpServersApi.list();
       setMcpServers(refreshed.data);
@@ -937,44 +944,144 @@ export function MobileSettings() {
           <div className={styles.sectionLabel}>MCP Servers</div>
           <div className={styles.sectionCard}>
             {mcpServers.map((server) => (
-              <div key={server.id} className={styles.listRow}>
-                <span
-                  className={`${styles.mcpStatusDot} ${mcpStatusDotClass(server.status)}`}
-                />
-                <div className={styles.listRowLabel}>
-                  <div className={styles.listRowName}>
-                    {server.name}
-                    <span className={styles.badge}>{server.server_type}</span>
+              <div
+                key={server.id}
+                style={{ display: "flex", flexDirection: "column" }}
+              >
+                <div className={styles.listRow}>
+                  <span
+                    className={`${styles.mcpStatusDot} ${mcpStatusDotClass(server.status)}`}
+                  />
+                  <div className={styles.listRowLabel}>
+                    <div className={styles.listRowName}>
+                      {server.name}
+                      <span className={styles.badge}>{server.server_type}</span>
+                    </div>
                   </div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={server.enabled}
-                  onChange={() => handleToggleMcpServer(server)}
-                />
-                {pendingDeleteMcpId === server.id ? (
-                  <div className={styles.confirmRow}>
-                    <span className={styles.confirmText}>Delete?</span>
+                  <input
+                    type="checkbox"
+                    checked={server.enabled}
+                    onChange={() => handleToggleMcpServer(server)}
+                  />
+                  {pendingDeleteMcpId === server.id ? (
+                    <div className={styles.confirmRow}>
+                      <span className={styles.confirmText}>Delete?</span>
+                      <button
+                        className={styles.confirmBtn}
+                        onClick={() => handleDeleteMcpServer(server.id)}
+                      >
+                        Confirm
+                      </button>
+                      <button
+                        className={styles.cancelBtn}
+                        onClick={() => setPendingDeleteMcpId(null)}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
                     <button
-                      className={styles.confirmBtn}
-                      onClick={() => handleDeleteMcpServer(server.id)}
+                      className={styles.deleteButton}
+                      onClick={() => setPendingDeleteMcpId(server.id)}
                     >
-                      Confirm
+                      ✕
                     </button>
+                  )}
+                </div>
+                {server.status === "connected" && (
+                  <div style={{ paddingLeft: 8, paddingBottom: 6 }}>
                     <button
                       className={styles.cancelBtn}
-                      onClick={() => setPendingDeleteMcpId(null)}
+                      style={{ fontSize: 11, marginTop: 4 }}
+                      onClick={async () => {
+                        if (expandedMcpTools === server.id) {
+                          setExpandedMcpTools(null);
+                        } else {
+                          setExpandedMcpTools(server.id);
+                          if (!mcpToolsMap[server.id]) {
+                            try {
+                              const res = await mcpServersApi.listTools(
+                                server.id,
+                              );
+                              setMcpToolsMap((prev) => ({
+                                ...prev,
+                                [server.id]: res.data,
+                              }));
+                            } catch {
+                              setMcpToolsMap((prev) => ({
+                                ...prev,
+                                [server.id]: [],
+                              }));
+                            }
+                          }
+                        }
+                      }}
                     >
-                      Cancel
+                      Tools {expandedMcpTools === server.id ? "▲" : "▼"}
                     </button>
+                    {expandedMcpTools === server.id && (
+                      <div style={{ paddingTop: 8 }}>
+                        {(mcpToolsMap[server.id] ?? []).map((tool) => (
+                          <label
+                            key={tool.name}
+                            style={{
+                              display: "flex",
+                              gap: 8,
+                              alignItems: "center",
+                              padding: "3px 0",
+                              fontSize: 12,
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={
+                                !server.disabled_tools.includes(tool.name)
+                              }
+                              onChange={async () => {
+                                const isDisabled =
+                                  server.disabled_tools.includes(tool.name);
+                                const newList = isDisabled
+                                  ? server.disabled_tools.filter(
+                                      (n) => n !== tool.name,
+                                    )
+                                  : [...server.disabled_tools, tool.name];
+                                try {
+                                  await mcpServersApi.update(server.id, {
+                                    disabled_tools: newList,
+                                  });
+                                  setMcpServers((prev) =>
+                                    prev.map((s) =>
+                                      s.id === server.id
+                                        ? { ...s, disabled_tools: newList }
+                                        : s,
+                                    ),
+                                  );
+                                } catch (err) {
+                                  console.error("Toggle tool failed:", err);
+                                }
+                              }}
+                            />
+                            <span
+                              style={{
+                                opacity: server.disabled_tools.includes(
+                                  tool.name,
+                                )
+                                  ? 0.4
+                                  : 1,
+                              }}
+                            >
+                              {tool.name}
+                            </span>
+                          </label>
+                        ))}
+                        {(mcpToolsMap[server.id] ?? []).length === 0 && (
+                          <span style={{ fontSize: 12, opacity: 0.5 }}>
+                            No tools
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
-                ) : (
-                  <button
-                    className={styles.deleteButton}
-                    onClick={() => setPendingDeleteMcpId(server.id)}
-                  >
-                    ✕
-                  </button>
                 )}
               </div>
             ))}
@@ -1610,6 +1717,19 @@ export function MobileSettings() {
               </div>
             </>
           )}
+          <div className={styles.formGroup}>
+            <label className={styles.formLabel}>
+              Tool Call Timeout (seconds)
+            </label>
+            <input
+              className={styles.formInput}
+              type="number"
+              min="1"
+              value={mcpTimeoutSecs}
+              onChange={(e) => setMcpTimeoutSecs(e.target.value)}
+              placeholder="e.g. 30 (blank = no timeout)"
+            />
+          </div>
         </div>
         <div className={styles.drawerFooter}>
           <button

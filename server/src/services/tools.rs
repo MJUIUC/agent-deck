@@ -475,6 +475,96 @@ impl AgentTool for TailscaleStatusTool {
     }
 }
 
+// ─── SetMcpTimeout ──────────────────────────────────────────────────────────
+
+pub struct SetMcpTimeoutTool;
+
+#[async_trait]
+impl AgentTool for SetMcpTimeoutTool {
+    fn name(&self) -> &str {
+        "set_mcp_timeout"
+    }
+
+    fn description(&self) -> &str {
+        "Adjust the per-thread timeout (in seconds) for tool calls made to a specific MCP \
+         server. Use this when a tool is timing out and needs more time, or when you want \
+         to impose a tighter limit. Pass null to remove the timeout override and fall back \
+         to the server default."
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "server_tag": {
+                    "type": "string",
+                    "description": "The tag identifier of the MCP server (e.g. 'github', 'filesystem')"
+                },
+                "timeout_secs": {
+                    "description": "Timeout in seconds (integer ≥ 1), or null to clear the override.",
+                    "oneOf": [
+                        { "type": "integer", "minimum": 1 },
+                        { "type": "null" }
+                    ]
+                }
+            },
+            "required": ["server_tag", "timeout_secs"]
+        })
+    }
+
+    async fn run(&self, args: Value, context: &ToolContext<'_>) -> Result<String> {
+        let tag = match args["server_tag"].as_str() {
+            Some(t) => t,
+            None => {
+                return Err(anyhow::anyhow!(
+                    "server_tag is required and must be a string"
+                ))
+            }
+        };
+
+        let timeout_secs: Option<i64> = match &args["timeout_secs"] {
+            Value::Null => None,
+            Value::Number(n) => Some(
+                n.as_i64()
+                    .ok_or_else(|| anyhow::anyhow!("timeout_secs must be a whole number"))?,
+            ),
+            _ => return Err(anyhow::anyhow!("timeout_secs must be an integer or null")),
+        };
+
+        let result = sqlx::query(
+            "UPDATE thread_mcp_servers
+             SET tool_call_timeout_secs = ?
+             WHERE thread_id = ?
+               AND mcp_server_id IN (SELECT id FROM mcp_servers WHERE tag = ?)",
+        )
+        .bind(timeout_secs)
+        .bind(context.thread_id)
+        .bind(tag)
+        .execute(context.pool)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            return Ok(format!(
+                "No MCP server with tag '{}' is attached to this thread. \
+                 Check the tag name and make sure the server is attached.",
+                tag
+            ));
+        }
+
+        Ok(match timeout_secs {
+            Some(secs) => format!(
+                "Timeout for MCP server '{}' set to {}s on this thread.",
+                tag, secs
+            ),
+            None => format!(
+                "Timeout override for MCP server '{}' cleared. \
+                 The server's default timeout will now apply.",
+                tag
+            ),
+        })
+    }
+}
+
 // ─── Registry factory ─────────────────────────────────────────────────────────
 
 /// Construct the list of all statically-registered built-in tools.
@@ -488,6 +578,7 @@ pub fn built_in_tools() -> Vec<Arc<dyn AgentTool>> {
         Arc::new(DeleteMemoryTool),
         Arc::new(RecallConversationTool),
         Arc::new(TailscaleStatusTool),
+        Arc::new(SetMcpTimeoutTool),
     ]
 }
 

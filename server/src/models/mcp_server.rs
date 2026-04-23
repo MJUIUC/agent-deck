@@ -14,6 +14,12 @@ pub struct McpServer {
     pub config: String,      // JSON string
     pub status: String,      // "inactive" | "connecting" | "connected" | "error"
     pub enabled: bool,
+    /// Per-server timeout for individual tool calls, in seconds.
+    /// NULL means no timeout is enforced.
+    pub tool_call_timeout_secs: Option<i64>,
+    /// JSON array of tool names that are disabled for this server.
+    /// e.g. `'["create_issue","delete_repo"]'`
+    pub disabled_tools: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -28,6 +34,10 @@ pub struct CreateMcpServer {
     pub source_url: Option<String>,
     pub server_type: String,
     pub config: Value,
+    /// Optional timeout in seconds for tool calls from this server.
+    pub tool_call_timeout_secs: Option<i64>,
+    /// Optional list of tool names to disable on this server.
+    pub disabled_tools: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -38,13 +48,17 @@ pub struct UpdateMcpServer {
     pub source_url: Option<String>,
     pub config: Option<Value>,
     pub enabled: Option<bool>,
+    /// `None` → omit (no change); `Some(null)` → clear timeout; `Some(n)` → set to n seconds.
+    pub tool_call_timeout_secs: Option<Value>,
+    /// `None` → omit (no change); `Some(vec)` → replace disabled tool list.
+    pub disabled_tools: Option<Vec<String>>,
 }
 
 impl McpServer {
     pub fn new(user_id: &str, req: CreateMcpServer) -> Self {
         let now = chrono::Utc::now().to_rfc3339();
         // Default tag to name when the caller omits it, stripping whitespace and
-        // lower-casing so "My Server" becomes "my server" as a safe fallback.
+        // lower-casing so "My Server" becomes "my_server" as a safe fallback.
         let tag = req
             .tag
             .filter(|t| !t.trim().is_empty())
@@ -60,6 +74,9 @@ impl McpServer {
             config: req.config.to_string(),
             status: "inactive".to_string(),
             enabled: true,
+            tool_call_timeout_secs: req.tool_call_timeout_secs,
+            disabled_tools: serde_json::to_string(&req.disabled_tools.unwrap_or_default())
+                .unwrap_or_else(|_| "[]".to_string()),
             created_at: now.clone(),
             updated_at: now,
         }

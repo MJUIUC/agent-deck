@@ -45,6 +45,8 @@ use crate::{
 struct AttachedMcpServer {
     id: String,
     tag: String,
+    tool_call_timeout_secs: Option<i64>,
+    disabled_tools: Vec<String>,
 }
 
 // ─── Public entry point ────────────────────────────────────────────────────────
@@ -512,8 +514,11 @@ async fn run_inner(
 
     // ── 4.5. Load attached MCP servers and build namespaced tool list ─────────
     let attached: Vec<AttachedMcpServer> = {
-        let rows: Vec<(String, String)> = sqlx::query_as(
-            "SELECT ms.id, ms.tag
+        let rows: Vec<(String, String, Option<i64>, String, String)> = sqlx::query_as(
+            "SELECT ms.id, ms.tag,
+                    COALESCE(tms.tool_call_timeout_secs, ms.tool_call_timeout_secs) AS tool_call_timeout_secs,
+                    ms.disabled_tools AS server_disabled,
+                    tms.disabled_tools AS thread_disabled
              FROM thread_mcp_servers tms
              JOIN mcp_servers ms ON ms.id = tms.mcp_server_id
              WHERE tms.thread_id = ? AND tms.enabled = 1 AND ms.enabled = 1",
@@ -527,7 +532,27 @@ async fn run_inner(
         });
 
         rows.into_iter()
-            .map(|(id, tag)| AttachedMcpServer { id, tag })
+            .map(
+                |(id, tag, timeout, server_disabled_json, thread_disabled_json)| {
+                    let server_disabled: Vec<String> =
+                        serde_json::from_str(&server_disabled_json).unwrap_or_default();
+                    let thread_disabled: Vec<String> =
+                        serde_json::from_str(&thread_disabled_json).unwrap_or_default();
+                    // Union: server-level always applies; thread adds on top
+                    let mut disabled_tools = server_disabled;
+                    for t in thread_disabled {
+                        if !disabled_tools.contains(&t) {
+                            disabled_tools.push(t);
+                        }
+                    }
+                    AttachedMcpServer {
+                        id,
+                        tag,
+                        tool_call_timeout_secs: timeout,
+                        disabled_tools,
+                    }
+                },
+            )
             .collect()
     };
 
@@ -536,6 +561,10 @@ async fn run_inner(
     for server in &attached {
         let tools = state.mcp.cached_tools(&server.id).await;
         for tool in tools {
+            // Skip tools that have been disabled for this server.
+            if server.disabled_tools.contains(&tool.name) {
+                continue;
+            }
             let namespaced_name = format!("{}__{}", server.tag, tool.name);
             let tool_def = async_openai::types::ChatCompletionTool {
                 r#type: async_openai::types::ChatCompletionToolType::Function,
@@ -1928,9 +1957,21 @@ async fn execute_mcp_tool(
             };
 
             let mut cancellation_watcher = cancellation_rx.clone();
+            let timeout_secs = s.tool_call_timeout_secs;
             tokio::select! {
                 biased;
-                res = state.mcp.call_tool(&s.id, tool_name, args) => {
+                res = async {
+                    if let Some(secs) = timeout_secs {
+                        tokio::time::timeout(
+                            std::time::Duration::from_secs(secs as u64),
+                            state.mcp.call_tool(&s.id, tool_name, args),
+                        )
+                        .await
+                        .unwrap_or_else(|_| Err(anyhow::anyhow!("Tool call timed out after {}s", secs)))
+                    } else {
+                        state.mcp.call_tool(&s.id, tool_name, args).await
+                    }
+                } => {
                     info!(
                         thread_id = %thread_id,
                         server_id = %s.id,

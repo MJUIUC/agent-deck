@@ -33,7 +33,7 @@ pub async fn list_mcp(State(state): State<Arc<AppState>>) -> AppResult<impl Into
     let user_id = get_user_id(&state).await?;
 
     let servers: Vec<McpServer> = sqlx::query_as(
-        "SELECT id, user_id, name, tag, description, source_url, server_type, config, status, enabled, created_at, updated_at
+        "SELECT id, user_id, name, tag, description, source_url, server_type, config, status, enabled, tool_call_timeout_secs, disabled_tools, created_at, updated_at
          FROM mcp_servers
          WHERE user_id = ?
          ORDER BY created_at ASC",
@@ -53,7 +53,7 @@ pub async fn get_mcp(
     let user_id = get_user_id(&state).await?;
 
     let server: Option<McpServer> = sqlx::query_as(
-        "SELECT id, user_id, name, tag, description, source_url, server_type, config, status, enabled, created_at, updated_at
+        "SELECT id, user_id, name, tag, description, source_url, server_type, config, status, enabled, tool_call_timeout_secs, disabled_tools, created_at, updated_at
          FROM mcp_servers
          WHERE id = ? AND user_id = ?",
     )
@@ -94,8 +94,8 @@ pub async fn create_mcp(
     validate_tag(&server.tag).map_err(AppError::BadRequest)?;
 
     sqlx::query(
-        "INSERT INTO mcp_servers (id, user_id, name, tag, description, source_url, server_type, config, status, enabled, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO mcp_servers (id, user_id, name, tag, description, source_url, server_type, config, status, enabled, tool_call_timeout_secs, disabled_tools, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&server.id)
     .bind(&server.user_id)
@@ -107,6 +107,8 @@ pub async fn create_mcp(
     .bind(&server.config)
     .bind(&server.status)
     .bind(server.enabled)
+    .bind(server.tool_call_timeout_secs)
+    .bind(&server.disabled_tools)
     .bind(&server.created_at)
     .bind(&server.updated_at)
     .execute(&state.pool)
@@ -138,7 +140,7 @@ pub async fn update_mcp(
     let user_id = get_user_id(&state).await?;
 
     let existing: Option<McpServer> = sqlx::query_as(
-        "SELECT id, user_id, name, tag, description, source_url, server_type, config, status, enabled, created_at, updated_at
+        "SELECT id, user_id, name, tag, description, source_url, server_type, config, status, enabled, tool_call_timeout_secs, disabled_tools, created_at, updated_at
          FROM mcp_servers
          WHERE id = ? AND user_id = ?",
     )
@@ -174,11 +176,21 @@ pub async fn update_mcp(
         .map(|v| v.to_string())
         .unwrap_or_else(|| existing.config.clone());
     let enabled = payload.enabled.unwrap_or(existing.enabled);
+    let tool_call_timeout_secs: Option<i64> = match &payload.tool_call_timeout_secs {
+        None => existing.tool_call_timeout_secs, // not included — keep existing
+        Some(v) if v.is_null() => None,          // explicitly set to null — clear
+        Some(v) => v.as_i64(),                   // set to provided number
+    };
+    let disabled_tools_str = match &payload.disabled_tools {
+        None => existing.disabled_tools.clone(),
+        Some(v) => serde_json::to_string(v).unwrap_or_else(|_| "[]".to_string()),
+    };
     let now = chrono::Utc::now().to_rfc3339();
 
     sqlx::query(
         "UPDATE mcp_servers
-         SET name = ?, tag = ?, description = ?, source_url = ?, config = ?, enabled = ?, updated_at = ?
+         SET name = ?, tag = ?, description = ?, source_url = ?, config = ?, enabled = ?,
+             tool_call_timeout_secs = ?, disabled_tools = ?, updated_at = ?
          WHERE id = ? AND user_id = ?",
     )
     .bind(name)
@@ -187,6 +199,8 @@ pub async fn update_mcp(
     .bind(source_url)
     .bind(&config)
     .bind(enabled)
+    .bind(tool_call_timeout_secs)
+    .bind(&disabled_tools_str)
     .bind(&now)
     .bind(&id)
     .bind(&user_id)
@@ -205,6 +219,8 @@ pub async fn update_mcp(
         config,
         status: existing.status,
         enabled,
+        tool_call_timeout_secs,
+        disabled_tools: disabled_tools_str,
         created_at: existing.created_at,
         updated_at: now,
     };

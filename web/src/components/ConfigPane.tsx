@@ -9,6 +9,7 @@ import type {
   Model,
   Routine,
   MemoryEntry,
+  ThreadMcpServer,
 } from "@/types";
 
 import {
@@ -33,13 +34,6 @@ import { CronPicker } from "./CronPicker";
 type ThreadWebhookBinding = ThreadWebhookBindingAPI;
 
 // ─── Sub-types ────────────────────────────────────────────────────────────────
-
-interface ThreadMcpEntry {
-  id: string;
-  thread_id: string;
-  mcp_server_id: string;
-  enabled: boolean;
-}
 
 interface ProviderWithModels {
   provider: Provider;
@@ -98,14 +92,18 @@ function TypeBadge({ type }: { type: McpServer["server_type"] }) {
 
 function McpServerCard({
   server,
+  entry,
   tools,
   onRemove,
   onLoadTools,
+  onEntryUpdate,
 }: {
   server: McpServer;
+  entry: ThreadMcpServer;
   tools: McpTool[] | null;
   onRemove: () => void;
   onLoadTools: () => void;
+  onEntryUpdate: (updated: ThreadMcpServer) => void;
 }) {
   const [toolsOpen, setToolsOpen] = useState(false);
   const [toolsLoading, setToolsLoading] = useState(false);
@@ -186,14 +184,71 @@ function McpServerCard({
               <span className={styles.mcpToolsEmpty}>No tools reported</span>
             ) : (
               tools.map((t) => (
-                <div key={t.name} className={styles.mcpToolItem}>
-                  <span className={styles.mcpToolName}>{t.name}</span>
+                <label key={t.name} className={styles.mcpToolItem}>
+                  <input
+                    type="checkbox"
+                    checked={!entry.disabled_tools.includes(t.name)}
+                    onChange={async () => {
+                      const isDisabled = entry.disabled_tools.includes(t.name);
+                      const newList = isDisabled
+                        ? entry.disabled_tools.filter((n) => n !== t.name)
+                        : [...entry.disabled_tools, t.name];
+                      try {
+                        const { data: updated } =
+                          await threadsApi.updateThreadMcpServer(
+                            entry.thread_id,
+                            entry.mcp_server_id,
+                            { disabled_tools: newList },
+                          );
+                        onEntryUpdate(updated);
+                      } catch {
+                        // silently degrade
+                      }
+                    }}
+                    className={styles.mcpToolCheckbox}
+                  />
+                  <span
+                    className={[
+                      styles.mcpToolName,
+                      entry.disabled_tools.includes(t.name)
+                        ? styles.mcpToolNameDisabled
+                        : "",
+                    ].join(" ")}
+                  >
+                    {t.name}
+                  </span>
                   <span className={styles.mcpToolDesc}>{t.description}</span>
-                </div>
+                </label>
               ))
             )}
           </div>
         )}
+      </div>
+
+      {/* Per-thread timeout */}
+      <div className={styles.mcpTimeoutRow}>
+        <span className={styles.mcpTimeoutLabel}>Timeout (s)</span>
+        <input
+          type="number"
+          min="1"
+          className={styles.mcpTimeoutInput}
+          value={entry.tool_call_timeout_secs ?? ""}
+          placeholder="inherit"
+          onChange={async (e) => {
+            const val = e.target.value.trim();
+            const timeout = val ? parseInt(val, 10) : null;
+            try {
+              const { data: updated } = await threadsApi.updateThreadMcpServer(
+                entry.thread_id,
+                entry.mcp_server_id,
+                { tool_call_timeout_secs: timeout },
+              );
+              onEntryUpdate(updated);
+            } catch {
+              // silently degrade
+            }
+          }}
+        />
       </div>
     </div>
   );
@@ -578,7 +633,7 @@ export function ConfigPane({
   // ── MCP servers ──
   const lastMcpStatusChange = useSseStore((s) => s.lastMcpStatusChange);
 
-  const [attachedEntries, setAttachedEntries] = useState<ThreadMcpEntry[]>([]);
+  const [attachedEntries, setAttachedEntries] = useState<ThreadMcpServer[]>([]);
   const [mcpServersMap, setMcpServersMap] = useState<Record<string, McpServer>>(
     {},
   );
@@ -1510,9 +1565,17 @@ export function ConfigPane({
                       <McpServerCard
                         key={entry.id}
                         server={server}
+                        entry={entry}
                         tools={toolsMap[server.id] ?? null}
                         onRemove={() => handleDetachServer(server.id)}
                         onLoadTools={() => handleLoadTools(server.id)}
+                        onEntryUpdate={(updated) =>
+                          setAttachedEntries((prev) =>
+                            prev.map((e) =>
+                              e.id === updated.id ? updated : e,
+                            ),
+                          )
+                        }
                       />
                     );
                   })}

@@ -364,7 +364,7 @@ pub async fn build_router(
         )
         .route(
             "/api/threads/:id/mcp-servers/:mcp_id",
-            axum::routing::delete(threads::detach_mcp),
+            axum::routing::delete(threads::detach_mcp).patch(threads::update_thread_mcp),
         )
         // Messages
         .route(

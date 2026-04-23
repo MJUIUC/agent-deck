@@ -15,6 +15,7 @@ import type {
   FsEntry,
   FsFileContent,
   TailscaleStatus,
+  ThreadMcpServer,
 } from "@/types";
 
 // ── Credential types ──────────────────────────────────────────────────────────
@@ -242,31 +243,31 @@ export const threadsApi = {
     return apiFetch(`/api/threads/${id}/unarchive`, { method: "POST" });
   },
 
-  listMcpServers(threadId: string): Promise<{
-    data: Array<{
-      id: string;
-      thread_id: string;
-      mcp_server_id: string;
-      enabled: boolean;
-    }>;
-  }> {
+  listMcpServers(threadId: string): Promise<{ data: ThreadMcpServer[] }> {
     return apiFetch(`/api/threads/${threadId}/mcp-servers`);
   },
 
   attachMcpServer(
     threadId: string,
     mcpServerId: string,
-  ): Promise<{
-    data: {
-      id: string;
-      thread_id: string;
-      mcp_server_id: string;
-      enabled: boolean;
-    };
-  }> {
+  ): Promise<{ data: ThreadMcpServer }> {
     return apiFetch(`/api/threads/${threadId}/mcp-servers`, {
       method: "POST",
       body: JSON.stringify({ mcp_server_id: mcpServerId }),
+    });
+  },
+
+  updateThreadMcpServer(
+    threadId: string,
+    mcpServerId: string,
+    payload: {
+      disabled_tools?: string[];
+      tool_call_timeout_secs?: number | null;
+    },
+  ): Promise<{ data: ThreadMcpServer }> {
+    return apiFetch(`/api/threads/${threadId}/mcp-servers/${mcpServerId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
     });
   },
 
@@ -461,6 +462,8 @@ export const mcpServersApi = {
     source_url?: string;
     server_type: "local" | "remote";
     config: McpServerConfig;
+    tool_call_timeout_secs?: number | null;
+    disabled_tools?: string[];
   }): Promise<{ data: McpServer }> {
     return apiFetch("/api/mcp-servers", {
       method: "POST",
@@ -476,6 +479,8 @@ export const mcpServersApi = {
       source_url?: string;
       config?: McpServerConfig;
       enabled?: boolean;
+      tool_call_timeout_secs?: number | null;
+      disabled_tools?: string[];
     },
   ): Promise<{ data: McpServer }> {
     return apiFetch(`/api/mcp-servers/${id}`, {

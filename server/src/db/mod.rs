@@ -99,6 +99,10 @@ async fn verify_schema(pool: &SqlitePool) -> Result<()> {
         ("threads", "show_system_events"),
         ("threads", "summary"),
         ("threads", "auto_summarize"),
+        ("mcp_servers", "tool_call_timeout_secs"),
+        ("mcp_servers", "disabled_tools"),
+        ("thread_mcp_servers", "disabled_tools"),
+        ("thread_mcp_servers", "tool_call_timeout_secs"),
     ];
 
     for (table, column) in checks {

@@ -84,6 +84,10 @@ export interface McpServer {
   config: string; // JSON string
   status: "inactive" | "connecting" | "connected" | "error";
   enabled: boolean;
+  /** Per-server timeout for tool calls in seconds. null = no timeout. */
+  tool_call_timeout_secs: number | null;
+  /** Tool names that are disabled for this server and won't be offered to the model. */
+  disabled_tools: string[];
   created_at: string;
   updated_at: string;
 }
@@ -91,6 +95,17 @@ export interface McpServer {
 export interface McpTool {
   name: string;
   description: string;
+}
+
+export interface ThreadMcpServer {
+  id: string;
+  thread_id: string;
+  mcp_server_id: string;
+  enabled: boolean;
+  /** Per-thread disabled tool names. Tools in this list won't be offered to the model for this thread. */
+  disabled_tools: string[];
+  /** Per-thread timeout override in seconds. null = inherit from the server's global setting. */
+  tool_call_timeout_secs: number | null;
 }
 
 export interface Routine {

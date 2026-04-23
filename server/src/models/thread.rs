@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -50,11 +51,21 @@ pub struct ThreadMcpServer {
     pub thread_id: String,
     pub mcp_server_id: String,
     pub enabled: bool,
+    pub disabled_tools: String, // JSON array, e.g. '["tool1"]'
+    pub tool_call_timeout_secs: Option<i64>, // NULL = inherit from mcp_server default
 }
 
 #[derive(Debug, Deserialize)]
 pub struct AttachMcpServer {
     pub mcp_server_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateThreadMcpServer {
+    /// None = no change. Some(vec) = replace the full disabled list for this thread.
+    pub disabled_tools: Option<Vec<String>>,
+    /// None = no change. Some(null JSON value) = clear. Some(n) = set to n seconds.
+    pub tool_call_timeout_secs: Option<serde_json::Value>,
 }
 
 impl Thread {
@@ -103,6 +114,8 @@ impl ThreadMcpServer {
             thread_id: thread_id.into(),
             mcp_server_id: mcp_server_id.into(),
             enabled: true,
+            disabled_tools: "[]".to_string(),
+            tool_call_timeout_secs: None,
         }
     }
 }
