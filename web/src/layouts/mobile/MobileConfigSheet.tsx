@@ -758,17 +758,10 @@ export function MobileConfigSheet({
                   return (
                     <div
                       key={entry.id}
-                      className={styles.toolRow}
-                      style={{ flexDirection: "column", alignItems: "stretch" }}
+                      className={cx(styles.toolRow, styles.toolRowExpanded)}
                     >
                       {/* Main row */}
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 8,
-                        }}
-                      >
+                      <div className={styles.toolRowInner}>
                         <span
                           className={cx(
                             styles.mcpStatusDot,
@@ -776,42 +769,37 @@ export function MobileConfigSheet({
                           )}
                           aria-hidden="true"
                         />
-                        <span className={styles.toolName} style={{ flex: 1 }}>
-                          {server.name}
-                        </span>
-                        {server.status === "connected" && (
-                          <button
-                            type="button"
-                            className={styles.detachBtn}
-                            style={{ fontSize: 10, opacity: 0.6 }}
-                            onClick={async () => {
-                              if (expandedMcpId === entry.mcp_server_id) {
-                                setExpandedMcpId(null);
-                              } else {
-                                setExpandedMcpId(entry.mcp_server_id);
-                                if (!mcpToolsCache[entry.mcp_server_id]) {
-                                  try {
-                                    const res = await mcpServersApi.listTools(
-                                      entry.mcp_server_id,
-                                    );
-                                    setMcpToolsCache((prev) => ({
-                                      ...prev,
-                                      [entry.mcp_server_id]: res.data,
-                                    }));
-                                  } catch {
-                                    setMcpToolsCache((prev) => ({
-                                      ...prev,
-                                      [entry.mcp_server_id]: [],
-                                    }));
-                                  }
+                        <span className={styles.toolName}>{server.name}</span>
+                        <button
+                          type="button"
+                          className={styles.toolsExpandBtn}
+                          onClick={async () => {
+                            if (expandedMcpId === entry.mcp_server_id) {
+                              setExpandedMcpId(null);
+                            } else {
+                              setExpandedMcpId(entry.mcp_server_id);
+                              if (!mcpToolsCache[entry.mcp_server_id]) {
+                                try {
+                                  const res = await mcpServersApi.listTools(
+                                    entry.mcp_server_id,
+                                  );
+                                  setMcpToolsCache((prev) => ({
+                                    ...prev,
+                                    [entry.mcp_server_id]: res.data,
+                                  }));
+                                } catch {
+                                  setMcpToolsCache((prev) => ({
+                                    ...prev,
+                                    [entry.mcp_server_id]: [],
+                                  }));
                                 }
                               }
-                            }}
-                          >
-                            Tools{" "}
-                            {expandedMcpId === entry.mcp_server_id ? "▲" : "▼"}
-                          </button>
-                        )}
+                            }
+                          }}
+                        >
+                          Tools{" "}
+                          {expandedMcpId === entry.mcp_server_id ? "▲" : "▼"}
+                        </button>
                         <button
                           type="button"
                           className={styles.detachBtn}
@@ -826,39 +814,18 @@ export function MobileConfigSheet({
 
                       {/* Tools accordion */}
                       {expandedMcpId === entry.mcp_server_id && (
-                        <div style={{ paddingTop: 8, paddingLeft: 4 }}>
+                        <div className={styles.toolRowAccordion}>
                           {/* Timeout */}
-                          <div
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: 8,
-                              marginBottom: 8,
-                              fontSize: 12,
-                            }}
-                          >
-                            <span
-                              style={{
-                                color: "var(--text-tertiary)",
-                                fontSize: 11,
-                              }}
-                            >
+                          <div className={styles.toolRowTimeoutRow}>
+                            <span className={styles.toolRowTimeoutLabel}>
                               Timeout (s):
                             </span>
                             <input
                               type="number"
                               min="1"
+                              className={styles.toolRowTimeoutInput}
                               value={entry.tool_call_timeout_secs ?? ""}
                               placeholder="inherit"
-                              style={{
-                                width: 60,
-                                fontSize: 12,
-                                background: "var(--bg-secondary)",
-                                border: "1px solid var(--border-default)",
-                                borderRadius: 5,
-                                color: "var(--text-primary)",
-                                padding: "2px 6px",
-                              }}
                               onChange={async (e) => {
                                 const val = e.target.value.trim();
                                 const timeout = val ? parseInt(val, 10) : null;
@@ -881,18 +848,17 @@ export function MobileConfigSheet({
                             />
                           </div>
                           {/* Tool toggles */}
+                          {server.status !== "connected" &&
+                            !mcpToolsCache[entry.mcp_server_id] && (
+                              <span className={styles.toolRowEmpty}>
+                                Connect the server to load tools.
+                              </span>
+                            )}
                           {(mcpToolsCache[entry.mcp_server_id] ?? []).map(
                             (tool) => (
                               <label
                                 key={tool.name}
-                                style={{
-                                  display: "flex",
-                                  gap: 8,
-                                  alignItems: "center",
-                                  padding: "3px 0",
-                                  fontSize: 12,
-                                  cursor: "pointer",
-                                }}
+                                className={styles.toolToggleLabel}
                               >
                                 <input
                                   type="checkbox"
@@ -925,13 +891,11 @@ export function MobileConfigSheet({
                                   }}
                                 />
                                 <span
-                                  style={{
-                                    opacity: entry.disabled_tools.includes(
-                                      tool.name,
-                                    )
-                                      ? 0.4
-                                      : 1,
-                                  }}
+                                  className={cx(
+                                    styles.toolToggleName,
+                                    entry.disabled_tools.includes(tool.name) &&
+                                      styles.toolToggleNameDisabled,
+                                  )}
                                 >
                                   {tool.name}
                                 </span>
@@ -939,8 +903,8 @@ export function MobileConfigSheet({
                             ),
                           )}
                           {mcpToolsCache[entry.mcp_server_id]?.length === 0 && (
-                            <span style={{ fontSize: 12, opacity: 0.5 }}>
-                              No tools available
+                            <span className={styles.toolRowEmpty}>
+                              No tools reported.
                             </span>
                           )}
                         </div>
