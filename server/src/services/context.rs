@@ -59,15 +59,13 @@ You also have access to a `recall_conversation` tool that lets you look up summa
 const SKILLS_BLOCK_TEMPLATE: &str = "\
 ## Skill Guides
 
-You have access to skill guides that document how to use this platform's built-in features (webhooks, MCP servers, routines, and more). Guides are Markdown files stored in {skills_dir}.
+Skill guides are available that document how to use this platform's built-in features. They are Markdown files stored in {skills_dir}. Only read a guide when the user explicitly asks for help with that feature.
 
 List available guides:
   GET /api/fs/list?path={skills_dir}
 
 Read a guide:
-  GET /api/fs/read?path={skills_dir}/github-webhook.md
-
-Read the relevant guide before configuring a platform feature for the first time in this conversation, or when you are uncertain about an API contract. Only read what is relevant to the current task — do not load guides preemptively.";
+  GET /api/fs/read?path={skills_dir}/credentials.md";
 
 // ─── Input types ──────────────────────────────────────────────────────────────
 
