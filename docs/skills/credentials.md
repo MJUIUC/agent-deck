@@ -1,6 +1,6 @@
 # Credential Store
 
-The credential store is a server-side encrypted vault for API keys, tokens, and other secrets. Secrets are encrypted with AES-256-GCM at rest and are **never decrypted into the message stream or any tool call response** — the server resolves them internally at connection time. As an agent you work entirely with credential *keys* (short identifiers) and the public metadata fields. You never see, handle, or transmit the raw secret values.
+The credential store is a server-side encrypted vault for API keys, tokens, and other secrets. Secrets are encrypted with AES-256-GCM at rest and are **never decrypted into the message stream or surfaced to the agent**. The server resolves them internally — either at MCP connection time (for server config) or at tool call dispatch time (for tool arguments). As an agent you work entirely with credential *keys* (short identifiers) and the public metadata fields. You never see, handle, or transmit the raw secret values.
 
 ## What you can and cannot do
 
@@ -8,8 +8,9 @@ The credential store is a server-side encrypted vault for API keys, tokens, and 
 |---|---|
 | List and read credential metadata | Read or write the database directly |
 | Create a new credential (user provides the secret in the UI, or you POST it if the user pastes it to you explicitly) | Retrieve a decrypted secret via any API call |
-| Reference a credential by key inside an MCP server config | Put a raw secret value in a message, argument, or config field |
-| Update metadata or rotate a secret | Bypass the placeholder system to inject secrets manually |
+| Reference a credential by key in MCP server config using placeholders | Put a raw secret value in a message, argument, or config field |
+| Use `{credential:<key>}` placeholders in MCP tool call arguments | Bypass the placeholder system to inject secrets manually |
+| Update metadata or rotate a secret | |
 | Delete a credential | |
 
 ---
@@ -171,9 +172,11 @@ Always check for warnings and inform the user so they can update the affected MC
 
 ---
 
-## Referencing credentials in MCP server config
+## Using credentials in tool call arguments
 
-When configuring an MCP server, use placeholder strings in the `env` or `headers` fields of the config JSON. The server resolves these to the decrypted value at connection time — the agent never sees the plaintext.
+When making a tool call, you can place `{credential:<key>}` placeholders anywhere in the argument values. The server resolves them to the decrypted secret **before** forwarding the call to the MCP tool — the placeholder is what gets stored in the database, so the secret never appears in history.
+
+This works for any MCP tool call, in any argument position: standalone values, strings with the placeholder embedded, nested objects, and arrays.
 
 ### Placeholder syntax
 
@@ -182,6 +185,53 @@ When configuring an MCP server, use placeholder strings in the `env` or `headers
 | `{credential:<key>}` | The primary `secret` field of the credential |
 | `{credential:<key>:secret}` | Same as above — explicit form |
 | `{credential:<key>:password}` | The `password` field — for `key_secret_pair` credentials |
+
+### Example — standalone value
+
+```json
+{
+  "api_key": "{credential:openai_key}"
+}
+```
+
+### Example — embedded in a string
+
+```json
+{
+  "authorization": "Bearer {credential:openai_key}"
+}
+```
+
+### Example — key/secret pair across two arguments
+
+```json
+{
+  "app_key": "{credential:schwab_trading:secret}",
+  "app_secret": "{credential:schwab_trading:password}"
+}
+```
+
+### Example — nested in a headers object
+
+```json
+{
+  "url": "https://api.example.com/data",
+  "headers": {
+    "Authorization": "Bearer {credential:my_token}",
+    "Content-Type": "application/json"
+  }
+}
+```
+
+If a placeholder references a credential that does not exist, the tool call fails and returns an error to the model. Always verify the credential exists (`GET /api/credentials`) before constructing a tool call that depends on it.
+
+---
+
+## Referencing credentials in MCP server config
+
+When configuring an MCP server, use placeholder strings in the `env` or `headers` fields of the config JSON. The server resolves these to the decrypted value at connection time — the agent never sees the plaintext.
+
+Placeholders in MCP server config are resolved once at connection time and apply to every request for the lifetime of the connection. Use the same syntax as tool call argument placeholders.
 
 ### Example — single API key in env var
 
@@ -225,5 +275,6 @@ When configuring an MCP server, use placeholder strings in the `env` or `headers
 
 1. **Check what credentials already exist** — `GET /api/credentials`. Look for a `key` that matches the service you need.
 2. **If the credential is missing**, ask the user to provide the secret, then `POST /api/credentials` with the value they supply. Prefer directing the user to the Credentials UI (Settings → Credentials) so the secret never passes through the conversation at all.
-3. **Reference the credential by key** in the MCP server config using the `{credential:<key>}` placeholder. Never hardcode a raw secret value in the config.
-4. **When deleting a credential**, check the response for `warnings` and tell the user which MCP servers need to be updated.
+3. **In MCP server config** — use `{credential:<key>}` placeholders in `env` or `headers` fields. Resolved once at connection time.
+4. **In tool call arguments** — use `{credential:<key>}` placeholders directly in argument values. Resolved by the server at dispatch time, before the tool receives the call. The placeholder (not the secret) is what gets stored.
+5. **When deleting a credential**, check the response for `warnings` and tell the user which MCP servers need to be updated.
