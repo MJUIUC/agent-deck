@@ -96,6 +96,14 @@ organised by thread ID.
                 include_str!("../../docs/skills/credentials.md"),
             ),
             ("webhooks.md", include_str!("../../docs/skills/webhooks.md")),
+            (
+                "configure-mcp.md",
+                include_str!("../../docs/skills/configure-mcp.md"),
+            ),
+            (
+                "create-routine.md",
+                include_str!("../../docs/skills/create-routine.md"),
+            ),
         ];
 
         for (filename, content) in SKILLS {
