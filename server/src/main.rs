@@ -85,6 +85,27 @@ organised by thread ID.
         }
     }
 
+    // ── Seed bundled skill guides into skills_dir ─────────────────────────────
+    // Skills are documentation for agents — they are always overwritten on
+    // startup so they stay in sync with the server binary across upgrades.
+    // Users should not edit these files; any changes will be lost on restart.
+    {
+        const SKILLS: &[(&str, &str)] = &[
+            (
+                "credentials.md",
+                include_str!("../../docs/skills/credentials.md"),
+            ),
+            ("webhooks.md", include_str!("../../docs/skills/webhooks.md")),
+        ];
+
+        for (filename, content) in SKILLS {
+            let path = config.skills_dir.join(filename);
+            if let Err(e) = tokio::fs::write(&path, content).await {
+                warn!("Failed to write skill guide '{}': {}", filename, e);
+            }
+        }
+    }
+
     info!("data_dir: {}", config.data_dir.display());
 
     // ── Legacy migration hints ────────────────────────────────────────────────

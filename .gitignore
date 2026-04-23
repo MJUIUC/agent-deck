@@ -65,6 +65,8 @@ data/avatars/
 # vendor/copilot-api is tracked via .gitmodules
 #
 
-# Build documentation
-docs/
+# Build documentation (generated output only — docs/skills/ is tracked)
+docs/*
+!docs/skills
+!docs/skills/**
 mockups/
