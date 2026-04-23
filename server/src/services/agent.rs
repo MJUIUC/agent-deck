@@ -1900,6 +1900,33 @@ async fn execute_mcp_tool(
                 );
             }
 
+            // Resolve any {credential:<key>} placeholders in the args before
+            // forwarding to the MCP server.  The stored tool call message above
+            // keeps the raw placeholder text so secrets never reach the database.
+            let args = match crate::services::credentials::inject_credentials(
+                args,
+                &state.pool,
+                &state.credential_master_key,
+            )
+            .await
+            {
+                Ok(a) => a,
+                Err(e) => {
+                    warn!(
+                        tool = %tc.name,
+                        error = %e,
+                        "execute_mcp_tool: credential injection failed"
+                    );
+                    return (
+                        Ok(format!(
+                            "Tool execution failed: credential could not be resolved: {}",
+                            e
+                        )),
+                        hidden_ids,
+                    );
+                }
+            };
+
             let mut cancellation_watcher = cancellation_rx.clone();
             tokio::select! {
                 biased;

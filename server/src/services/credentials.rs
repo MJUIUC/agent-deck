@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 use rand::Rng;
 use sqlx::SqlitePool;
+use std::collections::{HashMap, HashSet};
 use tracing::{debug, info, warn};
 
 use crate::models::app_config::keys;
@@ -413,13 +414,12 @@ pub async fn mcp_servers_using_credential(
     // We use two OR'd LIKE clauses so either form is matched.
     let pattern_plain = format!("%{{credential:{}}}%", credential_key);
     let pattern_field = format!("%{{credential:{}:%}}%", credential_key);
-    let rows: Vec<(String,)> = sqlx::query_as(
-        "SELECT name FROM mcp_servers WHERE config LIKE ? OR config LIKE ?",
-    )
-    .bind(&pattern_plain)
-    .bind(&pattern_field)
-    .fetch_all(pool)
-    .await?;
+    let rows: Vec<(String,)> =
+        sqlx::query_as("SELECT name FROM mcp_servers WHERE config LIKE ? OR config LIKE ?")
+            .bind(&pattern_plain)
+            .bind(&pattern_field)
+            .fetch_all(pool)
+            .await?;
     Ok(rows.into_iter().map(|(name,)| name).collect())
 }
 
@@ -487,6 +487,107 @@ pub async fn migrate_provider_api_key(
     );
 
     Ok(cred_key)
+}
+
+// ---------------------------------------------------------------------------
+// Tool call credential injection
+// ---------------------------------------------------------------------------
+
+/// Scan a JSON value tree for `{credential:…}` placeholder strings, resolve
+/// each unique placeholder against the credential store, and return a new
+/// value tree with all placeholders replaced by their decrypted values.
+///
+/// Placeholders may appear as standalone string values **or** embedded inside
+/// a larger string (e.g. `"Bearer {credential:my_token}"`).  Each unique
+/// placeholder is resolved exactly once regardless of how many times it appears.
+///
+/// Returns the original value unchanged when no placeholders are present.
+/// Returns an error if any referenced credential cannot be resolved — the
+/// caller should surface this as a tool error rather than panicking.
+pub async fn inject_credentials(
+    val: serde_json::Value,
+    pool: &SqlitePool,
+    master_key: &str,
+) -> Result<serde_json::Value> {
+    let mut placeholders: HashSet<String> = HashSet::new();
+    collect_credential_placeholders(&val, &mut placeholders);
+
+    if placeholders.is_empty() {
+        return Ok(val);
+    }
+
+    // Resolve each unique placeholder exactly once.
+    let mut resolved: HashMap<String, String> = HashMap::new();
+    for placeholder in &placeholders {
+        // Strip `{credential:` prefix and `}` suffix to get the inner spec.
+        let inner = &placeholder["{credential:".len()..placeholder.len() - 1];
+        let secret = match inner.split_once(':') {
+            Some((key, field)) => resolve_field(pool, master_key, key, field).await?,
+            None => resolve_secret(pool, master_key, inner).await?,
+        };
+        resolved.insert(placeholder.clone(), secret);
+    }
+
+    Ok(apply_credential_resolutions(val, &resolved))
+}
+
+/// Recursively collect every `{credential:…}` placeholder string found inside
+/// any string value in the JSON tree.
+fn collect_credential_placeholders(val: &serde_json::Value, out: &mut HashSet<String>) {
+    match val {
+        serde_json::Value::String(s) => {
+            let mut search = s.as_str();
+            while let Some(start) = search.find("{credential:") {
+                match search[start..].find('}') {
+                    Some(end_rel) => {
+                        out.insert(search[start..start + end_rel + 1].to_string());
+                        search = &search[start + end_rel + 1..];
+                    }
+                    None => break, // malformed — no closing brace
+                }
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for (_, v) in map {
+                collect_credential_placeholders(v, out);
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for v in arr {
+                collect_credential_placeholders(v, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Apply a pre-resolved placeholder → secret map to every string value in a
+/// JSON tree.  Non-string values (numbers, booleans, null) are passed through
+/// unchanged.
+fn apply_credential_resolutions(
+    val: serde_json::Value,
+    resolved: &HashMap<String, String>,
+) -> serde_json::Value {
+    match val {
+        serde_json::Value::String(s) => {
+            let mut out = s;
+            for (placeholder, secret) in resolved {
+                out = out.replace(placeholder.as_str(), secret.as_str());
+            }
+            serde_json::Value::String(out)
+        }
+        serde_json::Value::Object(map) => serde_json::Value::Object(
+            map.into_iter()
+                .map(|(k, v)| (k, apply_credential_resolutions(v, resolved)))
+                .collect(),
+        ),
+        serde_json::Value::Array(arr) => serde_json::Value::Array(
+            arr.into_iter()
+                .map(|v| apply_credential_resolutions(v, resolved))
+                .collect(),
+        ),
+        other => other,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1010,5 +1111,146 @@ mod tests {
             .await
             .expect("query");
         assert!(names.is_empty(), "should not return unrelated servers");
+    }
+
+    // ── inject_credentials ────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_inject_credentials_no_placeholders_is_noop() {
+        let pool = setup_db().await;
+        let mk = test_master_key();
+        let args = serde_json::json!({
+            "url": "https://api.example.com",
+            "method": "GET"
+        });
+        let result = inject_credentials(args.clone(), &pool, &mk)
+            .await
+            .expect("inject");
+        assert_eq!(result, args);
+    }
+
+    #[tokio::test]
+    async fn test_inject_credentials_standalone_placeholder() {
+        let pool = setup_db().await;
+        let mk = test_master_key();
+        create_credential(&pool, &mk, &sample_create())
+            .await
+            .expect("create");
+
+        let args = serde_json::json!({ "api_key": "{credential:openai_test}" });
+        let result = inject_credentials(args, &pool, &mk).await.expect("inject");
+        assert_eq!(result["api_key"], "sk-supersecret");
+    }
+
+    #[tokio::test]
+    async fn test_inject_credentials_embedded_in_string() {
+        let pool = setup_db().await;
+        let mk = test_master_key();
+        create_credential(&pool, &mk, &sample_create())
+            .await
+            .expect("create");
+
+        let args = serde_json::json!({
+            "authorization": "Bearer {credential:openai_test}"
+        });
+        let result = inject_credentials(args, &pool, &mk).await.expect("inject");
+        assert_eq!(result["authorization"], "Bearer sk-supersecret");
+    }
+
+    #[tokio::test]
+    async fn test_inject_credentials_field_selector() {
+        let pool = setup_db().await;
+        let mk = test_master_key();
+        let req = CreateCredential {
+            key: "schwab".to_string(),
+            display_name: "Schwab".to_string(),
+            service: Some("schwab".to_string()),
+            credential_type: "key_secret_pair".to_string(),
+            service_url: None,
+            username: None,
+            email: None,
+            secret: Some("app-key".to_string()),
+            password: Some("app-secret".to_string()),
+        };
+        create_credential(&pool, &mk, &req).await.expect("create");
+
+        let args = serde_json::json!({
+            "key": "{credential:schwab:secret}",
+            "secret": "{credential:schwab:password}"
+        });
+        let result = inject_credentials(args, &pool, &mk).await.expect("inject");
+        assert_eq!(result["key"], "app-key");
+        assert_eq!(result["secret"], "app-secret");
+    }
+
+    #[tokio::test]
+    async fn test_inject_credentials_nested_json() {
+        let pool = setup_db().await;
+        let mk = test_master_key();
+        create_credential(&pool, &mk, &sample_create())
+            .await
+            .expect("create");
+
+        let args = serde_json::json!({
+            "headers": {
+                "Authorization": "Bearer {credential:openai_test}",
+                "Content-Type": "application/json"
+            },
+            "body": {
+                "model": "gpt-4o"
+            }
+        });
+        let result = inject_credentials(args, &pool, &mk).await.expect("inject");
+        assert_eq!(result["headers"]["Authorization"], "Bearer sk-supersecret");
+        assert_eq!(result["headers"]["Content-Type"], "application/json");
+        assert_eq!(result["body"]["model"], "gpt-4o");
+    }
+
+    #[tokio::test]
+    async fn test_inject_credentials_array_values() {
+        let pool = setup_db().await;
+        let mk = test_master_key();
+        create_credential(&pool, &mk, &sample_create())
+            .await
+            .expect("create");
+
+        let args = serde_json::json!({
+            "tokens": ["{credential:openai_test}", "literal-value"]
+        });
+        let result = inject_credentials(args, &pool, &mk).await.expect("inject");
+        assert_eq!(result["tokens"][0], "sk-supersecret");
+        assert_eq!(result["tokens"][1], "literal-value");
+    }
+
+    #[tokio::test]
+    async fn test_inject_credentials_missing_credential_returns_error() {
+        let pool = setup_db().await;
+        let mk = test_master_key();
+
+        let args = serde_json::json!({ "key": "{credential:does_not_exist}" });
+        let result = inject_credentials(args, &pool, &mk).await;
+        assert!(
+            result.is_err(),
+            "should return error when credential key does not exist"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_inject_credentials_unique_placeholder_resolved_once() {
+        // Same placeholder appears in multiple fields — credential should be
+        // resolved once and reused (verified indirectly by checking both values).
+        let pool = setup_db().await;
+        let mk = test_master_key();
+        create_credential(&pool, &mk, &sample_create())
+            .await
+            .expect("create");
+
+        let args = serde_json::json!({
+            "field_a": "{credential:openai_test}",
+            "field_b": "{credential:openai_test}"
+        });
+        let result = inject_credentials(args, &pool, &mk).await.expect("inject");
+        assert_eq!(result["field_a"], "sk-supersecret");
+        assert_eq!(result["field_b"], "sk-supersecret");
     }
 }
