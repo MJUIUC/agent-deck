@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use uuid::Uuid;
 
 use axum::{
     extract::{Multipart, Path, State},
@@ -81,41 +82,12 @@ pub async fn upload_file(
         ));
     }
 
-    // 8. Resolve output path, handling filename collisions
-    let (stem, ext) = match filename.rfind('.') {
-        Some(dot_pos) => {
-            let stem = filename[..dot_pos].to_string();
-            let ext = filename[dot_pos + 1..].to_string();
-            (stem, Some(ext))
-        }
-        None => (filename.clone(), None),
-    };
+    // 8. Always store with a UUID prefix so generic names like "image.jpeg"
+    //    (produced by every iOS camera capture) never collide within a thread.
+    let unique_filename = format!("{}_{}", Uuid::new_v4(), filename);
+    let final_path = workspace.join(&unique_filename);
 
-    let final_path = {
-        let candidate = workspace.join(&filename);
-        if !candidate.exists() {
-            candidate
-        } else {
-            let mut counter: u32 = 1;
-            loop {
-                let new_name = match &ext {
-                    Some(e) => format!("{}_{}.{}", stem, counter, e),
-                    None => format!("{}_{}", stem, counter),
-                };
-                let candidate = workspace.join(&new_name);
-                if !candidate.exists() {
-                    break candidate;
-                }
-                counter += 1;
-            }
-        }
-    };
-
-    // Derive the actual filename used on disk
-    let final_filename = final_path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| filename.clone());
+    let final_filename = unique_filename;
 
     // 9. Write bytes to disk
     let file_size = bytes.len();

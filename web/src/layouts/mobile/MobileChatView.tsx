@@ -377,12 +377,7 @@ export function MobileChatView({
 
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const files = Array.from(e.target.files ?? []).map((file, i) => {
-        // Rename immediately so the chip shows a unique name and the upload
-        // never collides. iOS camera always produces "image.jpeg".
-        const uniqueName = `${Date.now() + i}_${file.name}`;
-        return new File([file], uniqueName, { type: file.type });
-      });
+      const files = Array.from(e.target.files ?? []);
       setPendingFiles((prev) => [...prev, ...files]);
       e.target.value = "";
     },
