@@ -245,18 +245,14 @@ export function MessageBubble({
           {message.stopped && (
             <div className={styles.stoppedLabel}>⏹ Stopped</div>
           )}
-          {isUser ? (
-            message.content
-          ) : (
-            <div className={styles.markdown}>
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm, remarkBreaks]}
-                components={markdownComponents(onFilePath)}
-              >
-                {message.content}
-              </ReactMarkdown>
-            </div>
-          )}
+          <div className={styles.markdown}>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm, remarkBreaks]}
+              components={markdownComponents(onFilePath)}
+            >
+              {message.content}
+            </ReactMarkdown>
+          </div>
         </div>
         <div className={[styles.meta, isUser ? styles.metaUser : ""].join(" ")}>
           {metaText}
