@@ -332,6 +332,7 @@ export function MobileChatView({
     )
       return;
 
+    const pendingFileNames = pendingFiles.map((f) => f.name);
     setInputValue("");
     setPendingFiles([]);
 
@@ -340,7 +341,7 @@ export function MobileChatView({
       textareaRef.current.style.height = "auto";
     }
 
-    let uploaded: MessageAttachment[] = [];
+    const uploaded: MessageAttachment[] = [];
     try {
       setUploading(true);
       for (const file of pendingFiles) {
@@ -357,10 +358,12 @@ export function MobileChatView({
       setUploading(false);
     }
 
+    const finalContent = content || pendingFileNames.join(", ");
+
     if (threadId === "pending" && onFirstSend) {
-      await onFirstSend(content);
+      await onFirstSend(finalContent);
     } else {
-      await sendMessage(threadId, content, uploaded);
+      await sendMessage(threadId, finalContent, uploaded);
     }
   }, [
     inputValue,

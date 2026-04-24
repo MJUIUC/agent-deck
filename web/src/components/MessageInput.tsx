@@ -69,7 +69,7 @@ export function MessageInput({
       return;
 
     setUploading(true);
-    let uploaded: MessageAttachment[] = [];
+    const uploaded: MessageAttachment[] = [];
     try {
       for (const file of pendingFiles) {
         const res = await uploadsApi.upload(threadId, file);
@@ -85,7 +85,8 @@ export function MessageInput({
       setUploading(false);
     }
 
-    onSend(trimmed, uploaded);
+    const content = trimmed || pendingFiles.map((f) => f.name).join(", ");
+    onSend(content, uploaded);
     setValue("");
     setPendingFiles([]);
     if (textareaRef.current) textareaRef.current.style.height = "22px";
