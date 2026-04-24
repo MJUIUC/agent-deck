@@ -28,6 +28,7 @@ use async_openai::types::{
     ChatCompletionRequestUserMessageContentPart, ChatCompletionTool, ChatCompletionToolType,
     FunctionObject, ImageDetail, ImageUrl,
 };
+use image::ImageEncoder;
 use serde_json::json;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -172,6 +173,36 @@ pub struct AssembledContext {
 /// ## Panics
 /// Does not panic.  All input validation is lenient: empty prompts produce
 /// an empty system message rather than an error.
+/// Resize an image to fit within MAX_DIM on each side and re-encode as JPEG
+/// at JPEG_QUALITY. Called just before base64-encoding images for the LLM so
+/// the stored file is always the original but the model receives a compact copy.
+fn compress_image_for_llm(data: &[u8]) -> anyhow::Result<Vec<u8>> {
+    const MAX_DIM: u32 = 2048;
+    const JPEG_QUALITY: u8 = 82;
+
+    let img = image::load_from_memory(data)?;
+
+    let img = if img.width() > MAX_DIM || img.height() > MAX_DIM {
+        img.resize(MAX_DIM, MAX_DIM, image::imageops::FilterType::Lanczos3)
+    } else {
+        img
+    };
+
+    // JPEG has no alpha channel — flatten to RGB8 first.
+    let rgb = img.to_rgb8();
+
+    let mut buf = Vec::new();
+    let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, JPEG_QUALITY);
+    encoder.write_image(
+        rgb.as_raw(),
+        rgb.width(),
+        rgb.height(),
+        image::ExtendedColorType::Rgb8,
+    )?;
+
+    Ok(buf)
+}
+
 pub fn assemble(input: AssemblyInput) -> AssembledContext {
     let mut messages: Vec<ChatCompletionRequestMessage> = Vec::new();
 
@@ -495,10 +526,22 @@ pub fn assemble(input: AssemblyInput) -> AssembledContext {
         // Image parts
         for attachment in &image_attachments {
             match std::fs::read(&attachment.path) {
-                Ok(bytes) => {
+                Ok(raw) => {
+                    // Compress before base64-encoding to reduce payload size sent to the LLM.
+                    // Falls back to the original bytes if compression fails.
+                    let (bytes, mime) = match compress_image_for_llm(&raw) {
+                        Ok(compressed) => (compressed, "image/jpeg".to_string()),
+                        Err(e) => {
+                            tracing::warn!(
+                                "Image compression for LLM failed, using original: {}",
+                                e
+                            );
+                            (raw, attachment.content_type.clone())
+                        }
+                    };
                     use base64::Engine;
                     let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-                    let data_uri = format!("data:{};base64,{}", attachment.content_type, b64);
+                    let data_uri = format!("data:{};base64,{}", mime, b64);
                     parts.push(ChatCompletionRequestUserMessageContentPart::ImageUrl(
                         ChatCompletionRequestMessageContentPartImage {
                             image_url: ImageUrl {
