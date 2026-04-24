@@ -109,8 +109,12 @@ class MessageListErrorBoundary extends Component<
 interface ChatViewProps {
   thread: Thread;
   /** Provided only in draft mode (thread.id === "pending"). Called with the
-   *  user's message content; creates the real thread and sends the message. */
-  onFirstSend?: (content: string) => Promise<void>;
+   *  user's message content and any attachments; creates the real thread and
+   *  sends the message. */
+  onFirstSend?: (
+    content: string,
+    attachments: MessageAttachment[],
+  ) => Promise<void>;
   onMobileMenuOpen?: () => void;
 }
 
@@ -281,8 +285,8 @@ export function ChatView({
   const handleSend = useCallback(
     (content: string, attachments: MessageAttachment[]) => {
       if (isDraft && onFirstSend) {
-        // Draft mode: delegate to App.tsx which creates the real thread first
-        onFirstSend(content);
+        // Draft mode: delegate to layout which creates the real thread first
+        onFirstSend(content, attachments);
       } else {
         sendMessage(thread.id, content, attachments);
       }

@@ -29,7 +29,7 @@ import styles from "./MobileChatView.module.css";
 interface MobileChatViewProps {
   thread: Thread | null;
   onBack: () => void;
-  onFirstSend?: (content: string) => Promise<void>;
+  onFirstSend?: (content: string, files: File[]) => Promise<void>;
 }
 
 // ─── Icon sub-components ──────────────────────────────────────────────────────
@@ -333,7 +333,7 @@ export function MobileChatView({
     )
       return;
 
-    const pendingFileNames = pendingFiles.map((f) => f.name);
+    const filesToSend = [...pendingFiles];
     setInputValue("");
     setPendingFiles([]);
 
@@ -342,11 +342,21 @@ export function MobileChatView({
       textareaRef.current.style.height = "auto";
     }
 
+    // Pending thread: delegate to onFirstSend which creates the thread first,
+    // then uploads files to the newly created thread.
+    if (threadId === "pending" && onFirstSend) {
+      const fallbackContent =
+        content || filesToSend.map((f) => f.name).join(", ");
+      await onFirstSend(fallbackContent, filesToSend);
+      return;
+    }
+
+    // Existing thread: upload files, then send message.
     const uploaded: MessageAttachment[] = [];
     try {
       setUploading(true);
       setUploadError(null);
-      for (const file of pendingFiles) {
+      for (const file of filesToSend) {
         const res = await uploadsApi.upload(threadId, file);
         uploaded.push({
           path: res.data.path,
@@ -360,23 +370,18 @@ export function MobileChatView({
       setUploadError(msg);
       setUploading(false);
       // Re-add the files to pendingFiles so the user can retry
-      setPendingFiles(pendingFiles);
+      setPendingFiles(filesToSend);
       setInputValue(content);
       return;
     } finally {
       setUploading(false);
     }
 
-    const finalContent = content || pendingFileNames.join(", ");
-
-    if (threadId === "pending" && onFirstSend) {
-      await onFirstSend(finalContent);
-    } else {
-      await sendMessage(threadId, finalContent, uploaded);
-    }
+    const finalContent = content || filesToSend.map((f) => f.name).join(", ");
+    await sendMessage(threadId, finalContent, uploaded);
   }, [
     inputValue,
-    pendingFiles,
+    pendingFiles.length,
     isStreaming,
     uploading,
     threadId,

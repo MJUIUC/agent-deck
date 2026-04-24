@@ -3,6 +3,7 @@ import { useThreadStore, makeDraftThread } from "@/stores/useThreadStore";
 import { useSseStore } from "@/stores/useSseStore";
 import { useMessageStore } from "@/stores/useMessageStore";
 import { providersApi } from "@/api/client";
+import type { MessageAttachment } from "@/types";
 import { Sidebar } from "@/components/Sidebar";
 import { ChatView } from "@/components/ChatView";
 import { EmptyState } from "@/components/EmptyState";
@@ -95,7 +96,7 @@ export function DesktopLayout() {
   // active. Title generation is driven server-side via the TitleUpdated SSE
   // event — no client-side coordination needed here.
   const handleFirstSend = useCallback(
-    async (content: string) => {
+    async (content: string, attachments: MessageAttachment[]) => {
       if (!pendingPersona) return;
       try {
         // 1. Create the real thread in the DB.
@@ -112,7 +113,13 @@ export function DesktopLayout() {
 
         // 3. Send the user message. The SSE connection is now open so the
         //    agent's tokens will be received as they stream in.
-        await sendMessage(newThread.id, content);
+        //    Attachments are MessageAttachment records already uploaded by
+        //    MessageInput before handleSend was called — forward them as-is.
+        await sendMessage(
+          newThread.id,
+          content,
+          attachments.length > 0 ? attachments : undefined,
+        );
       } catch {
         // createThread or sendMessage failure — keep pendingPersona so the
         // user can retry.

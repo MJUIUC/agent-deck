@@ -4,10 +4,11 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useEffect, useState, useCallback } from "react";
+import type { MessageAttachment } from "@/types";
 import { useThreadStore, makeDraftThread } from "@/stores/useThreadStore";
 import { useSseStore } from "@/stores/useSseStore";
 import { useMessageStore } from "@/stores/useMessageStore";
-import { providersApi, pushApi } from "@/api/client";
+import { providersApi, pushApi, uploadsApi } from "@/api/client";
 import { PersonaPickerModal } from "@/components/PersonaPickerModal";
 import { MobileThreadList } from "./mobile/MobileThreadList";
 import { MobileChatView } from "./mobile/MobileChatView";
@@ -219,12 +220,32 @@ export function MobileLayout() {
   // ── First-send handler ───────────────────────────────────────────────────────
   // Creates the real thread, promotes it, then sends the first message.
   const handleFirstSend = useCallback(
-    async (content: string) => {
+    async (content: string, files: File[]) => {
       if (!pendingPersona) return;
       const newThread = await createThread(pendingPersona.id);
       promotePendingThread(newThread);
       await Promise.resolve();
-      await sendMessage(newThread.id, content);
+
+      // Upload any attached files to the newly created thread
+      const uploaded: MessageAttachment[] = [];
+      for (const file of files) {
+        try {
+          const res = await uploadsApi.upload(newThread.id, file);
+          uploaded.push({
+            path: res.data.path,
+            filename: res.data.filename,
+            content_type: res.data.content_type,
+          });
+        } catch {
+          // skip failed individual uploads
+        }
+      }
+
+      await sendMessage(
+        newThread.id,
+        content,
+        uploaded.length > 0 ? uploaded : undefined,
+      );
     },
     [pendingPersona, createThread, promotePendingThread, sendMessage],
   );

@@ -509,7 +509,24 @@ pub fn assemble(input: AssemblyInput) -> AssembledContext {
         format!("\n\n{}", lines.join("\n"))
     };
 
-    let full_text = format!("{}{}", input.user_message, non_image_note);
+    // When vision is not supported, still tell the LLM about image attachments
+    // as text path notes so it can use workspace tools to process them rather
+    // than silently ignoring them.
+    let image_fallback_note: String =
+        if !input.provider_supports_vision && !image_attachments.is_empty() {
+            let lines: Vec<String> = image_attachments
+                .iter()
+                .map(|a| format!("[Attached image: {} — available at {}]", a.filename, a.path))
+                .collect();
+            format!("\n\n{}", lines.join("\n"))
+        } else {
+            String::new()
+        };
+
+    let full_text = format!(
+        "{}{}{}",
+        input.user_message, non_image_note, image_fallback_note
+    );
 
     if input.provider_supports_vision && !image_attachments.is_empty() {
         // Build a multi-part user message: text + one image part per image.
