@@ -1,4 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
+import {
+  Document,
+  Close,
+  ChevronDown,
+  ChevronRight,
+} from "@carbon/icons-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
@@ -60,10 +66,16 @@ function TreeEntry({
       >
         {node.kind === "dir" ? (
           <span className={styles.treeArrow}>
-            {node.isExpanded ? "▼" : "▶"}
+            {node.isExpanded ? (
+              <ChevronDown size={14} />
+            ) : (
+              <ChevronRight size={14} />
+            )}
           </span>
         ) : (
-          <span className={styles.treeFileIcon}>📄</span>
+          <span className={styles.treeFileIcon}>
+            <Document size={14} />
+          </span>
         )}
         <span className={styles.treeName}>{node.name}</span>
         {node.isLoading && <span className={styles.treeLoading}>…</span>}
@@ -470,7 +482,7 @@ export function FileExplorerModal({
             onClick={onClose}
             aria-label="Close"
           >
-            ✕
+            <Close size={16} />
           </button>
         </div>
 

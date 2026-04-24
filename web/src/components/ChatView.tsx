@@ -22,6 +22,7 @@ import { ConfigPane } from "./ConfigPane";
 import { FileExplorerModal } from "./FileExplorerModal";
 import { fsApi } from "@/api/client";
 
+import { WarningAlt } from "@carbon/icons-react";
 import styles from "./ChatView.module.css";
 
 // ── MessageListErrorBoundary ──────────────────────────────────────────────────
@@ -63,7 +64,7 @@ class MessageListErrorBoundary extends Component<
           <div
             style={{ fontWeight: 600, color: "var(--error)", marginBottom: 6 }}
           >
-            ⚠ Unable to render messages
+            <WarningAlt size={14} /> Unable to render messages
           </div>
           <div style={{ marginBottom: 12 }}>
             One or more messages in this thread could not be displayed. This is
@@ -483,7 +484,9 @@ export function ChatView({
 
         {/* Error banner */}
         {messageError && !isStreaming && (
-          <div className={styles.errorBanner}>⚠ {messageError}</div>
+          <div className={styles.errorBanner}>
+            <WarningAlt size={14} /> {messageError}
+          </div>
         )}
       </div>
 

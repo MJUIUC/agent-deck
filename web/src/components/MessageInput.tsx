@@ -1,5 +1,6 @@
 import { useRef, useState, useCallback, useEffect } from "react";
 import { SendHorizonal, Square, Paperclip } from "lucide-react";
+import { Attachment, Close } from "@carbon/icons-react";
 import { uploadsApi } from "@/api/client";
 import type { MessageAttachment } from "@/types";
 import styles from "./MessageInput.module.css";
@@ -143,7 +144,7 @@ export function MessageInput({
                   className={styles.chipThumb}
                 />
               ) : (
-                <span className={styles.chipIcon}>📎</span>
+                <Attachment size={14} />
               )}
               <span className={styles.chipName}>{file.name}</span>
               {uploading ? (
@@ -155,7 +156,7 @@ export function MessageInput({
                   onClick={() => removeFile(idx)}
                   aria-label={`Remove ${file.name}`}
                 >
-                  ×
+                  <Close size={12} />
                 </button>
               )}
             </div>

@@ -148,7 +148,15 @@ function ToolRow({ tool }: { tool: ToolCallEntry }) {
             onClick={() => setResultOpen((v) => !v)}
             aria-expanded={resultOpen}
           >
-            {resultOpen ? "▼ output" : "▶ output"}
+            {resultOpen ? (
+              <>
+                <ChevronDown size={12} /> output
+              </>
+            ) : (
+              <>
+                <ChevronRight size={12} /> output
+              </>
+            )}
           </button>
         )}
       </div>

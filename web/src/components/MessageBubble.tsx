@@ -1,6 +1,14 @@
 import { useState, useRef, useId, useEffect, type ReactNode } from "react";
 import remarkBreaks from "remark-breaks";
-import { MagicWandFilled } from "@carbon/icons-react";
+import {
+  MagicWandFilled,
+  StopFilled,
+  Attachment,
+  Document,
+  Folder,
+  CheckmarkFilled,
+  Copy,
+} from "@carbon/icons-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Message } from "@/types";
@@ -80,7 +88,7 @@ export function MermaidBlock({ source }: { source: string }) {
 
 function PathChip({ path, onClick }: { path: string; onClick: () => void }) {
   const hasExtension = path.includes(".") && !path.endsWith("/");
-  const icon = hasExtension ? "📄" : "📁";
+  const Icon = hasExtension ? Document : Folder;
   const label = path.split("/").pop() ?? path;
   return (
     <button
@@ -102,7 +110,7 @@ function PathChip({ path, onClick }: { path: string; onClick: () => void }) {
         verticalAlign: "middle",
       }}
     >
-      {icon} {label}
+      <Icon size={12} /> {label}
     </button>
   );
 }
@@ -150,7 +158,15 @@ function CodeBlock({
         }}
         aria-label="Copy code"
       >
-        {copied ? "✓ Copied" : "Copy"}
+        {copied ? (
+          <>
+            <CheckmarkFilled size={12} /> Copied
+          </>
+        ) : (
+          <>
+            <Copy size={12} /> Copy
+          </>
+        )}
       </button>
     </div>
   );
@@ -243,7 +259,9 @@ export function MessageBubble({
             </div>
           )}
           {message.stopped && (
-            <div className={styles.stoppedLabel}>⏹ Stopped</div>
+            <div className={styles.stoppedLabel}>
+              <StopFilled size={12} /> Stopped
+            </div>
           )}
           {/* Attachments */}
           {message.attachments && message.attachments.length > 0 && (
@@ -291,7 +309,7 @@ export function MessageBubble({
                       textDecoration: "none",
                     }}
                   >
-                    📎 {att.filename}
+                    <Attachment size={14} /> {att.filename}
                   </a>
                 );
               })}

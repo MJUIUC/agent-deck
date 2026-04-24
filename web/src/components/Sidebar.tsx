@@ -4,7 +4,7 @@ import { tailscaleApi } from "@/api/client";
 import { ThreadItem } from "./ThreadItem";
 import { PersonaPickerModal } from "./PersonaPickerModal";
 import { Plus, Settings } from "lucide-react";
-import { Ai, Chat, Search } from "@carbon/icons-react";
+import { Ai, Chat, Search, Close } from "@carbon/icons-react";
 import styles from "./Sidebar.module.css";
 
 interface SidebarProps {
@@ -184,7 +184,7 @@ export function Sidebar({
                 aria-label="Close sidebar"
                 className={styles.mobileCloseBtn}
               >
-                ✕
+                <Close size={16} />
               </button>
             )}
           </div>
