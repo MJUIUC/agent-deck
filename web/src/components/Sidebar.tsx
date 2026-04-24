@@ -3,8 +3,7 @@ import type { Thread, AgentPersona } from "@/types";
 import { tailscaleApi } from "@/api/client";
 import { ThreadItem } from "./ThreadItem";
 import { PersonaPickerModal } from "./PersonaPickerModal";
-import { Plus, Settings } from "lucide-react";
-import { Ai, Chat, Search, Close } from "@carbon/icons-react";
+import { Ai, Chat, Search, Close, Add, Settings } from "@carbon/icons-react";
 import styles from "./Sidebar.module.css";
 
 interface SidebarProps {
@@ -206,7 +205,7 @@ export function Sidebar({
                 : undefined
             }
           >
-            <Plus size={14} strokeWidth={2.5} />
+            <Add size={14} />
             {isCreating ? "Creating…" : "New Chat"}
           </button>
           {/* Inline note shown when clicked with no personas */}

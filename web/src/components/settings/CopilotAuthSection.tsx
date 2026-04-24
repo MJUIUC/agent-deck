@@ -1,6 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { RefreshCw, ExternalLink, CheckCircle2, Loader2 } from "lucide-react";
-import { LogoGithub } from "@carbon/icons-react";
+import {
+  LogoGithub,
+  Renew,
+  Launch,
+  CheckmarkOutline,
+  InProgress,
+} from "@carbon/icons-react";
 import { copilotApi } from "@/api/client";
 import { Btn, type CopilotAuthStep } from "./shared";
 
@@ -258,7 +263,7 @@ export function CopilotAuthSection() {
                 fontWeight: 600,
               }}
             >
-              <CheckCircle2 size={13} /> Authenticated
+              <CheckmarkOutline size={13} /> Authenticated
             </span>
           )}
           {(auth.stage === "checking" || auth.stage === "authorizing") && (
@@ -271,7 +276,7 @@ export function CopilotAuthSection() {
                 fontSize: 12,
               }}
             >
-              <Loader2
+              <InProgress
                 size={13}
                 style={{ animation: "spin 0.8s linear infinite" }}
               />
@@ -358,7 +363,7 @@ export function CopilotAuthSection() {
               fontWeight: 500,
             }}
           >
-            <ExternalLink size={13} />
+            <Launch size={13} />
             {auth.verificationUri}
           </a>
 
@@ -379,7 +384,7 @@ export function CopilotAuthSection() {
       {/* Action buttons */}
       {auth.stage === "authenticated" ? (
         <Btn sm variant="ghost" onClick={startAuth}>
-          <RefreshCw size={12} /> Re-authenticate
+          <Renew size={12} /> Re-authenticate
         </Btn>
       ) : auth.stage === "idle" || auth.stage === "error" ? (
         <Btn sm variant="primary" onClick={startAuth}>

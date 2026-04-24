@@ -25,7 +25,7 @@ import {
   type WebhookBinding,
   type ThreadWebhookBinding as ThreadWebhookBindingAPI,
 } from "@/api/client";
-import { X, ChevronRight, Settings } from "lucide-react";
+import { Close, ChevronRight, Settings } from "@carbon/icons-react";
 import styles from "./ConfigPane.module.css";
 import { CronPicker } from "./CronPicker";
 
@@ -138,7 +138,7 @@ function McpServerCard({
           title="Detach server from thread"
           onClick={onRemove}
         >
-          <X size={12} />
+          <Close size={12} />
         </button>
       </div>
 
@@ -1251,7 +1251,7 @@ export function ConfigPane({
             aria-label="Close thread config"
             className={styles.closeBtn}
           >
-            <X size={15} />
+            <Close size={15} />
           </button>
         </div>
 

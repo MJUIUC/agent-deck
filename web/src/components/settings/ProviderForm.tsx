@@ -1,5 +1,5 @@
 import React, { useState, type FormEvent } from "react";
-import { RefreshCw, Zap } from "lucide-react";
+import { Renew, Flash } from "@carbon/icons-react";
 import type { Provider } from "@/types";
 import { providersApi } from "@/api/client";
 import {
@@ -265,12 +265,12 @@ export function ProviderForm({
               style={{ marginRight: "auto" }}
             >
               {testing ? (
-                <RefreshCw
+                <Renew
                   size={13}
                   style={{ animation: "spin 0.8s linear infinite" }}
                 />
               ) : (
-                <Zap size={13} />
+                <Flash size={13} />
               )}
               {testing ? "Testing…" : "Test Connection"}
             </Btn>

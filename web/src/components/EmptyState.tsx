@@ -1,5 +1,4 @@
-import { Menu } from "lucide-react";
-import { CloudApp, Bot, Chat } from "@carbon/icons-react";
+import { Menu, CloudApp, Bot, Chat } from "@carbon/icons-react";
 import styles from "./EmptyState.module.css";
 
 interface EmptyStateProps {

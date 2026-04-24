@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import type { Thread, Provider, Model } from "@/types";
 import { useThreadStore } from "@/stores/useThreadStore";
 import { providersApi, modelsApi, threadsApi } from "@/api/client";
-import { Menu, FolderOpen } from "lucide-react";
+import { Menu, FolderOpen } from "@carbon/icons-react";
 import styles from "./ChatHeader.module.css";
 
 interface ChatHeaderProps {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { Plus, RefreshCw, Pencil, Trash2 } from "lucide-react";
+import { Add, Renew, Edit, TrashCan } from "@carbon/icons-react";
 import type { Provider, Model } from "@/types";
 import { providersApi, modelsApi } from "@/api/client";
 import { Btn, KindIcon, StatusBadge } from "./shared";
@@ -297,7 +297,7 @@ function ProviderCard({
             : `${enabledCount} / ${models.length} model${models.length !== 1 ? "s" : ""} enabled`}
         </span>
         <Btn sm variant="ghost" onClick={onSyncModels} disabled={syncingModels}>
-          <RefreshCw
+          <Renew
             size={12}
             style={
               syncingModels
@@ -308,7 +308,7 @@ function ProviderCard({
           {syncingModels ? "Syncing…" : "Sync Models"}
         </Btn>
         <Btn sm variant="ghost" onClick={onEdit}>
-          <Pencil size={12} />
+          <Edit size={12} />
           Edit
         </Btn>
         {confirmDelete ? (
@@ -323,7 +323,7 @@ function ProviderCard({
           </>
         ) : (
           <Btn sm variant="danger" onClick={() => setConfirmDelete(true)}>
-            <Trash2 size={12} />
+            <TrashCan size={12} />
             Delete
           </Btn>
         )}
@@ -530,7 +530,7 @@ export function ProviderSettings({ onDataChanged }: ProviderSettingsProps) {
             Add an AI provider to start using agent-deck.
           </div>
           <Btn variant="primary" onClick={openAdd}>
-            <Plus size={14} />
+            <Add size={14} />
             Add Provider
           </Btn>
         </div>
@@ -613,7 +613,7 @@ export function ProviderSettings({ onDataChanged }: ProviderSettingsProps) {
 
             {!showForm && (
               <Btn variant="ghost" onClick={openAdd}>
-                <Plus size={13} />
+                <Add size={13} />
                 Add Provider
               </Btn>
             )}

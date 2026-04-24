@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { Plus } from "lucide-react";
-import { Laptop, Network_3, ToolKit } from "@carbon/icons-react";
+import { Laptop, Network_3, ToolKit, Add } from "@carbon/icons-react";
 import type { McpServer, McpTool } from "@/types";
 import { mcpServersApi, credentialsApi } from "@/api/client";
 import type { Credential } from "@/api/client";
@@ -1628,7 +1627,7 @@ export function McpServerSettings() {
           {formMode === null && (
             <div style={{ marginTop: 14 }}>
               <Btn variant="ghost" onClick={handleAddClick}>
-                <Plus size={13} />
+                <Add size={13} />
                 Add Server
               </Btn>
             </div>

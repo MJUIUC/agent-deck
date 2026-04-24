@@ -1,6 +1,5 @@
 import { useRef, useState, useCallback, useEffect } from "react";
-import { SendHorizonal, Square, Paperclip } from "lucide-react";
-import { Attachment, Close } from "@carbon/icons-react";
+import { Attachment, Close, SendAlt, StopFilled } from "@carbon/icons-react";
 import { uploadsApi } from "@/api/client";
 import type { MessageAttachment } from "@/types";
 import styles from "./MessageInput.module.css";
@@ -175,7 +174,7 @@ export function MessageInput({
           title="Attach file"
           className={styles.attachBtn}
         >
-          <Paperclip size={15} strokeWidth={2} />
+          <Attachment size={15} />
         </button>
 
         <textarea
@@ -202,7 +201,7 @@ export function MessageInput({
             title="Stop"
             className={styles.stopBtn}
           >
-            <Square size={14} strokeWidth={2} fill="currentColor" />
+            <StopFilled size={14} />
           </button>
         ) : (
           /* Send button */
@@ -213,7 +212,7 @@ export function MessageInput({
             title="Send"
             className={styles.sendBtn}
           >
-            <SendHorizonal size={15} strokeWidth={2} />
+            <SendAlt size={15} />
           </button>
         )}
       </div>

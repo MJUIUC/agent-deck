@@ -374,6 +374,20 @@
     border-bottom: none;
 }
 
+.mcpServerBlock {
+    display: flex;
+    flex-direction: column;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.mcpServerBlock:last-child {
+    border-bottom: none;
+}
+
+.mcpServerBlock .listRow {
+    border-bottom: none;
+}
+
 .listRowLabel {
     flex: 1;
     min-width: 0;

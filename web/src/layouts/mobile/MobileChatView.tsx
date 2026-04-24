@@ -10,7 +10,7 @@ import {
   useRef,
   useCallback,
 } from "react";
-import { FolderOpen } from "lucide-react";
+import { FolderOpen, Attachment } from "@carbon/icons-react";
 import type { Thread, MessageAttachment } from "@/types";
 import { useMessageStore } from "@/stores/useMessageStore";
 import { useSseStore } from "@/stores/useSseStore";
@@ -773,7 +773,7 @@ export function MobileChatView({
                 opacity: isStreaming || uploading ? 0.4 : 1,
               }}
             >
-              📎
+              <Attachment size={18} />
             </button>
             <textarea
               ref={textareaRef}
