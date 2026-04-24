@@ -522,9 +522,10 @@ export const uploadsApi = {
     // Prepend a timestamp to guarantee a unique filename on the server.
     // Mobile cameras (especially iOS) always name photos "image.jpeg", which
     // would otherwise collide on repeated uploads within the same thread.
+    // Use the three-argument form of append() to set the filename directly in
+    // the multipart payload — more reliable than new File() on mobile Safari.
     const uniqueName = `${Date.now()}_${file.name}`;
-    const renamedFile = new File([file], uniqueName, { type: file.type });
-    form.append("file", renamedFile);
+    form.append("file", file, uniqueName);
     // Note: do NOT set Content-Type header — let the browser set multipart boundary
     return apiFetch(`/api/threads/${threadId}/upload`, {
       method: "POST",
