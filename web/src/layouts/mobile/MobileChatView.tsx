@@ -126,6 +126,7 @@ export function MobileChatView({
   const [inputValue, setInputValue] = useState("");
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputMobileRef = useRef<HTMLInputElement>(null);
   const [configSheetOpen, setConfigSheetOpen] = useState(false);
   const [titleEditing, setTitleEditing] = useState(false);
@@ -344,6 +345,7 @@ export function MobileChatView({
     const uploaded: MessageAttachment[] = [];
     try {
       setUploading(true);
+      setUploadError(null);
       for (const file of pendingFiles) {
         const res = await uploadsApi.upload(threadId, file);
         uploaded.push({
@@ -352,8 +354,15 @@ export function MobileChatView({
           content_type: res.data.content_type,
         });
       }
-    } catch {
-      /* skip failed uploads */
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Upload failed";
+      console.error("Upload failed:", msg);
+      setUploadError(msg);
+      setUploading(false);
+      // Re-add the files to pendingFiles so the user can retry
+      setPendingFiles(pendingFiles);
+      setInputValue(content);
+      return;
     } finally {
       setUploading(false);
     }
@@ -676,6 +685,19 @@ export function MobileChatView({
           paddingBottom: `calc(${keyboardOffset}px + env(safe-area-inset-bottom, 0px) + 8px)`,
         }}
       >
+        {/* Upload error */}
+        {uploadError && (
+          <div
+            style={{
+              padding: "4px 16px 0",
+              fontSize: 12,
+              color: "var(--error, #e05252)",
+            }}
+          >
+            Upload failed: {uploadError}
+          </div>
+        )}
+
         {/* Attachment chips */}
         {pendingFiles.length > 0 && (
           <div

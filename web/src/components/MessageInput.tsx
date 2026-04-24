@@ -34,6 +34,7 @@ export function MessageInput({
   const [value, setValue] = useState("");
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   // Reset input and focus when thread changes
   useEffect(() => {
@@ -75,6 +76,7 @@ export function MessageInput({
       return;
 
     setUploading(true);
+    setUploadError(null);
     const uploaded: MessageAttachment[] = [];
     try {
       for (const file of pendingFiles) {
@@ -85,12 +87,17 @@ export function MessageInput({
           content_type: res.data.content_type,
         });
       }
-    } catch {
-      // upload failed — still send the message without attachments
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Upload failed";
+      console.error("Upload failed:", msg);
+      setUploadError(msg);
+      setUploading(false);
+      return;
     } finally {
       setUploading(false);
     }
 
+    setUploadError(null);
     onSend(trimmed, uploaded);
     setValue("");
     setPendingFiles([]);
@@ -130,6 +137,8 @@ export function MessageInput({
   return (
     <div
       className={styles.wrap}
+      // Clear upload error when user interacts with the input area
+      onClick={() => uploadError && setUploadError(null)}
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => {
         e.preventDefault();
@@ -137,6 +146,19 @@ export function MessageInput({
         if (files.length) setPendingFiles((prev) => [...prev, ...files]);
       }}
     >
+      {/* Upload error */}
+      {uploadError && (
+        <div
+          style={{
+            padding: "4px 6px",
+            fontSize: "0.75rem",
+            color: "var(--error, #e05252)",
+          }}
+        >
+          Upload failed: {uploadError}
+        </div>
+      )}
+
       {/* Attachment chips */}
       {pendingFiles.length > 0 && (
         <div className={styles.attachmentChips}>
