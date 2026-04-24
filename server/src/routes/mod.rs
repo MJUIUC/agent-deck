@@ -314,7 +314,8 @@ pub async fn build_router(
         )
         .route(
             "/api/personas/:id/avatar",
-            axum::routing::post(personas::upload_avatar),
+            axum::routing::post(personas::upload_avatar)
+                .layer(axum::extract::DefaultBodyLimit::max(25 * 1024 * 1024)),
         )
         // Credentials
         .route(
@@ -482,7 +483,8 @@ pub async fn build_router(
         // Webhook bindings — thread attachments
         .route(
             "/api/threads/:id/upload",
-            axum::routing::post(uploads::upload_file),
+            axum::routing::post(uploads::upload_file)
+                .layer(axum::extract::DefaultBodyLimit::max(25 * 1024 * 1024)),
         )
         .route(
             "/api/threads/:id/webhook-bindings",
