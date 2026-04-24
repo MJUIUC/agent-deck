@@ -446,7 +446,7 @@ async fn run_inner(
 
     // Load the provider row from the database.
     let provider_row: Option<crate::models::provider::Provider> = sqlx::query_as(
-        "SELECT id, user_id, name, kind, base_url, api_key, enabled, created_at
+        "SELECT id, user_id, name, kind, base_url, api_key, enabled, vision, created_at
          FROM providers WHERE id = ? AND user_id = ?",
     )
     .bind(&provider_id)
@@ -484,6 +484,7 @@ async fn run_inner(
 
     // Build the concrete provider instance.
     let provider: Box<dyn LlmProvider> = build_provider(&state, &provider_row)?;
+    let provider_vision: bool = provider_row.vision;
 
     // ── 3. Load visible message history for this thread ────────────────────────
     let history_rows: Vec<(String, String, String)> = sqlx::query_as(
@@ -599,6 +600,25 @@ async fn run_inner(
         None
     };
 
+    // Parse stored attachments from the user message record (if any).
+    let message_attachments: Vec<context::MessageAttachment> = if !is_routine {
+        let row: Option<(Option<String>,)> = sqlx::query_as(
+            "SELECT attachments FROM messages
+             WHERE thread_id = ? AND role = 'user'
+             ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(thread_id)
+        .fetch_optional(&state.pool)
+        .await
+        .unwrap_or(None);
+
+        row.and_then(|(s,)| s)
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
+    } else {
+        vec![]
+    };
+
     let mut assembled = context::assemble(AssemblyInput {
         persona_emoji: Some(persona.emoji.clone()),
         persona_system_prompt: persona.system_prompt.clone(),
@@ -631,6 +651,8 @@ async fn run_inner(
         mcp_tools: mcp_tool_defs.clone(),
         workspace_path: workspace_path.clone(),
         skills_dir: Some(state.config.skills_dir.to_string_lossy().into_owned()),
+        attachments: message_attachments.clone(),
+        provider_supports_vision: provider_vision,
     });
 
     // ── 5. Generation loop — with reactive summarization on context-length error ──
@@ -736,6 +758,8 @@ async fn run_inner(
                     mcp_tools: mcp_tool_defs.clone(),
                     workspace_path: workspace_path.clone(),
                     skills_dir: Some(state.config.skills_dir.to_string_lossy().into_owned()),
+                    attachments: message_attachments.clone(),
+                    provider_supports_vision: provider_vision,
                 });
                 continue;
             }
@@ -2078,6 +2102,7 @@ async fn persist_tool_message(
         execution_id: execution_id.map(|s| s.to_string()),
         event_type: None,
         stopped: false,
+        attachments: None,
         created_at: chrono::Utc::now()
             .format("%Y-%m-%dT%H:%M:%S%.3fZ")
             .to_string(),

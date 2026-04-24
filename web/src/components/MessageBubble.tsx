@@ -245,6 +245,58 @@ export function MessageBubble({
           {message.stopped && (
             <div className={styles.stoppedLabel}>⏹ Stopped</div>
           )}
+          {/* Attachments */}
+          {message.attachments && message.attachments.length > 0 && (
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 6,
+                marginBottom: 8,
+              }}
+            >
+              {message.attachments.map((att, idx) => {
+                const isImage = att.content_type.startsWith("image/");
+                if (isImage) {
+                  return (
+                    <img
+                      key={idx}
+                      src={`/api/fs/read?path=${encodeURIComponent(att.path)}`}
+                      alt={att.filename}
+                      style={{
+                        maxWidth: "100%",
+                        maxHeight: 300,
+                        borderRadius: 8,
+                        objectFit: "contain",
+                        display: "block",
+                      }}
+                    />
+                  );
+                }
+                return (
+                  <a
+                    key={idx}
+                    href={`/api/fs/download?path=${encodeURIComponent(att.path)}`}
+                    download={att.filename}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 5,
+                      background: "var(--bg-elevated)",
+                      border: "1px solid var(--border-subtle)",
+                      borderRadius: 8,
+                      padding: "4px 10px",
+                      fontSize: 12,
+                      color: "var(--text-secondary)",
+                      textDecoration: "none",
+                    }}
+                  >
+                    📎 {att.filename}
+                  </a>
+                );
+              })}
+            </div>
+          )}
           <div className={styles.markdown}>
             <ReactMarkdown
               remarkPlugins={[remarkGfm, remarkBreaks]}

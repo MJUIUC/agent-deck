@@ -23,8 +23,10 @@
 
 use async_openai::types::{
     ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
+    ChatCompletionRequestMessageContentPartImage, ChatCompletionRequestMessageContentPartText,
     ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
-    ChatCompletionTool, ChatCompletionToolType, FunctionObject,
+    ChatCompletionRequestUserMessageContentPart, ChatCompletionTool, ChatCompletionToolType,
+    FunctionObject, ImageDetail, ImageUrl,
 };
 use serde_json::json;
 
@@ -68,6 +70,17 @@ Read a guide:
   GET /api/fs/read?path={skills_dir}/credentials.md";
 
 // ─── Input types ──────────────────────────────────────────────────────────────
+
+/// A file attached to a user message.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MessageAttachment {
+    /// Absolute path to the file on disk.
+    pub path: String,
+    /// MIME type, e.g. "image/png".
+    pub content_type: String,
+    /// Original filename.
+    pub filename: String,
+}
 
 /// A single message from the thread history as loaded from the database.
 #[derive(Debug, Clone)]
@@ -127,6 +140,13 @@ pub struct AssemblyInput {
     /// Absolute path to the skills directory. When present, a system message is
     /// injected telling the agent how to discover and read skill guides on demand.
     pub skills_dir: Option<String>,
+    /// Attachments from the user message. Images are sent as image_url content
+    /// parts when `provider_supports_vision` is true. Non-image attachments are
+    /// appended as a text note.
+    pub attachments: Vec<MessageAttachment>,
+    /// Whether the active provider/model supports vision (image input).
+    /// When false, image attachments are sent as a text note instead.
+    pub provider_supports_vision: bool,
 }
 
 // ─── Output type ──────────────────────────────────────────────────────────────
@@ -145,7 +165,9 @@ pub struct AssembledContext {
 
 /// Assemble the full context window for an LLM request.
 ///
-/// This is a pure, synchronous function — no I/O, no side effects.
+/// This function performs file I/O when image attachments are present and
+/// `provider_supports_vision` is true (reads attachment bytes from disk to
+/// base64-encode them as inline data URIs). For all other cases it is pure.
 ///
 /// ## Panics
 /// Does not panic.  All input validation is lenient: empty prompts produce
@@ -434,13 +456,82 @@ pub fn assemble(input: AssemblyInput) -> AssembledContext {
     }
 
     // ── 5. New user message ───────────────────────────────────────────────────
-    messages.push(
-        ChatCompletionRequestUserMessageArgs::default()
-            .content(input.user_message.as_str())
-            .build()
-            .expect("user message build")
-            .into(),
-    );
+    let image_attachments: Vec<&MessageAttachment> = input
+        .attachments
+        .iter()
+        .filter(|a| a.content_type.starts_with("image/"))
+        .collect();
+    let non_image_attachments: Vec<&MessageAttachment> = input
+        .attachments
+        .iter()
+        .filter(|a| !a.content_type.starts_with("image/"))
+        .collect();
+
+    // Build a text suffix for non-image attachments (always appended as text).
+    let non_image_note: String = if non_image_attachments.is_empty() {
+        String::new()
+    } else {
+        let lines: Vec<String> = non_image_attachments
+            .iter()
+            .map(|a| format!("[Attached file: {} — available at {}]", a.filename, a.path))
+            .collect();
+        format!("\n\n{}", lines.join("\n"))
+    };
+
+    let full_text = format!("{}{}", input.user_message, non_image_note);
+
+    if input.provider_supports_vision && !image_attachments.is_empty() {
+        // Build a multi-part user message: text + one image part per image.
+        // Images are read from disk and base64-encoded inline as data: URIs.
+        let mut parts: Vec<ChatCompletionRequestUserMessageContentPart> = Vec::new();
+
+        // Text part (always first)
+        parts.push(ChatCompletionRequestUserMessageContentPart::Text(
+            ChatCompletionRequestMessageContentPartText {
+                text: full_text.clone(),
+            },
+        ));
+
+        // Image parts
+        for attachment in &image_attachments {
+            match std::fs::read(&attachment.path) {
+                Ok(bytes) => {
+                    use base64::Engine;
+                    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+                    let data_uri = format!("data:{};base64,{}", attachment.content_type, b64);
+                    parts.push(ChatCompletionRequestUserMessageContentPart::ImageUrl(
+                        ChatCompletionRequestMessageContentPartImage {
+                            image_url: ImageUrl {
+                                url: data_uri,
+                                detail: Some(ImageDetail::Auto),
+                            },
+                        },
+                    ));
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to read attachment {}: {}", attachment.path, e);
+                    // Fall back: skip this image (non-image note already handles text-only fallback)
+                }
+            }
+        }
+
+        messages.push(
+            ChatCompletionRequestUserMessageArgs::default()
+                .content(parts)
+                .build()
+                .expect("user message build")
+                .into(),
+        );
+    } else {
+        // No vision or no image attachments — plain text (may include non-image note)
+        messages.push(
+            ChatCompletionRequestUserMessageArgs::default()
+                .content(full_text.as_str())
+                .build()
+                .expect("user message build")
+                .into(),
+        );
+    }
 
     // ── Tool definitions ──────────────────────────────────────────────────────
     let tools = if input.supports_tools {
@@ -564,6 +655,8 @@ mod tests {
             conversation_summary: None,
             workspace_path: None,
             skills_dir: None,
+            attachments: vec![],
+            provider_supports_vision: false,
         }
     }
 
@@ -989,6 +1082,8 @@ mod tests {
             conversation_summary: None,
             workspace_path: None,
             skills_dir: None,
+            attachments: vec![],
+            provider_supports_vision: false,
         };
 
         let ctx = assemble(input);
@@ -1038,6 +1133,8 @@ mod tests {
             conversation_summary: None,
             workspace_path: None,
             skills_dir: None,
+            attachments: vec![],
+            provider_supports_vision: false,
         };
         let ctx = assemble(input);
         // System message must not contain memory instructions
@@ -1091,6 +1188,8 @@ mod tests {
             conversation_summary: None,
             workspace_path: None,
             skills_dir: None,
+            attachments: vec![],
+            provider_supports_vision: false,
         };
         let ctx = assemble(input);
         assert_eq!(

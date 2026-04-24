@@ -29,7 +29,7 @@ pub async fn list(State(state): State<Arc<AppState>>) -> AppResult<impl IntoResp
     let user_id = get_user_id(&state).await?;
 
     let providers: Vec<Provider> = sqlx::query_as(
-        "SELECT id, user_id, name, kind, base_url, api_key, enabled, created_at
+        "SELECT id, user_id, name, kind, base_url, api_key, enabled, vision, created_at
          FROM providers
          WHERE user_id = ?
          ORDER BY created_at ASC",
@@ -51,7 +51,7 @@ pub async fn get(
     let user_id = get_user_id(&state).await?;
 
     let provider: Option<Provider> = sqlx::query_as(
-        "SELECT id, user_id, name, kind, base_url, api_key, enabled, created_at
+        "SELECT id, user_id, name, kind, base_url, api_key, enabled, vision, created_at
          FROM providers
          WHERE id = ? AND user_id = ?",
     )
@@ -105,8 +105,8 @@ pub async fn create(
     let provider = Provider::new(&user_id, payload);
 
     sqlx::query(
-        "INSERT INTO providers (id, user_id, name, kind, base_url, api_key, enabled, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO providers (id, user_id, name, kind, base_url, api_key, enabled, vision, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&provider.id)
     .bind(&provider.user_id)
@@ -115,6 +115,7 @@ pub async fn create(
     .bind(&provider.base_url)
     .bind(&encrypted_key)
     .bind(provider.enabled)
+    .bind(provider.vision as i64)
     .bind(&provider.created_at)
     .execute(&state.pool)
     .await?;
@@ -128,6 +129,7 @@ pub async fn create(
         base_url: provider.base_url,
         api_key: encrypted_key.map(|_| "••••••••".to_string()),
         enabled: provider.enabled,
+        vision: provider.vision,
         created_at: provider.created_at,
     };
 
@@ -144,7 +146,7 @@ pub async fn update(
 
     // Verify provider exists
     let existing: Option<Provider> = sqlx::query_as(
-        "SELECT id, user_id, name, kind, base_url, api_key, enabled, created_at
+        "SELECT id, user_id, name, kind, base_url, api_key, enabled, vision, created_at
          FROM providers
          WHERE id = ? AND user_id = ?",
     )
@@ -184,10 +186,11 @@ pub async fn update(
     let kind = payload.kind.as_deref().unwrap_or(&existing.kind);
     let base_url = payload.base_url.as_deref().unwrap_or(&existing.base_url);
     let enabled = payload.enabled.unwrap_or(existing.enabled);
+    let vision = payload.vision.unwrap_or(existing.vision);
 
     sqlx::query(
         "UPDATE providers
-         SET name = ?, kind = ?, base_url = ?, api_key = ?, enabled = ?
+         SET name = ?, kind = ?, base_url = ?, api_key = ?, enabled = ?, vision = ?
          WHERE id = ? AND user_id = ?",
     )
     .bind(name)
@@ -195,6 +198,7 @@ pub async fn update(
     .bind(base_url)
     .bind(&new_encrypted_key)
     .bind(enabled)
+    .bind(vision as i64)
     .bind(&id)
     .bind(&user_id)
     .execute(&state.pool)
@@ -208,6 +212,7 @@ pub async fn update(
         base_url: base_url.to_string(),
         api_key: new_encrypted_key.map(|_| "••••••••".to_string()),
         enabled,
+        vision,
         created_at: existing.created_at,
     };
 
@@ -245,7 +250,7 @@ pub async fn test_connection(
     let user_id = get_user_id(&state).await?;
 
     let provider: Option<Provider> = sqlx::query_as(
-        "SELECT id, user_id, name, kind, base_url, api_key, enabled, created_at
+        "SELECT id, user_id, name, kind, base_url, api_key, enabled, vision, created_at
          FROM providers
          WHERE id = ? AND user_id = ?",
     )

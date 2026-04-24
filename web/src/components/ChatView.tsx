@@ -8,7 +8,7 @@ import {
   Component,
 } from "react";
 import type { ReactNode, ErrorInfo } from "react";
-import type { Thread, ThreadState } from "@/types";
+import type { Thread, ThreadState, MessageAttachment } from "@/types";
 import { useMessageStore } from "@/stores/useMessageStore";
 import { useSseStore } from "@/stores/useSseStore";
 import { useThreadStore } from "@/stores/useThreadStore";
@@ -278,12 +278,12 @@ export function ChatView({
   }, [cancelRun, thread.id]);
 
   const handleSend = useCallback(
-    (content: string) => {
+    (content: string, attachments: MessageAttachment[]) => {
       if (isDraft && onFirstSend) {
         // Draft mode: delegate to App.tsx which creates the real thread first
         onFirstSend(content);
       } else {
-        sendMessage(thread.id, content);
+        sendMessage(thread.id, content, attachments);
       }
     },
     [isDraft, onFirstSend, thread.id, sendMessage],

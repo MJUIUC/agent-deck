@@ -49,6 +49,7 @@ export function ProviderForm({
     kind: normaliseKind(editing?.kind ?? ""),
     base_url: editing?.base_url ?? "",
     api_key: "",
+    vision: editing?.vision ?? false,
   });
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -90,6 +91,7 @@ export function ProviderForm({
         ...(form.kind !== "copilot" && form.api_key
           ? { api_key: form.api_key }
           : {}),
+        vision: form.vision ?? false,
       };
       if (editing) {
         await providersApi.update(editing.id, payload);
@@ -228,6 +230,36 @@ export function ProviderForm({
                 <FieldHint>
                   Encrypted at rest. Never returned in API responses.
                 </FieldHint>
+              </div>
+
+              <div
+                style={{
+                  gridColumn: "1 / -1",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "10px 0",
+                }}
+              >
+                <div>
+                  <FieldLabel>Vision / image input</FieldLabel>
+                  <FieldHint>
+                    Enable to send image attachments to this provider's models.
+                  </FieldHint>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={form.vision ?? false}
+                  onChange={(e) =>
+                    setForm((prev) => ({ ...prev, vision: e.target.checked }))
+                  }
+                  style={{
+                    width: 16,
+                    height: 16,
+                    accentColor: "var(--accent-primary)",
+                    cursor: "pointer",
+                  }}
+                />
               </div>
             </>
           )}

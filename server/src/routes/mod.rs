@@ -47,6 +47,7 @@ pub mod sse;
 pub mod tailscale;
 pub mod threads;
 pub mod tokens;
+pub mod uploads;
 pub mod webhook_bindings;
 pub mod webhooks;
 
@@ -478,6 +479,10 @@ pub async fn build_router(
             axum::routing::patch(webhook_bindings::toggle_global),
         )
         // Webhook bindings — thread attachments
+        .route(
+            "/api/threads/:id/upload",
+            axum::routing::post(uploads::upload_file),
+        )
         .route(
             "/api/threads/:id/webhook-bindings",
             get(webhook_bindings::list_attachments).post(webhook_bindings::attach),

@@ -77,7 +77,7 @@ pub async fn list(
             Some((cursor_created_at,)) => {
                 sqlx::query_as::<_, Message>(&format!(
                     "SELECT id, thread_id, role, content, source, routine_id, visibility,
-                            execution_id, event_type, stopped, created_at
+                            execution_id, event_type, stopped, attachments, created_at
                      FROM messages
                      WHERE thread_id = ? AND created_at < ? AND {}
                      ORDER BY created_at DESC
@@ -105,10 +105,10 @@ pub async fn list(
         // No cursor: return the most recent `limit` messages, oldest-first
         sqlx::query_as::<_, Message>(&format!(
             "SELECT id, thread_id, role, content, source, routine_id, visibility,
-                    execution_id, event_type, stopped, created_at
+                    execution_id, event_type, stopped, attachments, created_at
              FROM (
                  SELECT id, thread_id, role, content, source, routine_id, visibility,
-                        execution_id, event_type, stopped, created_at
+                        execution_id, event_type, stopped, attachments, created_at
                  FROM messages
                  WHERE thread_id = ? AND {}
                  ORDER BY created_at DESC
@@ -164,12 +164,20 @@ pub async fn send(
     }
 
     // Persist the user message
-    let message = Message::new_user(&thread_id, &payload.content);
+    let mut message = Message::new_user(&thread_id, &payload.content);
+
+    // Serialize attachments if provided
+    let attachments_json = payload
+        .attachments
+        .as_ref()
+        .filter(|a| !a.is_empty())
+        .map(|a| serde_json::to_string(a).unwrap_or_else(|_| "[]".to_string()));
+    message.attachments = attachments_json;
 
     sqlx::query(
         "INSERT INTO messages (id, thread_id, role, content, source, routine_id, visibility,
-                               execution_id, event_type, stopped, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                               execution_id, event_type, stopped, attachments, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&message.id)
     .bind(&message.thread_id)
@@ -181,6 +189,7 @@ pub async fn send(
     .bind(&message.execution_id)
     .bind(&message.event_type)
     .bind(message.stopped)
+    .bind(&message.attachments)
     .bind(&message.created_at)
     .execute(&state.pool)
     .await?;

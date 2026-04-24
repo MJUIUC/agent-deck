@@ -4,6 +4,7 @@ import zukeeper from "zukeeper";
 import { messagesApi } from "@/api/client";
 import type {
   Message,
+  MessageAttachment,
   ProcessingRound,
   SlashCommandResponse,
   StreamingEntry,
@@ -50,7 +51,11 @@ interface MessageStore {
 
   loadMessages: (threadId: string) => Promise<void>;
   loadMoreMessages: (threadId: string) => Promise<void>;
-  sendMessage: (threadId: string, content: string) => Promise<void>;
+  sendMessage: (
+    threadId: string,
+    content: string,
+    attachments?: MessageAttachment[],
+  ) => Promise<void>;
   sendCommand: (
     threadId: string,
     input: string,
@@ -164,7 +169,7 @@ const storeCreator: StateCreator<MessageStore> = (set, get) => ({
   // sending → idle on POST error (optimistic message removed)
   // sending → streaming on first appendToken
 
-  sendMessage: async (threadId, content) => {
+  sendMessage: async (threadId, content, attachments?) => {
     const optimisticId = `optimistic-${Date.now()}`;
 
     const optimisticUserMsg: Message = {
@@ -176,6 +181,7 @@ const storeCreator: StateCreator<MessageStore> = (set, get) => ({
       routine_id: null,
       visibility: "visible",
       execution_id: null,
+      attachments: attachments ?? null,
       created_at: new Date().toISOString(),
     };
 
@@ -203,7 +209,7 @@ const storeCreator: StateCreator<MessageStore> = (set, get) => ({
     });
 
     try {
-      const res = await messagesApi.send(threadId, content);
+      const res = await messagesApi.send(threadId, content, attachments);
       const realUserMsg = res.data;
 
       // Replace optimistic placeholder with real server message.

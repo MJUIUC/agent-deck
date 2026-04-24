@@ -12,6 +12,7 @@ pub struct Provider {
     #[serde(skip_serializing)]
     pub api_key: Option<String>,
     pub enabled: bool,
+    pub vision: bool,
     pub created_at: String,
 }
 
@@ -26,6 +27,7 @@ pub struct ProviderResponse {
     /// Returns `"••••••••"` if a key is stored, `null` if not.
     pub api_key: Option<String>,
     pub enabled: bool,
+    pub vision: bool,
     pub created_at: String,
 }
 
@@ -39,6 +41,7 @@ impl From<Provider> for ProviderResponse {
             base_url: p.base_url,
             api_key: p.api_key.map(|_| "••••••••".to_string()),
             enabled: p.enabled,
+            vision: p.vision,
             created_at: p.created_at,
         }
     }
@@ -50,6 +53,7 @@ pub struct CreateProvider {
     pub kind: String,
     pub base_url: String,
     pub api_key: Option<String>,
+    pub vision: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -59,6 +63,7 @@ pub struct UpdateProvider {
     pub base_url: Option<String>,
     pub api_key: Option<String>,
     pub enabled: Option<bool>,
+    pub vision: Option<bool>,
 }
 
 impl Provider {
@@ -71,6 +76,7 @@ impl Provider {
             base_url: req.base_url,
             api_key: req.api_key,
             enabled: true,
+            vision: req.vision.unwrap_or(false),
             created_at: chrono::Utc::now()
                 .format("%Y-%m-%dT%H:%M:%S%.3fZ")
                 .to_string(),
