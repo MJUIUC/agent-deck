@@ -10,7 +10,7 @@ import {
   useRef,
   useCallback,
 } from "react";
-import { FolderOpen, Attachment } from "@carbon/icons-react";
+import { FolderOpen, Attachment, InProgress } from "@carbon/icons-react";
 import type { Thread, MessageAttachment } from "@/types";
 import { useMessageStore } from "@/stores/useMessageStore";
 import { useSseStore } from "@/stores/useSseStore";
@@ -714,7 +714,7 @@ export function MobileChatView({
                     }}
                   />
                 ) : (
-                  <span>📎</span>
+                  <Attachment size={14} />
                 )}
                 <span
                   style={{
@@ -727,7 +727,7 @@ export function MobileChatView({
                   {file.name}
                 </span>
                 {uploading ? (
-                  <span>⏳</span>
+                  <InProgress size={14} />
                 ) : (
                   <button
                     type="button"

@@ -1,5 +1,11 @@
 import { useRef, useState, useCallback, useEffect } from "react";
-import { Attachment, Close, SendAlt, StopFilled } from "@carbon/icons-react";
+import {
+  Attachment,
+  Close,
+  SendAlt,
+  StopFilled,
+  InProgress,
+} from "@carbon/icons-react";
 import { uploadsApi } from "@/api/client";
 import type { MessageAttachment } from "@/types";
 import styles from "./MessageInput.module.css";
@@ -147,7 +153,7 @@ export function MessageInput({
               )}
               <span className={styles.chipName}>{file.name}</span>
               {uploading ? (
-                <span className={styles.chipSpinner}>⏳</span>
+                <InProgress size={14} />
               ) : (
                 <button
                   type="button"

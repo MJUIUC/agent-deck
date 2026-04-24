@@ -519,7 +519,12 @@ export const mcpServersApi = {
 export const uploadsApi = {
   upload(threadId: string, file: File): Promise<{ data: UploadedFile }> {
     const form = new FormData();
-    form.append("file", file);
+    // Prepend a timestamp to guarantee a unique filename on the server.
+    // Mobile cameras (especially iOS) always name photos "image.jpeg", which
+    // would otherwise collide on repeated uploads within the same thread.
+    const uniqueName = `${Date.now()}_${file.name}`;
+    const renamedFile = new File([file], uniqueName, { type: file.type });
+    form.append("file", renamedFile);
     // Note: do NOT set Content-Type header — let the browser set multipart boundary
     return apiFetch(`/api/threads/${threadId}/upload`, {
       method: "POST",
