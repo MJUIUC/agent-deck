@@ -986,8 +986,8 @@ mod tests {
         let defs = built_in_tool_defs_for_test();
         assert_eq!(
             defs.len(),
-            5,
-            "expected exactly save_memory, recall_memory, delete_memory, recall_conversation, and tailscale_status in the built-in registry"
+            7,
+            "expected exactly save_memory, recall_memory, delete_memory, recall_conversation, tailscale_status, set_mcp_timeout, and describe_image in the built-in registry"
         );
     }
 

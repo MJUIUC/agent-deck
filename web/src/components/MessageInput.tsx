@@ -85,8 +85,7 @@ export function MessageInput({
       setUploading(false);
     }
 
-    const content = trimmed || pendingFiles.map((f) => f.name).join(", ");
-    onSend(content, uploaded);
+    onSend(trimmed, uploaded);
     setValue("");
     setPendingFiles([]);
     if (textareaRef.current) textareaRef.current.style.height = "22px";

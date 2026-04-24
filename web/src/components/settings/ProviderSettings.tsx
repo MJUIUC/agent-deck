@@ -14,6 +14,11 @@ interface ProviderCardProps {
   onDelete: () => void;
   onSyncModels: () => void;
   syncingModels: boolean;
+  onToggleModel: (
+    modelId: string,
+    patch: { enabled?: boolean; vision?: boolean },
+  ) => void;
+  togglingModelId: string | null;
 }
 
 function ProviderCard({
@@ -23,6 +28,8 @@ function ProviderCard({
   onDelete,
   onSyncModels,
   syncingModels,
+  onToggleModel,
+  togglingModelId,
 }: ProviderCardProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [hovered, setHovered] = useState(false);
@@ -106,50 +113,154 @@ function ProviderCard({
         </div>
       </div>
 
-      {/* Model chips */}
+      {/* Model list */}
       {models.length > 0 && (
         <div style={{ marginBottom: 10 }}>
-          <div
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: "4px 6px",
-              ...(expanded
-                ? {
-                    maxHeight: 160,
-                    overflowY: "auto",
-                    padding: "6px 8px",
-                    background: "var(--bg-tertiary)",
-                    border: "1px solid var(--border-subtle)",
-                    borderRadius: 7,
-                  }
-                : {}),
-            }}
-          >
-            {(expanded ? models : models.slice(0, 6)).map((m) => (
-              <span
-                key={m.id}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  background: m.enabled
-                    ? "rgba(74,82,53,0.35)"
-                    : "var(--bg-elevated)",
-                  border: `1px solid ${m.enabled ? "var(--accent-muted)" : "var(--border-subtle)"}`,
-                  borderRadius: 5,
-                  padding: "2px 8px",
-                  fontSize: 11,
-                  color: m.enabled
-                    ? "var(--text-secondary)"
-                    : "var(--text-tertiary)",
-                  fontFamily: '"SF Mono","Fira Code",monospace',
-                  opacity: m.enabled ? 1 : 0.6,
-                }}
-              >
-                {m.display_name}
-              </span>
-            ))}
-          </div>
+          {!expanded ? (
+            /* Compact chip row — up to 6 read-only chips */
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 6px" }}>
+              {models.slice(0, 6).map((m) => (
+                <span
+                  key={m.id}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 4,
+                    background: m.enabled
+                      ? "rgba(74,82,53,0.35)"
+                      : "var(--bg-elevated)",
+                    border: `1px solid ${m.enabled ? "var(--accent-muted)" : "var(--border-subtle)"}`,
+                    borderRadius: 5,
+                    padding: "2px 8px",
+                    fontSize: 11,
+                    color: m.enabled
+                      ? "var(--text-secondary)"
+                      : "var(--text-tertiary)",
+                    fontFamily: '"SF Mono","Fira Code",monospace',
+                    opacity: m.enabled ? 1 : 0.6,
+                  }}
+                >
+                  {m.vision && (
+                    <span
+                      title="Vision capable"
+                      style={{ fontSize: 10, opacity: 0.7 }}
+                    >
+                      👁
+                    </span>
+                  )}
+                  {m.display_name}
+                </span>
+              ))}
+            </div>
+          ) : (
+            /* Expanded model rows with toggles */
+            <div
+              style={{
+                background: "var(--bg-tertiary)",
+                border: "1px solid var(--border-subtle)",
+                borderRadius: 7,
+                overflow: "hidden",
+              }}
+            >
+              {models.map((m, idx) => (
+                <div
+                  key={m.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    padding: "7px 10px",
+                    borderBottom:
+                      idx < models.length - 1
+                        ? "1px solid var(--border-subtle)"
+                        : "none",
+                    opacity: togglingModelId === m.id ? 0.5 : 1,
+                    transition: "opacity 0.15s",
+                  }}
+                >
+                  <span
+                    style={{
+                      flex: 1,
+                      fontSize: 11,
+                      fontFamily: '"SF Mono","Fira Code",monospace',
+                      color: m.enabled
+                        ? "var(--text-secondary)"
+                        : "var(--text-tertiary)",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {m.display_name}
+                  </span>
+                  {/* Vision toggle */}
+                  <button
+                    type="button"
+                    onClick={() => onToggleModel(m.id, { vision: !m.vision })}
+                    disabled={togglingModelId === m.id}
+                    title={
+                      m.vision
+                        ? "Vision enabled — click to disable"
+                        : "Vision disabled — click to enable"
+                    }
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                      padding: "2px 7px",
+                      borderRadius: 4,
+                      border: `1px solid ${m.vision ? "var(--accent-muted)" : "var(--border-subtle)"}`,
+                      background: m.vision
+                        ? "rgba(74,82,53,0.35)"
+                        : "transparent",
+                      color: m.vision
+                        ? "var(--text-secondary)"
+                        : "var(--text-tertiary)",
+                      fontSize: 10,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                      transition: "all 0.15s",
+                    }}
+                  >
+                    👁 Vision
+                  </button>
+                  {/* Enabled toggle */}
+                  <button
+                    type="button"
+                    onClick={() => onToggleModel(m.id, { enabled: !m.enabled })}
+                    disabled={togglingModelId === m.id}
+                    title={
+                      m.enabled
+                        ? "Enabled — click to disable"
+                        : "Disabled — click to enable"
+                    }
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                      padding: "2px 7px",
+                      borderRadius: 4,
+                      border: `1px solid ${m.enabled ? "var(--accent-muted)" : "var(--border-subtle)"}`,
+                      background: m.enabled
+                        ? "rgba(74,82,53,0.35)"
+                        : "transparent",
+                      color: m.enabled
+                        ? "var(--text-secondary)"
+                        : "var(--text-tertiary)",
+                      fontSize: 10,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                      transition: "all 0.15s",
+                    }}
+                  >
+                    {m.enabled ? "✓ Enabled" : "Disabled"}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           {models.length > 6 && (
             <button
               onClick={() => setExpanded((v) => !v)}
@@ -241,6 +352,7 @@ export function ProviderSettings({ onDataChanged }: ProviderSettingsProps) {
   const [editing, setEditing] = useState<Provider | null>(null);
   const [syncingId, setSyncingId] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [togglingModelId, setTogglingModelId] = useState<string | null>(null);
 
   const loadProviders = useCallback(async () => {
     setLoading(true);
@@ -305,6 +417,30 @@ export function ProviderSettings({ onDataChanged }: ProviderSettingsProps) {
       setSyncingId(null);
     }
   }, []);
+
+  const handleToggleModel = useCallback(
+    async (
+      providerId: string,
+      modelId: string,
+      patch: { enabled?: boolean; vision?: boolean },
+    ) => {
+      setTogglingModelId(modelId);
+      try {
+        const res = await modelsApi.update(providerId, modelId, patch);
+        setModelsByProvider((prev) => ({
+          ...prev,
+          [providerId]: (prev[providerId] ?? []).map((m) =>
+            m.id === modelId ? res.data : m,
+          ),
+        }));
+      } catch {
+        /* ignore */
+      } finally {
+        setTogglingModelId(null);
+      }
+    },
+    [],
+  );
 
   const openAdd = useCallback(() => {
     setEditing(null);
@@ -468,6 +604,10 @@ export function ProviderSettings({ onDataChanged }: ProviderSettingsProps) {
                 onDelete={() => handleDelete(p.id)}
                 onSyncModels={() => handleSyncModels(p.id)}
                 syncingModels={syncingId === p.id}
+                onToggleModel={(modelId, patch) =>
+                  handleToggleModel(p.id, modelId, patch)
+                }
+                togglingModelId={togglingModelId}
               />
             ))}
 

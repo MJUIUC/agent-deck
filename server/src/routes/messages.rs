@@ -148,7 +148,11 @@ pub async fn send(
     Path(thread_id): Path<String>,
     Json(payload): Json<CreateMessage>,
 ) -> AppResult<impl IntoResponse> {
-    if payload.content.trim().is_empty() {
+    let has_attachments = payload
+        .attachments
+        .as_ref()
+        .map_or(false, |a| !a.is_empty());
+    if payload.content.trim().is_empty() && !has_attachments {
         return Err(AppError::BadRequest(
             "content must not be empty".to_string(),
         ));

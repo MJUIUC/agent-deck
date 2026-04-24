@@ -446,6 +446,7 @@ pub async fn build_router(
         .route("/api/fs/read", get(fs::read_file))
         .route("/api/fs/download", get(fs::download_file))
         .route("/api/fs/workspace", get(fs::get_workspace))
+        .route("/api/fs/image", get(fs::serve_image))
         // Tailscale
         .route("/api/tailscale/status", get(tailscale::get_status))
         .route(

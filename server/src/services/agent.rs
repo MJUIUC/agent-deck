@@ -425,13 +425,14 @@ async fn run_inner(
 
     // Resolve the model UUID (FK stored on the thread) to the actual model_id
     // string (e.g. "gpt-4o") that the provider API expects.
-    let model_row: Option<(String,)> = sqlx::query_as("SELECT model_id FROM models WHERE id = ?")
-        .bind(&model_uuid)
-        .fetch_optional(&state.pool)
-        .await?;
+    let model_row: Option<(String, bool)> =
+        sqlx::query_as("SELECT model_id, vision FROM models WHERE id = ?")
+            .bind(&model_uuid)
+            .fetch_optional(&state.pool)
+            .await?;
 
-    let model_id = match model_row {
-        Some((mid,)) => mid,
+    let (model_id, model_vision) = match model_row {
+        Some((mid, vis)) => (mid, vis),
         None => {
             // Fall back to using the value as-is in case it was already a
             // raw model string rather than a UUID (e.g. during manual testing).
@@ -440,7 +441,7 @@ async fn run_inner(
                 model_uuid = %model_uuid,
                 "Model UUID not found in DB — using value as raw model_id"
             );
-            model_uuid
+            (model_uuid, false)
         }
     };
 
@@ -478,7 +479,6 @@ async fn run_inner(
 
     // Build the concrete provider instance.
     let provider: Box<dyn LlmProvider> = build_provider(&state, &provider_row)?;
-    let provider_vision: bool = provider_row.vision;
 
     // ── 3. Load visible message history for this thread ────────────────────────
     let history_rows: Vec<(String, String, String)> = sqlx::query_as(
@@ -646,7 +646,7 @@ async fn run_inner(
         workspace_path: workspace_path.clone(),
         skills_dir: Some(state.config.skills_dir.to_string_lossy().into_owned()),
         attachments: message_attachments.clone(),
-        provider_supports_vision: provider_vision,
+        provider_supports_vision: model_vision,
     });
 
     // ── 5. Generation loop — with reactive summarization on context-length error ──
@@ -753,7 +753,7 @@ async fn run_inner(
                     workspace_path: workspace_path.clone(),
                     skills_dir: Some(state.config.skills_dir.to_string_lossy().into_owned()),
                     attachments: message_attachments.clone(),
-                    provider_supports_vision: provider_vision,
+                    provider_supports_vision: model_vision,
                 });
                 continue;
             }
@@ -1101,6 +1101,8 @@ async fn generation_loop(
             cancellation_rx,
             execution_id,
             (tool_rounds + 1) as u32,
+            provider,
+            model_id,
         )
         .await;
         run_context.hidden_message_ids.extend(hidden_ids);
@@ -1654,6 +1656,8 @@ async fn execute_tool_calls(
     cancellation_rx: &tokio::sync::watch::Receiver<bool>,
     execution_id: Option<&str>,
     round: u32,
+    provider: &dyn LlmProvider,
+    model_id: &str,
 ) -> (Vec<String>, Vec<String>) {
     use crate::services::tools::ToolContext;
 
@@ -1722,6 +1726,8 @@ async fn execute_tool_calls(
                         user_id,
                         persona_id,
                         thread_id,
+                        provider,
+                        model_id,
                     };
                     let output = match tool.run(args, &context).await {
                         Ok(r) => {

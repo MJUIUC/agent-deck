@@ -85,6 +85,7 @@ export interface Model {
   model_id: string;
   display_name: string;
   enabled: boolean;
+  vision: boolean;
   created_at: string;
   updated_at: string;
 }

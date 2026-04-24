@@ -44,7 +44,7 @@ pub async fn list(
     let _ = get_provider(&state, &provider_id, &user_id).await?;
 
     let models: Vec<Model> = sqlx::query_as(
-        "SELECT id, provider_id, model_id, display_name, enabled
+        "SELECT id, provider_id, model_id, display_name, enabled, vision
          FROM models
          WHERE provider_id = ?
          ORDER BY display_name ASC",
@@ -65,7 +65,7 @@ pub async fn get(
     let _ = get_provider(&state, &provider_id, &user_id).await?;
 
     let model: Option<Model> = sqlx::query_as(
-        "SELECT id, provider_id, model_id, display_name, enabled
+        "SELECT id, provider_id, model_id, display_name, enabled, vision
          FROM models
          WHERE id = ? AND provider_id = ?",
     )
@@ -129,8 +129,8 @@ pub async fn sync(
         if existing.is_none() {
             let id = uuid::Uuid::new_v4().to_string();
             sqlx::query(
-                "INSERT INTO models (id, provider_id, model_id, display_name, enabled)
-                 VALUES (?, ?, ?, ?, 1)",
+                "INSERT INTO models (id, provider_id, model_id, display_name, enabled, vision)
+                 VALUES (?, ?, ?, ?, 1, 0)",
             )
             .bind(&id)
             .bind(&provider_id)
@@ -144,7 +144,7 @@ pub async fn sync(
 
     // Return the full updated list
     let models: Vec<Model> = sqlx::query_as(
-        "SELECT id, provider_id, model_id, display_name, enabled
+        "SELECT id, provider_id, model_id, display_name, enabled, vision
          FROM models
          WHERE provider_id = ?
          ORDER BY display_name ASC",
@@ -166,7 +166,7 @@ pub async fn update(
     let _ = get_provider(&state, &provider_id, &user_id).await?;
 
     let existing: Option<Model> = sqlx::query_as(
-        "SELECT id, provider_id, model_id, display_name, enabled
+        "SELECT id, provider_id, model_id, display_name, enabled, vision
          FROM models
          WHERE id = ? AND provider_id = ?",
     )
@@ -190,14 +190,18 @@ pub async fn update(
         .as_deref()
         .unwrap_or(&existing.display_name);
     let enabled = payload.enabled.unwrap_or(existing.enabled);
+    let vision = payload.vision.unwrap_or(existing.vision);
 
-    sqlx::query("UPDATE models SET display_name = ?, enabled = ? WHERE id = ? AND provider_id = ?")
-        .bind(display_name)
-        .bind(enabled)
-        .bind(&model_id)
-        .bind(&provider_id)
-        .execute(&state.pool)
-        .await?;
+    sqlx::query(
+        "UPDATE models SET display_name = ?, enabled = ?, vision = ? WHERE id = ? AND provider_id = ?",
+    )
+    .bind(display_name)
+    .bind(enabled)
+    .bind(vision)
+    .bind(&model_id)
+    .bind(&provider_id)
+    .execute(&state.pool)
+    .await?;
 
     let updated = Model {
         id: existing.id,
@@ -205,6 +209,7 @@ pub async fn update(
         model_id: existing.model_id,
         display_name: display_name.to_string(),
         enabled,
+        vision,
     };
 
     Ok((StatusCode::OK, Json(json!({ "data": updated }))))

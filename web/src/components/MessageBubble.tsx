@@ -261,7 +261,7 @@ export function MessageBubble({
                   return (
                     <img
                       key={idx}
-                      src={`/api/fs/read?path=${encodeURIComponent(att.path)}`}
+                      src={`/api/fs/image?path=${encodeURIComponent(att.path)}`}
                       alt={att.filename}
                       style={{
                         maxWidth: "100%",

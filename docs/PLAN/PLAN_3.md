@@ -1509,7 +1509,7 @@ Adds a background keepalive ping for local (stdio) MCP servers to prevent idle-e
 
 ---
 
-### Phase 8.5 — Tailscale Platform Layer + Webhook Integration
+### Phase 8.5 — Tailscale Platform Layer + Webhook Integration ✅ Complete
 
 **Goal:** Make Tailscale a first-class citizen of agent-deck. Surface live VPN status in the UI and give the agent tools to answer connectivity questions. Add a single universal webhook endpoint that lets any external service (GitHub, Stripe, CI/CD, IoT) trigger the agent by posting to `https://{hostname}/api/webhooks`. Routing is by HMAC secret — one stable URL for all services, forever.
 
@@ -1535,6 +1535,15 @@ Add migration 013 (`webhook_bindings` table). Implement a single public endpoint
 
 Acceptance criteria: see `docs/AD-8.5.md` § Story 8.5b Acceptance Criteria
 
+
+### As-built notes (Phase 8.5)
+- **Story 8.5a** (`feature/phase8-tailscale-platform`): `services/tailscale.rs` + 4 endpoints (`GET /api/tailscale/status`, `POST /api/tailscale/connect`, `POST /api/tailscale/serve`, `POST /api/tailscale/funnel/enable|disable`). `TailscaleStatusCard` in General + Mobile settings. VPN dot in desktop sidebar. `tailscale_status` built-in agent tool with active webhook binding count.
+- **Story 8.5b** (same branch): Migration 013 `webhook_bindings`. `POST /api/webhooks` public HMAC-SHA256 endpoint. CRUD at `/api/webhook-bindings` (global) and `/api/threads/:id/webhook-bindings` (thread attachments). GitHub/Stripe/generic formatters. `notify_internal` refactored out of `notify.rs`. Webhooks section in ConfigPane + MobileConfigSheet with one-time secret display. `docs/skills/webhooks.md` shipped.
+- **Story 8.5c** (same branch): `install.sh` bootstraps Homebrew/Rust/Node/Tailscale, deploys binary + public dir, seeds shell profiles with `agent-deck` CLI alias. `scripts/run.sh` canonical service runner. `agent-deck` CLI (start/stop/status/logs/open). `release.yml` GitHub Actions workflow produces `aarch64` + `x86_64` tarballs with SHA256s on `v*` tag push.
+- **Post-phase additions** (same branch, tagged `phase-8.5`): MCP server restart button (`POST /api/mcp-servers/:id/restart`); timezone-aware routine scheduler (`chrono-tz` + `iana-time-zone`, `Job::new_async_tz`, system TZ auto-populated at setup, `system_timezone` in `/api/config`); `TimezoneField` with auto-detect button in Profile Settings; timezone hint in `CronPicker`; markdown rendering in user chat bubbles.
+- **Branch:** `feature/phase8-tailscale-platform` — tagged `phase-8.5`.
+
+---
 
 ### Phase 9 — Polish and Hardening
 

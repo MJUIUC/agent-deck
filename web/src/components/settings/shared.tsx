@@ -20,7 +20,6 @@ export type ProviderFormData = {
   kind: "openai" | "anthropic" | "custom" | "copilot" | "";
   base_url: string;
   api_key: string;
-  vision?: boolean;
 };
 
 export type CopilotAuthStep =

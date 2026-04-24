@@ -397,7 +397,7 @@ export const modelsApi = {
   update(
     providerId: string,
     modelId: string,
-    payload: { enabled?: boolean; display_name?: string },
+    payload: { enabled?: boolean; display_name?: string; vision?: boolean },
   ): Promise<{ data: Model }> {
     return apiFetch(`/api/providers/${providerId}/models/${modelId}`, {
       method: "PUT",
