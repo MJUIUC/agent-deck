@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use chrono::Utc;
+use chrono_tz::Tz;
 use dashmap::DashMap;
 use sqlx::SqlitePool;
 use tokio_cron_scheduler::{Job, JobScheduler};
@@ -289,7 +290,20 @@ impl SchedulerService {
         let state = self.state.clone();
         let pool = self.pool.clone();
 
-        let job = Job::new_async(cron_6.as_str(), move |_uuid, _lock| {
+        // Look up the user's timezone preference; fall back to UTC.
+        let tz: Tz = {
+            let row: Option<(Option<String>,)> =
+                sqlx::query_as("SELECT timezone FROM users LIMIT 1")
+                    .fetch_optional(&self.pool)
+                    .await
+                    .unwrap_or(None);
+            let tz_str = row
+                .and_then(|(tz,)| tz)
+                .unwrap_or_else(|| "UTC".to_string());
+            tz_str.parse::<Tz>().unwrap_or(Tz::UTC)
+        };
+
+        let job = Job::new_async_tz(cron_6.as_str(), tz, move |_uuid, _lock| {
             // Inner clones so each invocation gets its own owned copies.
             let routine_id = routine_id.clone();
             let thread_id = thread_id.clone();

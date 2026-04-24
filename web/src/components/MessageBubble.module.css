@@ -250,7 +250,6 @@
 .bubbleUser {
     background: var(--bubble-user);
     border-radius: 12px 12px 4px 12px;
-    white-space: pre-wrap;
 }
 
 .bubbleAgent {

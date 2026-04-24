@@ -14,7 +14,8 @@ import { FolderOpen } from "lucide-react";
 import type { Thread } from "@/types";
 import { useMessageStore } from "@/stores/useMessageStore";
 import { useSseStore } from "@/stores/useSseStore";
-import { fsApi } from "@/api/client";
+import { useThreadStore } from "@/stores/useThreadStore";
+import { fsApi, threadsApi } from "@/api/client";
 import { resolveDisplayNames } from "@/components/ChatHeader";
 import { MessageBubble, StreamingBubble } from "@/components/MessageBubble";
 import { ProcessingBubble } from "@/components/ProcessingBlock";
@@ -124,6 +125,10 @@ export function MobileChatView({
 }: MobileChatViewProps) {
   const [inputValue, setInputValue] = useState("");
   const [configSheetOpen, setConfigSheetOpen] = useState(false);
+  const [titleEditing, setTitleEditing] = useState(false);
+  const [titleEditValue, setTitleEditValue] = useState("");
+  const [titleSaving, setTitleSaving] = useState(false);
+  const titleInputRef = useRef<HTMLInputElement>(null);
   const [keyboardOffset, setKeyboardOffset] = useState(0);
   const [explorerOpen, setExplorerOpen] = useState(false);
   const [explorerPath, setExplorerPath] = useState("");
@@ -340,6 +345,44 @@ export function MobileChatView({
     [growTextarea],
   );
 
+  const startTitleEdit = useCallback(() => {
+    if (!thread) return;
+    setTitleEditValue(thread.title);
+    setTitleEditing(true);
+  }, [thread]);
+
+  const cancelTitleEdit = useCallback(() => {
+    setTitleEditing(false);
+    setTitleEditValue("");
+  }, []);
+
+  const commitTitleEdit = useCallback(async () => {
+    if (!thread || !titleEditing) return;
+    const trimmed = titleEditValue.trim();
+    if (!trimmed || trimmed === thread.title) {
+      cancelTitleEdit();
+      return;
+    }
+    setTitleSaving(true);
+    try {
+      const res = await threadsApi.update(thread.id, { title: trimmed });
+      useThreadStore.getState().upsertThread(res.data);
+    } catch {
+      // revert silently — thread title from store will re-render on next update
+    } finally {
+      setTitleSaving(false);
+      setTitleEditing(false);
+      setTitleEditValue("");
+    }
+  }, [thread, titleEditing, titleEditValue, cancelTitleEdit]);
+
+  useEffect(() => {
+    if (titleEditing && titleInputRef.current) {
+      titleInputRef.current.focus();
+      titleInputRef.current.select();
+    }
+  }, [titleEditing]);
+
   const handleOpenExplorer = useCallback(async () => {
     if (!threadId) return;
     try {
@@ -397,7 +440,34 @@ export function MobileChatView({
             {personaEmoji}
           </div>
           <div className={styles.agentText}>
-            <div className={styles.agentName}>{thread.title}</div>
+            {titleEditing ? (
+              <input
+                ref={titleInputRef}
+                className={styles.agentNameInput}
+                value={titleEditValue}
+                disabled={titleSaving}
+                onChange={(e) => setTitleEditValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void commitTitleEdit();
+                  if (e.key === "Escape") cancelTitleEdit();
+                }}
+                onBlur={() => void commitTitleEdit()}
+                aria-label="Edit thread title"
+              />
+            ) : (
+              <div
+                className={styles.agentName}
+                onClick={startTitleEdit}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") startTitleEdit();
+                }}
+                title="Tap to rename"
+              >
+                {thread.title}
+              </div>
+            )}
             <div className={styles.agentStatus}>
               <span>{subtitleText}</span>
             </div>
@@ -600,6 +670,10 @@ export function MobileChatView({
         thread={thread}
         isOpen={configSheetOpen}
         onClose={() => setConfigSheetOpen(false)}
+        onArchive={() => {
+          setConfigSheetOpen(false);
+          onBack();
+        }}
       />
 
       <FileExplorerModal

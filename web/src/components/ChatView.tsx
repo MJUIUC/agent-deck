@@ -347,6 +347,9 @@ export function ChatView({
         onToggleConfig={isDraft ? undefined : () => setConfigOpen((o) => !o)}
         onMobileMenuOpen={onMobileMenuOpen}
         onOpenExplorer={handleOpenExplorer}
+        onTitleUpdate={(updated) =>
+          upsertThread({ ...updated, persona: thread.persona })
+        }
       />
 
       {/* ── Messages area ── */}

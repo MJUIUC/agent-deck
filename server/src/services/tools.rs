@@ -409,6 +409,162 @@ impl AgentTool for RecallConversationTool {
     }
 }
 
+// ─── TailscaleStatusTool ──────────────────────────────────────────────────────
+
+pub struct TailscaleStatusTool;
+
+#[async_trait]
+impl AgentTool for TailscaleStatusTool {
+    fn name(&self) -> &str {
+        "tailscale_status"
+    }
+
+    fn description(&self) -> &str {
+        "Check the current Tailscale VPN and Funnel status for this agent-deck server. \
+         Returns whether Tailscale is installed, connected, the device hostname, IP address, \
+         version, and whether Funnel (public HTTPS access) is enabled. Use this when the user \
+         asks about remote access, webhook configuration, or Tailscale connectivity."
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {},
+            "required": []
+        })
+    }
+
+    async fn run(&self, _args: Value, _context: &ToolContext<'_>) -> Result<String> {
+        let status = crate::services::tailscale::get_status(7474).await;
+
+        let installed_str = if status.installed { "yes" } else { "no" };
+        let connected_str = if status.connected { "yes" } else { "no" };
+        let hostname_str = status.hostname.as_deref().unwrap_or("unknown");
+        let ip_str = status.ip_address.as_deref().unwrap_or("unknown");
+        let version_str = status.version.as_deref().unwrap_or("unknown");
+
+        let funnel_str = if status.funnel_enabled {
+            format!(
+                "enabled — {}",
+                status.funnel_url.as_deref().unwrap_or("URL unknown")
+            )
+        } else {
+            "not enabled".to_string()
+        };
+
+        let mut lines = vec![
+            "Tailscale status:".to_string(),
+            format!("- Installed: {}", installed_str),
+            format!("- Connected: {}", connected_str),
+            format!("- Hostname: {}", hostname_str),
+            format!("- IP: {}", ip_str),
+            format!("- Version: {}", version_str),
+            format!("- Funnel: {}", funnel_str),
+        ];
+
+        if status.funnel_enabled {
+            if let Some(ref hostname) = status.hostname {
+                lines.push(format!(
+                    "- Webhook address: https://{}/api/webhooks",
+                    hostname
+                ));
+            }
+        }
+
+        Ok(lines.join("\n"))
+    }
+}
+
+// ─── SetMcpTimeout ──────────────────────────────────────────────────────────
+
+pub struct SetMcpTimeoutTool;
+
+#[async_trait]
+impl AgentTool for SetMcpTimeoutTool {
+    fn name(&self) -> &str {
+        "set_mcp_timeout"
+    }
+
+    fn description(&self) -> &str {
+        "Adjust the per-thread timeout (in seconds) for tool calls made to a specific MCP \
+         server. Use this when a tool is timing out and needs more time, or when you want \
+         to impose a tighter limit. Pass null to remove the timeout override and fall back \
+         to the server default."
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "server_tag": {
+                    "type": "string",
+                    "description": "The tag identifier of the MCP server (e.g. 'github', 'filesystem')"
+                },
+                "timeout_secs": {
+                    "description": "Timeout in seconds (integer ≥ 1), or null to clear the override.",
+                    "oneOf": [
+                        { "type": "integer", "minimum": 1 },
+                        { "type": "null" }
+                    ]
+                }
+            },
+            "required": ["server_tag", "timeout_secs"]
+        })
+    }
+
+    async fn run(&self, args: Value, context: &ToolContext<'_>) -> Result<String> {
+        let tag = match args["server_tag"].as_str() {
+            Some(t) => t,
+            None => {
+                return Err(anyhow::anyhow!(
+                    "server_tag is required and must be a string"
+                ))
+            }
+        };
+
+        let timeout_secs: Option<i64> = match &args["timeout_secs"] {
+            Value::Null => None,
+            Value::Number(n) => Some(
+                n.as_i64()
+                    .ok_or_else(|| anyhow::anyhow!("timeout_secs must be a whole number"))?,
+            ),
+            _ => return Err(anyhow::anyhow!("timeout_secs must be an integer or null")),
+        };
+
+        let result = sqlx::query(
+            "UPDATE thread_mcp_servers
+             SET tool_call_timeout_secs = ?
+             WHERE thread_id = ?
+               AND mcp_server_id IN (SELECT id FROM mcp_servers WHERE tag = ?)",
+        )
+        .bind(timeout_secs)
+        .bind(context.thread_id)
+        .bind(tag)
+        .execute(context.pool)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            return Ok(format!(
+                "No MCP server with tag '{}' is attached to this thread. \
+                 Check the tag name and make sure the server is attached.",
+                tag
+            ));
+        }
+
+        Ok(match timeout_secs {
+            Some(secs) => format!(
+                "Timeout for MCP server '{}' set to {}s on this thread.",
+                tag, secs
+            ),
+            None => format!(
+                "Timeout override for MCP server '{}' cleared. \
+                 The server's default timeout will now apply.",
+                tag
+            ),
+        })
+    }
+}
+
 // ─── Registry factory ─────────────────────────────────────────────────────────
 
 /// Construct the list of all statically-registered built-in tools.
@@ -421,6 +577,8 @@ pub fn built_in_tools() -> Vec<Arc<dyn AgentTool>> {
         Arc::new(RecallMemoryTool),
         Arc::new(DeleteMemoryTool),
         Arc::new(RecallConversationTool),
+        Arc::new(TailscaleStatusTool),
+        Arc::new(SetMcpTimeoutTool),
     ]
 }
 
@@ -455,7 +613,10 @@ mod tests {
         assert!(found.is_some(), "delete_memory must be in the registry");
 
         let found = tools.iter().find(|t| t.name() == "recall_conversation");
-        assert!(found.is_some(), "recall_conversation must be in the registry");
+        assert!(
+            found.is_some(),
+            "recall_conversation must be in the registry"
+        );
 
         let not_found = tools.iter().find(|t| t.name() == "nonexistent_tool");
         assert!(not_found.is_none());

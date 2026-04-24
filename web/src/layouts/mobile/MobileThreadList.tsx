@@ -1,6 +1,8 @@
+import { useState, useEffect } from "react";
 import { useThreadStore } from "@/stores/useThreadStore";
 import { formatThreadTime } from "@/hooks/useTimeFormat";
 import type { Thread } from "@/types";
+
 import styles from "./MobileThreadList.module.css";
 
 interface MobileThreadListProps {

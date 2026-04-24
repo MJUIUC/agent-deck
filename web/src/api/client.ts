@@ -14,6 +14,8 @@ import type {
   UserProfile,
   FsEntry,
   FsFileContent,
+  TailscaleStatus,
+  ThreadMcpServer,
 } from "@/types";
 
 // ── Credential types ──────────────────────────────────────────────────────────
@@ -196,6 +198,7 @@ export const threadsApi = {
       system_prompt_addendum?: string;
       show_system_events?: boolean;
       auto_summarize?: boolean;
+      auto_retitle?: boolean;
     },
   ): Promise<{ data: Thread }> {
     return apiFetch(`/api/threads/${id}`, {
@@ -240,31 +243,31 @@ export const threadsApi = {
     return apiFetch(`/api/threads/${id}/unarchive`, { method: "POST" });
   },
 
-  listMcpServers(threadId: string): Promise<{
-    data: Array<{
-      id: string;
-      thread_id: string;
-      mcp_server_id: string;
-      enabled: boolean;
-    }>;
-  }> {
+  listMcpServers(threadId: string): Promise<{ data: ThreadMcpServer[] }> {
     return apiFetch(`/api/threads/${threadId}/mcp-servers`);
   },
 
   attachMcpServer(
     threadId: string,
     mcpServerId: string,
-  ): Promise<{
-    data: {
-      id: string;
-      thread_id: string;
-      mcp_server_id: string;
-      enabled: boolean;
-    };
-  }> {
+  ): Promise<{ data: ThreadMcpServer }> {
     return apiFetch(`/api/threads/${threadId}/mcp-servers`, {
       method: "POST",
       body: JSON.stringify({ mcp_server_id: mcpServerId }),
+    });
+  },
+
+  updateThreadMcpServer(
+    threadId: string,
+    mcpServerId: string,
+    payload: {
+      disabled_tools?: string[];
+      tool_call_timeout_secs?: number | null;
+    },
+  ): Promise<{ data: ThreadMcpServer }> {
+    return apiFetch(`/api/threads/${threadId}/mcp-servers/${mcpServerId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
     });
   },
 
@@ -459,6 +462,8 @@ export const mcpServersApi = {
     source_url?: string;
     server_type: "local" | "remote";
     config: McpServerConfig;
+    tool_call_timeout_secs?: number | null;
+    disabled_tools?: string[];
   }): Promise<{ data: McpServer }> {
     return apiFetch("/api/mcp-servers", {
       method: "POST",
@@ -474,6 +479,8 @@ export const mcpServersApi = {
       source_url?: string;
       config?: McpServerConfig;
       enabled?: boolean;
+      tool_call_timeout_secs?: number | null;
+      disabled_tools?: string[];
     },
   ): Promise<{ data: McpServer }> {
     return apiFetch(`/api/mcp-servers/${id}`, {
@@ -489,6 +496,10 @@ export const mcpServersApi = {
   listTools(id: string): Promise<{ data: McpTool[] }> {
     return apiFetch(`/api/mcp-servers/${id}/tools`);
   },
+
+  restart(id: string): Promise<{ data: { restarted: boolean } }> {
+    return apiFetch(`/api/mcp-servers/${id}/restart`, { method: "POST" });
+  },
 };
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
@@ -501,7 +512,13 @@ export const authApi = {
   },
 
   getConfig(): Promise<{
-    data: { setup_complete: boolean; port: number; version: string };
+    data: {
+      setup_complete: boolean;
+      port: number;
+      version: string;
+      database_path: string;
+      system_timezone: string;
+    };
   }> {
     return apiFetch("/api/config");
   },
@@ -724,4 +741,116 @@ export const fsApi = {
   downloadUrl(path: string): string {
     return `/api/fs/download?path=${encodeURIComponent(path)}`;
   },
+};
+
+export const tailscaleApi = {
+  getStatus: (): Promise<{ data: TailscaleStatus }> =>
+    apiFetch("/api/tailscale/status"),
+  connect: (): Promise<{ data: TailscaleStatus }> =>
+    apiFetch("/api/tailscale/connect", { method: "POST" }),
+  enableFunnel: (): Promise<{ data: TailscaleStatus }> =>
+    apiFetch("/api/tailscale/funnel/enable", { method: "POST" }),
+  disableFunnel: (): Promise<{ data: TailscaleStatus }> =>
+    apiFetch("/api/tailscale/funnel/disable", { method: "POST" }),
+  startServe: (): Promise<{ data: TailscaleStatus }> =>
+    apiFetch("/api/tailscale/serve", { method: "POST" }),
+};
+
+// ── Webhook Bindings ──────────────────────────────────────────────────────────
+
+export interface WebhookBinding {
+  id: string;
+  name: string;
+  source: string;
+  signature_header?: string | null;
+  prompt: string;
+  enabled: boolean;
+  created_at: string;
+  // only on create response:
+  webhook_url?: string;
+  secret?: string;
+}
+
+export interface ThreadWebhookBinding {
+  id: string; // attachment id
+  webhook_binding_id: string;
+  name: string;
+  source: string;
+  enabled: boolean; // from global binding
+  prompt?: string | null;
+  created_at: string;
+}
+
+export const webhookBindingsApi = {
+  list: () => apiFetch<{ data: WebhookBinding[] }>("/api/webhook-bindings"),
+
+  create: (payload: {
+    name: string;
+    source: string;
+    signature_header?: string;
+    prompt: string;
+  }) =>
+    apiFetch<{
+      data: WebhookBinding & { webhook_url: string; secret: string };
+      warning?: string;
+    }>("/api/webhook-bindings", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  update: (
+    id: string,
+    payload: {
+      name?: string;
+      prompt?: string;
+      signature_header?: string;
+      enabled?: boolean;
+    },
+  ) =>
+    apiFetch<{ data: WebhookBinding }>(`/api/webhook-bindings/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+
+  delete: (id: string) =>
+    apiFetch<{ data: { deleted: boolean } }>(`/api/webhook-bindings/${id}`, {
+      method: "DELETE",
+    }),
+
+  toggle: (id: string) =>
+    apiFetch<{ data: WebhookBinding }>(`/api/webhook-bindings/${id}/toggle`, {
+      method: "PATCH",
+    }),
+};
+
+export const threadWebhookBindingsApi = {
+  list: (threadId: string) =>
+    apiFetch<{ data: ThreadWebhookBinding[] }>(
+      `/api/threads/${threadId}/webhook-bindings`,
+    ),
+
+  attach: (threadId: string, webhookBindingId: string, prompt?: string) =>
+    apiFetch<{ data: ThreadWebhookBinding }>(
+      `/api/threads/${threadId}/webhook-bindings`,
+      {
+        method: "POST",
+        body: JSON.stringify({ webhook_binding_id: webhookBindingId, prompt }),
+      },
+    ),
+
+  detach: (threadId: string, attachmentId: string) =>
+    apiFetch<{ data: { detached: boolean } }>(
+      `/api/threads/${threadId}/webhook-bindings/${attachmentId}`,
+      { method: "DELETE" },
+    ),
+
+  updatePrompt: (
+    threadId: string,
+    attachmentId: string,
+    prompt: string | null,
+  ) =>
+    apiFetch<{ data: ThreadWebhookBinding }>(
+      `/api/threads/${threadId}/webhook-bindings/${attachmentId}`,
+      { method: "PATCH", body: JSON.stringify({ prompt }) },
+    ),
 };

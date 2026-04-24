@@ -363,9 +363,12 @@ mod tests {
 
         let config = crate::config::Config {
             port: 7474,
+            process_dir: std::path::PathBuf::from("/tmp/test-deck/.process"),
             data_dir: std::path::PathBuf::from("/tmp/test-deck"),
             mcp_dir: std::path::PathBuf::from("/tmp/test-deck/mcp"),
             personas_dir: std::path::PathBuf::from("/tmp/test-deck/personas"),
+            workspaces_dir: std::path::PathBuf::from("/tmp/test-deck/workspaces"),
+            skills_dir: std::path::PathBuf::from("/tmp/test-deck/skills"),
             database_url: "sqlite::memory:".to_string(),
             public_dir: "./public".to_string(),
             fcm_service_account_json: None,

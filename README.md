@@ -1,211 +1,155 @@
 # agent-deck
 
-A self-hosted, highly configurable personal AI agent platform. Runs on a Mac mini, accessible privately over Tailscale, with a browser UI and Android mobile app.
+A self-hosted AI agent platform that runs on your own hardware. Talk to multiple AI personas, give them persistent memory, connect them to MCP servers and external tools, and access everything privately from any device over Tailscale.
 
 ---
 
-## What it is
+## Install
 
-Agent-Deck lets you run your own AI assistant on hardware you own. Everything stays local — conversations, memories, API keys — with no third-party platform in the loop. You configure it once and use it from any device on your Tailscale network.
-
-**Core features:**
-- Multiple agent personas with distinct personalities and system prompts
-- Persistent memory per persona (cross-thread, searchable)
-- Scheduled routines (cron-based prompts that run automatically)
-- MCP server integration
-- Android mobile app with push notifications
-- GitHub Copilot support via `copilot-api` proxy
-
----
-
-## Requirements
-
-- **Rust** (latest stable via `rustup`)
-- **Node.js** 24+ (also provides `npm` — required to build and run `copilot-api`)
-- **SQLx CLI**: `cargo install sqlx-cli --features sqlite`
-- **Android Studio** + JDK 17 + Android SDK (only for mobile app)
-
----
-
-## Quick start
-
-### 1. Clone and set up the server
+> Requires macOS or Linux with internet access. Everything else is installed automatically.
 
 ```bash
-git clone <repo-url> agent-deck
-cd agent-deck
-
-# Set up the server environment
-cd server
-cp .env.example .env
-# Edit .env if you want to change PORT or DATABASE_URL
-
-# Create the database and run migrations
-sqlx database create
-sqlx migrate run
-
-# Start the server
-cargo run
+curl -fsSL https://github.com/MJUIUC/agent-deck/archive/refs/heads/main.tar.gz | tar xz && cd agent-deck-main && ./install.sh
 ```
 
-The server starts on port **7474**. On first run it:
-1. Creates the SQLite database at `./data/agent-deck.db`
-2. Generates a random 64-character auth token and prints it to the terminal
-3. Serves the placeholder UI at `http://localhost:7474`
+The installer will:
 
-The auth token is required to access the API from any non-localhost device. Copy it from the terminal output.
+1. Install **Homebrew** — macOS only (if absent)
+2. Install **Rust** via rustup (if absent)
+3. Install **nvm** and **Node 24** via `.nvmrc` (if absent)
+4. Install **Tailscale** via Homebrew on macOS, or the official install script on Linux (if absent)
+5. Build the Rust server and React frontend from source
+6. Deploy everything to `~/.agent-deck/`
+7. Start the server and print your auth token
 
----
+Once installed, open **http://localhost:7474**.
 
-### 2. Build the web UI
+> This downloads the source and builds locally — the same as `git clone`, just without needing `git`. On modern multi-core hardware the compile takes about a minute; older or single-core machines may take longer. Pre-built binary releases (no build step) are planned once a CI release pipeline is in place.
 
-In a separate terminal:
+### Build from source
+
+If you already have `git`:
 
 ```bash
-cd web
-npm install
-npm run dev       # dev server at http://localhost:5173, proxies /api to :7474
-# or
-npm run build     # production build → server/public/ (served by Rust server)
+git clone git@github.com:MJUIUC/agent-deck.git && cd agent-deck && ./install.sh
 ```
 
 ---
 
-### 3. Set up the mobile app (optional)
+## CLI
 
-```bash
-cd mobile/BotRelayApp
-npm install
-npx react-native run-android
+The installer registers an `agent-deck` command in your shell:
+
 ```
-
-Pair the mobile app with your server by scanning the QR code from the mobile pairing screen in Settings.
+agent-deck start    Start the server
+agent-deck stop     Stop the server
+agent-deck status   Show server and Tailscale status
+agent-deck logs     Tail the server log
+agent-deck open     Open in the default browser
+```
 
 ---
 
-### 4. Set up copilot-api (optional — only needed for GitHub Copilot)
+## Data directory
 
-```bash
-git submodule update --init --recursive
+Everything lives under `~/.agent-deck/`:
+
+```
+~/.agent-deck/
+  mcp/          MCP server configs and local binaries
+  personas/     Persona avatars and assets
+  skills/       Skill definitions
+  workspaces/   Per-thread file workspaces
+  .process/     Internal runtime files (binary, database, logs, assets)
 ```
 
-The Rust server manages the `copilot-api` process automatically — no manual build step required. On first startup it will:
+The four top-level directories are the ones you'll interact with directly. `.process/` is managed by the installer and server — you shouldn't need to touch it.
 
-1. Run `npm install` inside `vendor/copilot-api/` to install dependencies
-2. Run `./node_modules/.bin/tsdown` to bundle the TypeScript source into `dist/main.js`
-3. Spawn `node dist/main.js start` and keep it supervised
+---
 
-Configure a Copilot provider in Settings to trigger the GitHub device auth flow.
+## What it does
 
-> **Note:** Node.js 24+ must be on your PATH (or installed via nvm). No other runtime is required.
+### Personas
+Create multiple AI personas, each with its own name, emoji, system prompt, and model assignment. Personas have independent memory — what one persona knows doesn't bleed into another.
+
+### Persistent memory
+Each persona has a searchable memory store (SQLite FTS5). The agent can call `save_memory` and `recall_memory` tools automatically during conversation. Memory persists across threads.
+
+### MCP servers
+Connect any [Model Context Protocol](https://modelcontextprotocol.io) server — local (child processes via stdio) or remote (HTTP/SSE). Tools are namespaced per server and injected into the agent's tool list automatically.
+
+### Scheduled routines
+Attach cron-based routines to threads. At the scheduled time the agent runs autonomously, executes tool calls, and saves results as messages. Useful for daily summaries, monitoring, or recurring tasks.
+
+### Providers
+Connect any OpenAI-compatible LLM provider. Multiple providers can be configured simultaneously and assigned to individual personas. GitHub Copilot is supported via a bundled `copilot-api` sidecar.
+
+### Workspaces
+Each thread gets an isolated filesystem workspace at `~/.agent-deck/workspaces/<thread-id>/`. The agent can read and write files there, and you can browse the workspace from the file explorer in the UI.
+
+### Credentials store
+API keys and secrets are stored encrypted at rest (AES-256-GCM) and decrypted only when needed by the MCP connection manager. They are never written to disk in plaintext.
+
+### Tailscale access
+Connect over your private Tailscale network to access agent-deck from any device — phone, tablet, or another computer. Enable Tailscale Funnel to expose a public HTTPS endpoint for incoming webhooks.
 
 ---
 
 ## Authentication
 
-**Localhost:** The browser on the same machine as the server never needs a token. Auth is bypassed for `127.0.0.1` and `::1`.
+**Localhost (127.0.0.1 / ::1):** Auth is bypassed entirely. The browser on the same machine as the server never needs a token.
 
-**Remote devices (Tailscale):** On first visit from a remote browser, a token entry screen is shown. Paste the token printed to the server terminal. Once entered, it's stored as an `httpOnly` cookie — you won't need to re-enter it.
+**Remote devices:** On first visit from a remote browser, a token entry screen is shown. The token is printed to the server terminal on startup (and visible in `agent-deck logs`). Once entered it's stored as an `httpOnly` session cookie — you won't need to re-enter it per browser.
 
-**Mobile app:** Pairing is done via QR code in Settings → Mobile Pairing. The app stores the token in MMKV and sends it as a `Bearer` header on every request.
-
----
-
-## Project structure
-
-```
-agent-deck/
-├── server/          # Rust server (Axum + SQLite)
-│   ├── src/
-│   │   ├── main.rs
-│   │   ├── config.rs
-│   │   ├── db/
-│   │   │   └── migrations/
-│   │   ├── routes/
-│   │   ├── services/
-│   │   ├── models/
-│   │   └── error.rs
-│   ├── public/      # React SPA build output (gitignored except placeholder)
-│   └── .env.example
-├── web/             # React SPA (Vite + TypeScript + Tailwind)
-├── mobile/          # React Native Android app
-│   └── BotRelayApp/
-├── vendor/
-│   └── copilot-api/ # Git submodule
-├── mockups/         # Static HTML mockups (visual reference)
-└── PLAN.md          # Full project specification
-```
+To rotate the token: **Settings → Auth Token → Rotate**.
 
 ---
 
-## API
+## Updating
 
-All endpoints are under `/api`. See `PLAN.md` §6 for the full API contract.
-
-Quick reference:
-
-| Endpoint | Description |
-|---|---|
-| `GET /health` | Health check (public) |
-| `GET /api/setup/status` | First-run setup status (public) |
-| `POST /api/auth/token` | Exchange token for session cookie |
-| `GET /api/providers` | List model providers |
-| `GET /api/personas` | List agent personas |
-| `GET /api/threads` | List chat threads |
-| `POST /api/threads/:id/messages` | Send a message |
-| `GET /api/threads/:id/stream` | SSE stream for LLM token streaming |
-| `GET /api/events` | Global SSE event stream |
-
----
-
-## Development
-
-### Running tests
+Pull the latest code and re-run the installer:
 
 ```bash
-# All tests
-cargo test
-
-# With output
-cargo test -- --nocapture
+cd agent-deck && git pull && ./install.sh
 ```
 
-### SQLx offline mode
+The installer stops any running instance, rebuilds, redeploys, and restarts.
 
-SQLx checks queries at compile time against a live database. If you're building without a running DB (e.g. CI):
+---
 
-```bash
-# After any schema change, regenerate the query metadata:
-cargo sqlx prepare
-
-# Then commit the .sqlx/ directory.
-# In CI, set:
-SQLX_OFFLINE=true cargo build
-```
-
-### Environment variables
+## Environment variables
 
 | Variable | Default | Description |
 |---|---|---|
-| `PORT` | `7474` | Server listen port |
-| `DATABASE_URL` | `sqlite:./data/agent-deck.db` | SQLite database path |
-| `RUST_LOG` | `info` | Log level |
-| `FCM_SERVICE_ACCOUNT_JSON` | *(unset)* | Firebase service account for push notifications |
-| `PUBLIC_DIR` | `./public` | Directory to serve the React SPA from |
+| `AGENT_DECK_HOME` | `~/.agent-deck` | Root data and install directory |
+| `AGENT_DECK_PORT` | `7474` | Server listen port |
+| `FCM_SERVICE_ACCOUNT_JSON` | *(unset)* | Firebase service account path for push notifications |
+| `RUST_LOG` | `info` | Log level (`info`, `debug`, `trace`) |
 
 ---
 
-## Phased implementation
+## Architecture
 
-The project is built in phases. See `PLAN.md` §10 for the full execution plan.
+The server is a single Rust binary (Axum + SQLite) that serves the React SPA, runs the agent loop, manages MCP connections, and handles all API routes. There are no external services required — just the binary and a SQLite database.
 
-| Phase | Status | Description |
-|---|---|---|
-| 1 — Skeleton | ✅ Complete | Rust server, SQLite schema, React SPA shell, auth, all CRUD |
-| 2 — First Chat | ✅ Complete | Agent run-loop, LLM streaming via SSE, chat UI |
-| 3 — Config UI | ⏳ Pending | Setup wizard, provider/persona/thread management UI |
-| 4 — Memory & Routines | ⏳ Pending | Persistent memory, cron scheduler |
-| 5 — Mobile App | ⏳ Pending | React Native screens |
-| 6 — Push Notifications | ⏳ Pending | FCM integration |
-| 7 — MCP Depth | ⏳ Pending | Tool inspector, local process management |
-| 8 — Polish | ⏳ Pending | Error handling, empty states, hardening |
+```
+Rust server :7474
+├── Axum HTTP + SSE
+├── Agent run-loop (streaming, tool calls, cancellation)
+├── Cron scheduler
+├── MCP connection manager (local stdio + remote HTTP/SSE)
+├── Provider abstraction (OpenAI-compatible + Copilot)
+├── Credential store (AES-256-GCM)
+└── Static file server → React SPA
+
+copilot-api sidecar :4141   (spawned automatically, only if Copilot is configured)
+SQLite (WAL mode)            ~/.agent-deck/.process/.database/agent-deck.db
+```
+
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for sequence diagrams and deeper detail.
+
+---
+
+## License
+
+Private. All rights reserved.

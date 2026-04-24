@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use tracing::{debug, error};
+
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -14,7 +16,9 @@ use crate::services::scheduler::SchedulerCommand;
 
 use crate::{
     error::{AppError, AppResult},
-    models::thread::{AttachMcpServer, CreateThread, Thread, ThreadMcpServer, UpdateThread},
+    models::thread::{
+        AttachMcpServer, CreateThread, Thread, ThreadMcpServer, UpdateThread, UpdateThreadMcpServer,
+    },
     routes::AppState,
 };
 
@@ -49,19 +53,14 @@ pub async fn list(
         )));
     }
 
-    let threads: Vec<Thread> = sqlx::query_as(
-        "SELECT id, user_id, persona_id, title, active_model, active_provider,
-                system_prompt_addendum, status, show_tool_activity, show_system_events,
-                summary, summary_updated_at, summary_message_count, auto_summarize,
-                created_at, updated_at
-         FROM threads
-         WHERE user_id = ? AND status = ?
-         ORDER BY updated_at DESC",
-    )
-    .bind(&user_id)
-    .bind(status)
-    .fetch_all(&state.pool)
-    .await?;
+    debug!(user_id = %user_id, status = %status, "list: fetching threads");
+    let threads: Vec<Thread> = crate::db::threads::list_by_user_and_status(&state.pool, &user_id, status)
+        .await
+        .map_err(|e| {
+            error!(user_id = %user_id, status = %status, error = ?e, error.display = %e, "list: failed to fetch threads");
+            e
+        })?;
+    debug!(user_id = %user_id, count = threads.len(), "list: fetched threads successfully");
 
     // Fetch the last visible message content for each thread in one query,
     // then merge into the response. Using a separate query with GROUP BY is
@@ -128,18 +127,13 @@ pub async fn get(
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
 
-    let thread: Option<Thread> = sqlx::query_as(
-        "SELECT id, user_id, persona_id, title, active_model, active_provider,
-                system_prompt_addendum, status, show_tool_activity, show_system_events,
-                summary, summary_updated_at, summary_message_count, auto_summarize,
-                created_at, updated_at
-         FROM threads
-         WHERE id = ? AND user_id = ?",
-    )
-    .bind(&id)
-    .bind(&user_id)
-    .fetch_optional(&state.pool)
-    .await?;
+    debug!(thread_id = %id, user_id = %user_id, "get: fetching thread");
+    let thread: Option<Thread> = crate::db::threads::fetch_by_id_and_user(&state.pool, &id, &user_id)
+        .await
+        .map_err(|e| {
+            error!(thread_id = %id, user_id = %user_id, error = ?e, error.display = %e, "get: failed to fetch thread");
+            e
+        })?;
 
     match thread {
         Some(t) => Ok((StatusCode::OK, Json(json!({ "data": t })))),
@@ -197,8 +191,8 @@ pub async fn create(
              (id, user_id, persona_id, title, active_model, active_provider,
               system_prompt_addendum, status, show_tool_activity, show_system_events,
               summary, summary_updated_at, summary_message_count, auto_summarize,
-              created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+              auto_retitle, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&thread.id)
     .bind(&thread.user_id)
@@ -214,6 +208,7 @@ pub async fn create(
     .bind(&thread.summary_updated_at)
     .bind(thread.summary_message_count)
     .bind(thread.auto_summarize)
+    .bind(thread.auto_retitle)
     .bind(&thread.created_at)
     .bind(&thread.updated_at)
     .execute(&state.pool)
@@ -254,18 +249,13 @@ pub async fn update(
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
 
-    let existing: Option<Thread> = sqlx::query_as(
-        "SELECT id, user_id, persona_id, title, active_model, active_provider,
-                system_prompt_addendum, status, show_tool_activity, show_system_events,
-                summary, summary_updated_at, summary_message_count, auto_summarize,
-                created_at, updated_at
-         FROM threads
-         WHERE id = ? AND user_id = ?",
-    )
-    .bind(&id)
-    .bind(&user_id)
-    .fetch_optional(&state.pool)
-    .await?;
+    debug!(thread_id = %id, user_id = %user_id, "update: fetching existing thread");
+    let existing: Option<Thread> = crate::db::threads::fetch_by_id_and_user(&state.pool, &id, &user_id)
+        .await
+        .map_err(|e| {
+            error!(thread_id = %id, user_id = %user_id, error = ?e, error.display = %e, "update: failed to fetch existing thread");
+            e
+        })?;
 
     let existing = match existing {
         Some(t) => t,
@@ -298,6 +288,7 @@ pub async fn update(
         .unwrap_or(existing.show_system_events);
 
     let auto_summarize = payload.auto_summarize.unwrap_or(existing.auto_summarize);
+    let auto_retitle = payload.auto_retitle.unwrap_or(existing.auto_retitle);
 
     let now = chrono::Utc::now()
         .format("%Y-%m-%dT%H:%M:%S%.3fZ")
@@ -307,7 +298,7 @@ pub async fn update(
         "UPDATE threads
          SET title = ?, active_model = ?, active_provider = ?,
              system_prompt_addendum = ?, show_tool_activity = ?,
-             show_system_events = ?, auto_summarize = ?, updated_at = ?
+             show_system_events = ?, auto_summarize = ?, auto_retitle = ?, updated_at = ?
          WHERE id = ? AND user_id = ?",
     )
     .bind(title)
@@ -317,6 +308,7 @@ pub async fn update(
     .bind(show_tool_activity)
     .bind(show_system_events)
     .bind(auto_summarize)
+    .bind(auto_retitle)
     .bind(&now)
     .bind(&id)
     .bind(&user_id)
@@ -338,6 +330,7 @@ pub async fn update(
         summary_updated_at: existing.summary_updated_at,
         summary_message_count: existing.summary_message_count,
         auto_summarize,
+        auto_retitle,
         created_at: existing.created_at,
         updated_at: now,
     };
@@ -485,7 +478,7 @@ pub async fn list_mcp_servers(
     let _thread = verify_thread_ownership(&state, &thread_id, &user_id).await?;
 
     let servers: Vec<ThreadMcpServer> = sqlx::query_as(
-        "SELECT id, thread_id, mcp_server_id, enabled
+        "SELECT id, thread_id, mcp_server_id, enabled, disabled_tools, tool_call_timeout_secs
          FROM thread_mcp_servers
          WHERE thread_id = ?",
     )
@@ -523,17 +516,84 @@ pub async fn attach_mcp(
     let entry = ThreadMcpServer::new(&thread_id, &payload.mcp_server_id);
 
     sqlx::query(
-        "INSERT OR IGNORE INTO thread_mcp_servers (id, thread_id, mcp_server_id, enabled)
-         VALUES (?, ?, ?, ?)",
+        "INSERT OR IGNORE INTO thread_mcp_servers (id, thread_id, mcp_server_id, enabled, disabled_tools, tool_call_timeout_secs)
+         VALUES (?, ?, ?, ?, ?, ?)",
     )
     .bind(&entry.id)
     .bind(&entry.thread_id)
     .bind(&entry.mcp_server_id)
     .bind(entry.enabled)
+    .bind(&entry.disabled_tools)
+    .bind(entry.tool_call_timeout_secs)
     .execute(&state.pool)
     .await?;
 
     Ok((StatusCode::CREATED, Json(json!({ "data": entry }))))
+}
+
+/// PATCH /api/threads/:id/mcp-servers/:mcp_id
+///
+/// Update per-thread settings for an attached MCP server.
+/// Accepts: { disabled_tools?: string[], tool_call_timeout_secs?: number | null }
+pub async fn update_thread_mcp(
+    State(state): State<Arc<AppState>>,
+    Path((thread_id, mcp_id)): Path<(String, String)>,
+    Json(payload): Json<UpdateThreadMcpServer>,
+) -> AppResult<impl IntoResponse> {
+    let user_id = get_user_id(&state).await?;
+    let _thread = verify_thread_ownership(&state, &thread_id, &user_id).await?;
+
+    // Fetch existing row
+    let existing: Option<ThreadMcpServer> = sqlx::query_as(
+        "SELECT id, thread_id, mcp_server_id, enabled, disabled_tools, tool_call_timeout_secs
+         FROM thread_mcp_servers
+         WHERE thread_id = ? AND mcp_server_id = ?",
+    )
+    .bind(&thread_id)
+    .bind(&mcp_id)
+    .fetch_optional(&state.pool)
+    .await?;
+
+    let existing = match existing {
+        Some(e) => e,
+        None => {
+            return Err(AppError::NotFound(format!(
+                "MCP server '{}' not attached to thread '{}'",
+                mcp_id, thread_id
+            )))
+        }
+    };
+
+    let new_disabled_tools = match &payload.disabled_tools {
+        None => existing.disabled_tools.clone(),
+        Some(v) => serde_json::to_string(v).unwrap_or_else(|_| "[]".to_string()),
+    };
+
+    let new_timeout: Option<i64> = match &payload.tool_call_timeout_secs {
+        None => existing.tool_call_timeout_secs,
+        Some(v) if v.is_null() => None,
+        Some(v) => v.as_i64(),
+    };
+
+    sqlx::query(
+        "UPDATE thread_mcp_servers
+         SET disabled_tools = ?, tool_call_timeout_secs = ?
+         WHERE thread_id = ? AND mcp_server_id = ?",
+    )
+    .bind(&new_disabled_tools)
+    .bind(new_timeout)
+    .bind(&thread_id)
+    .bind(&mcp_id)
+    .execute(&state.pool)
+    .await?;
+
+    let updated = ThreadMcpServer {
+        disabled_tools: new_disabled_tools,
+        tool_call_timeout_secs: new_timeout,
+        ..existing
+    };
+
+    Ok((StatusCode::OK, Json(json!({ "data": updated }))))
 }
 
 /// DELETE /api/threads/:id/mcp-servers/:mcp_id
@@ -570,18 +630,13 @@ async fn verify_thread_ownership(
     thread_id: &str,
     user_id: &str,
 ) -> AppResult<Thread> {
-    let thread: Option<Thread> = sqlx::query_as(
-        "SELECT id, user_id, persona_id, title, active_model, active_provider,
-                system_prompt_addendum, status, show_tool_activity, show_system_events,
-                summary, summary_updated_at, summary_message_count, auto_summarize,
-                created_at, updated_at
-         FROM threads
-         WHERE id = ? AND user_id = ?",
-    )
-    .bind(thread_id)
-    .bind(user_id)
-    .fetch_optional(&state.pool)
-    .await?;
+    debug!(thread_id = %thread_id, user_id = %user_id, "verify_thread_ownership: fetching thread");
+    let thread: Option<Thread> = crate::db::threads::fetch_by_id_and_user(&state.pool, thread_id, user_id)
+        .await
+        .map_err(|e| {
+            error!(thread_id = %thread_id, user_id = %user_id, error = ?e, error.display = %e, "verify_thread_ownership: failed to fetch thread");
+            e
+        })?;
 
     thread.ok_or_else(|| AppError::NotFound(format!("Thread '{}' not found", thread_id)))
 }

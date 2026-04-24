@@ -4,7 +4,15 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import cronstrue from "cronstrue";
-import type { Thread, Routine, Provider, Model, McpServer } from "@/types";
+import type {
+  Thread,
+  Routine,
+  Provider,
+  Model,
+  McpServer,
+  McpTool,
+  ThreadMcpServer,
+} from "@/types";
 import {
   routinesApi,
   providersApi,
@@ -23,19 +31,13 @@ interface ProviderWithModels {
   models: Model[];
 }
 
-interface ThreadMcpEntry {
-  id: string;
-  thread_id: string;
-  mcp_server_id: string;
-  enabled: boolean;
-}
-
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 interface MobileConfigSheetProps {
   thread: Thread;
   isOpen: boolean;
   onClose: () => void;
+  onArchive?: () => void;
 }
 
 // ─── Toggle sub-component ─────────────────────────────────────────────────────
@@ -185,6 +187,7 @@ export function MobileConfigSheet({
   thread,
   isOpen,
   onClose,
+  onArchive,
 }: MobileConfigSheetProps) {
   // ── Routines state ───────────────────────────────────────────────────────
   const [routines, setRoutines] = useState<Routine[]>([]);
@@ -201,12 +204,20 @@ export function MobileConfigSheet({
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
 
   // ── MCP state ─────────────────────────────────────────────────────────────
-  const [attachedEntries, setAttachedEntries] = useState<ThreadMcpEntry[]>([]);
+  const [attachedEntries, setAttachedEntries] = useState<ThreadMcpServer[]>([]);
+  const [expandedMcpId, setExpandedMcpId] = useState<string | null>(null);
+  const [mcpToolsCache, setMcpToolsCache] = useState<Record<string, McpTool[]>>(
+    {},
+  );
   const [mcpServersMap, setMcpServersMap] = useState<Record<string, McpServer>>(
     {},
   );
   const [mcpLoading, setMcpLoading] = useState(false);
   const [showMcpPicker, setShowMcpPicker] = useState(false);
+
+  // ── Archive state ─────────────────────────────────────────────────────────
+  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
+  const [isArchiving, setIsArchiving] = useState(false);
 
   // ── SSE ───────────────────────────────────────────────────────────────────
   const lastMcpStatusChange = useSseStore((s) => s.lastMcpStatusChange);
@@ -222,6 +233,9 @@ export function MobileConfigSheet({
   useEffect(() => {
     if (isOpen) {
       hasOpenedRef.current = true;
+    } else {
+      // Reset archive confirm state when sheet closes
+      setShowArchiveConfirm(false);
     }
   }, [isOpen]);
 
@@ -463,6 +477,21 @@ export function MobileConfigSheet({
     },
     [thread.id, mcpServersMap],
   );
+
+  // ── Archive handler ───────────────────────────────────────────────────────
+  const handleArchiveConfirm = useCallback(async () => {
+    setIsArchiving(true);
+    try {
+      await useThreadStore.getState().archiveThread(thread.id);
+      onClose();
+      onArchive?.();
+    } catch {
+      // Silent fail — store will not update, user can retry
+    } finally {
+      setIsArchiving(false);
+      setShowArchiveConfirm(false);
+    }
+  }, [thread.id, onClose, onArchive]);
 
   const handleAttachServer = useCallback(
     async (server: McpServer) => {
@@ -727,23 +756,159 @@ export function MobileConfigSheet({
                   const server = mcpServersMap[entry.mcp_server_id];
                   if (!server) return null;
                   return (
-                    <div key={entry.id} className={styles.toolRow}>
-                      <span
-                        className={cx(
-                          styles.mcpStatusDot,
-                          mcpStatusDotClass(server.status),
-                        )}
-                        aria-hidden="true"
-                      />
-                      <span className={styles.toolName}>{server.name}</span>
-                      <button
-                        type="button"
-                        className={styles.detachBtn}
-                        onClick={() => handleDetachServer(entry.mcp_server_id)}
-                        aria-label={`Detach ${server.name}`}
-                      >
-                        ✕
-                      </button>
+                    <div
+                      key={entry.id}
+                      className={cx(styles.toolRow, styles.toolRowExpanded)}
+                    >
+                      {/* Main row */}
+                      <div className={styles.toolRowInner}>
+                        <span
+                          className={cx(
+                            styles.mcpStatusDot,
+                            mcpStatusDotClass(server.status),
+                          )}
+                          aria-hidden="true"
+                        />
+                        <span className={styles.toolName}>{server.name}</span>
+                        <button
+                          type="button"
+                          className={styles.toolsExpandBtn}
+                          onClick={async () => {
+                            if (expandedMcpId === entry.mcp_server_id) {
+                              setExpandedMcpId(null);
+                            } else {
+                              setExpandedMcpId(entry.mcp_server_id);
+                              if (!mcpToolsCache[entry.mcp_server_id]) {
+                                try {
+                                  const res = await mcpServersApi.listTools(
+                                    entry.mcp_server_id,
+                                  );
+                                  setMcpToolsCache((prev) => ({
+                                    ...prev,
+                                    [entry.mcp_server_id]: res.data,
+                                  }));
+                                } catch {
+                                  setMcpToolsCache((prev) => ({
+                                    ...prev,
+                                    [entry.mcp_server_id]: [],
+                                  }));
+                                }
+                              }
+                            }
+                          }}
+                        >
+                          Tools{" "}
+                          {expandedMcpId === entry.mcp_server_id ? "▲" : "▼"}
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.detachBtn}
+                          onClick={() =>
+                            handleDetachServer(entry.mcp_server_id)
+                          }
+                          aria-label={`Detach ${server.name}`}
+                        >
+                          ✕
+                        </button>
+                      </div>
+
+                      {/* Tools accordion */}
+                      {expandedMcpId === entry.mcp_server_id && (
+                        <div className={styles.toolRowAccordion}>
+                          {/* Timeout */}
+                          <div className={styles.toolRowTimeoutRow}>
+                            <span className={styles.toolRowTimeoutLabel}>
+                              Timeout (s):
+                            </span>
+                            <input
+                              type="number"
+                              min="1"
+                              className={styles.toolRowTimeoutInput}
+                              value={entry.tool_call_timeout_secs ?? ""}
+                              placeholder="inherit"
+                              onChange={async (e) => {
+                                const val = e.target.value.trim();
+                                const timeout = val ? parseInt(val, 10) : null;
+                                try {
+                                  const { data: updated } =
+                                    await threadsApi.updateThreadMcpServer(
+                                      entry.thread_id,
+                                      entry.mcp_server_id,
+                                      { tool_call_timeout_secs: timeout },
+                                    );
+                                  setAttachedEntries((prev) =>
+                                    prev.map((e) =>
+                                      e.id === updated.id ? updated : e,
+                                    ),
+                                  );
+                                } catch {
+                                  /* silently degrade */
+                                }
+                              }}
+                            />
+                          </div>
+                          {/* Tool toggles */}
+                          {server.status !== "connected" &&
+                            !mcpToolsCache[entry.mcp_server_id] && (
+                              <span className={styles.toolRowEmpty}>
+                                Connect the server to load tools.
+                              </span>
+                            )}
+                          {(mcpToolsCache[entry.mcp_server_id] ?? []).map(
+                            (tool) => (
+                              <label
+                                key={tool.name}
+                                className={styles.toolToggleLabel}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={
+                                    !entry.disabled_tools.includes(tool.name)
+                                  }
+                                  onChange={async () => {
+                                    const isDisabled =
+                                      entry.disabled_tools.includes(tool.name);
+                                    const newList = isDisabled
+                                      ? entry.disabled_tools.filter(
+                                          (n) => n !== tool.name,
+                                        )
+                                      : [...entry.disabled_tools, tool.name];
+                                    try {
+                                      const { data: updated } =
+                                        await threadsApi.updateThreadMcpServer(
+                                          entry.thread_id,
+                                          entry.mcp_server_id,
+                                          { disabled_tools: newList },
+                                        );
+                                      setAttachedEntries((prev) =>
+                                        prev.map((e) =>
+                                          e.id === updated.id ? updated : e,
+                                        ),
+                                      );
+                                    } catch {
+                                      /* silently degrade */
+                                    }
+                                  }}
+                                />
+                                <span
+                                  className={cx(
+                                    styles.toolToggleName,
+                                    entry.disabled_tools.includes(tool.name) &&
+                                      styles.toolToggleNameDisabled,
+                                  )}
+                                >
+                                  {tool.name}
+                                </span>
+                              </label>
+                            ),
+                          )}
+                          {mcpToolsCache[entry.mcp_server_id]?.length === 0 && (
+                            <span className={styles.toolRowEmpty}>
+                              No tools reported.
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -816,6 +981,47 @@ export function MobileConfigSheet({
                   </div>
                 );
               })()}
+          </section>
+
+          {/* ── Archive ──────────────────────────────────────────────── */}
+          <section className={styles.section}>
+            {showArchiveConfirm ? (
+              <div className={styles.archiveConfirm}>
+                <p className={styles.archiveConfirmText}>
+                  Archive this thread?
+                </p>
+                <p className={styles.archiveConfirmHint}>
+                  It will be moved to Archived Threads in Settings and can be
+                  restored at any time.
+                </p>
+                <div className={styles.archiveConfirmActions}>
+                  <button
+                    type="button"
+                    className={styles.archiveCancelBtn}
+                    onClick={() => setShowArchiveConfirm(false)}
+                    disabled={isArchiving}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.archiveConfirmBtn}
+                    onClick={handleArchiveConfirm}
+                    disabled={isArchiving}
+                  >
+                    {isArchiving ? "Archiving…" : "Archive"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className={styles.archiveBtn}
+                onClick={() => setShowArchiveConfirm(true)}
+              >
+                Archive Thread
+              </button>
+            )}
           </section>
         </div>
         {/* /body */}

@@ -9,7 +9,9 @@ import type {
   Model,
   Routine,
   MemoryEntry,
+  ThreadMcpServer,
 } from "@/types";
+
 import {
   threadsApi,
   mcpServersApi,
@@ -17,19 +19,22 @@ import {
   modelsApi,
   routinesApi,
   memoriesApi,
+  profileApi,
+  webhookBindingsApi,
+  threadWebhookBindingsApi,
+  type WebhookBinding,
+  type ThreadWebhookBinding as ThreadWebhookBindingAPI,
 } from "@/api/client";
 import { X, ChevronRight, Settings } from "lucide-react";
 import styles from "./ConfigPane.module.css";
 import { CronPicker } from "./CronPicker";
 
-// ─── Sub-types ────────────────────────────────────────────────────────────────
+// ─── Local types ──────────────────────────────────────────────────────────────
 
-interface ThreadMcpEntry {
-  id: string;
-  thread_id: string;
-  mcp_server_id: string;
-  enabled: boolean;
-}
+// Re-alias the imported API types for local use
+type ThreadWebhookBinding = ThreadWebhookBindingAPI;
+
+// ─── Sub-types ────────────────────────────────────────────────────────────────
 
 interface ProviderWithModels {
   provider: Provider;
@@ -88,14 +93,18 @@ function TypeBadge({ type }: { type: McpServer["server_type"] }) {
 
 function McpServerCard({
   server,
+  entry,
   tools,
   onRemove,
   onLoadTools,
+  onEntryUpdate,
 }: {
   server: McpServer;
+  entry: ThreadMcpServer;
   tools: McpTool[] | null;
   onRemove: () => void;
   onLoadTools: () => void;
+  onEntryUpdate: (updated: ThreadMcpServer) => void;
 }) {
   const [toolsOpen, setToolsOpen] = useState(false);
   const [toolsLoading, setToolsLoading] = useState(false);
@@ -176,14 +185,71 @@ function McpServerCard({
               <span className={styles.mcpToolsEmpty}>No tools reported</span>
             ) : (
               tools.map((t) => (
-                <div key={t.name} className={styles.mcpToolItem}>
-                  <span className={styles.mcpToolName}>{t.name}</span>
+                <label key={t.name} className={styles.mcpToolItem}>
+                  <input
+                    type="checkbox"
+                    checked={!entry.disabled_tools.includes(t.name)}
+                    onChange={async () => {
+                      const isDisabled = entry.disabled_tools.includes(t.name);
+                      const newList = isDisabled
+                        ? entry.disabled_tools.filter((n) => n !== t.name)
+                        : [...entry.disabled_tools, t.name];
+                      try {
+                        const { data: updated } =
+                          await threadsApi.updateThreadMcpServer(
+                            entry.thread_id,
+                            entry.mcp_server_id,
+                            { disabled_tools: newList },
+                          );
+                        onEntryUpdate(updated);
+                      } catch {
+                        // silently degrade
+                      }
+                    }}
+                    className={styles.mcpToolCheckbox}
+                  />
+                  <span
+                    className={[
+                      styles.mcpToolName,
+                      entry.disabled_tools.includes(t.name)
+                        ? styles.mcpToolNameDisabled
+                        : "",
+                    ].join(" ")}
+                  >
+                    {t.name}
+                  </span>
                   <span className={styles.mcpToolDesc}>{t.description}</span>
-                </div>
+                </label>
               ))
             )}
           </div>
         )}
+      </div>
+
+      {/* Per-thread timeout */}
+      <div className={styles.mcpTimeoutRow}>
+        <span className={styles.mcpTimeoutLabel}>Timeout (s)</span>
+        <input
+          type="number"
+          min="1"
+          className={styles.mcpTimeoutInput}
+          value={entry.tool_call_timeout_secs ?? ""}
+          placeholder="inherit"
+          onChange={async (e) => {
+            const val = e.target.value.trim();
+            const timeout = val ? parseInt(val, 10) : null;
+            try {
+              const { data: updated } = await threadsApi.updateThreadMcpServer(
+                entry.thread_id,
+                entry.mcp_server_id,
+                { tool_call_timeout_secs: timeout },
+              );
+              onEntryUpdate(updated);
+            } catch {
+              // silently degrade
+            }
+          }}
+        />
       </div>
     </div>
   );
@@ -467,6 +533,61 @@ function AttachServerPicker({
   );
 }
 
+// ─── Attach webhook picker overlay ────────────────────────────────────────────
+
+function AttachWebhookPicker({
+  attachedIds,
+  onAttach,
+}: {
+  attachedIds: Set<string>;
+  onAttach: (binding: WebhookBinding) => void;
+}) {
+  const [allBindings, setAllBindings] = useState<WebhookBinding[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    webhookBindingsApi
+      .list()
+      .then((res) => {
+        setAllBindings(res.data);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, []);
+
+  const available = allBindings.filter((b) => !attachedIds.has(b.id));
+
+  return (
+    <div className={styles.pickerOverlay}>
+      <div className={styles.pickerTitle}>Attach Webhook</div>
+      <div className={styles.pickerList}>
+        {loading ? (
+          <div className={styles.pickerEmpty}>Loading…</div>
+        ) : available.length === 0 ? (
+          <div className={styles.pickerEmpty}>
+            {allBindings.length === 0
+              ? "No webhook bindings configured. Add one in Settings → Webhooks."
+              : "All configured webhooks are already attached."}
+          </div>
+        ) : (
+          available.map((b) => (
+            <button
+              key={b.id}
+              className={styles.pickerItem}
+              onClick={() => onAttach(b)}
+            >
+              <span style={{ fontWeight: 500 }}>{b.name}</span>
+              <span style={{ color: "#888", fontSize: 11, marginLeft: 6 }}>
+                {b.source}
+              </span>
+            </button>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main ConfigPane ──────────────────────────────────────────────────────────
 
 interface ConfigPaneProps {
@@ -506,10 +627,14 @@ export function ConfigPane({
   );
   const [isSavingAutoSummarize, setIsSavingAutoSummarize] = useState(false);
 
+  // ── Auto-retitle ──
+  const [autoRetitle, setAutoRetitle] = useState(thread.auto_retitle ?? false);
+  const [isSavingAutoRetitle, setIsSavingAutoRetitle] = useState(false);
+
   // ── MCP servers ──
   const lastMcpStatusChange = useSseStore((s) => s.lastMcpStatusChange);
 
-  const [attachedEntries, setAttachedEntries] = useState<ThreadMcpEntry[]>([]);
+  const [attachedEntries, setAttachedEntries] = useState<ThreadMcpServer[]>([]);
   const [mcpServersMap, setMcpServersMap] = useState<Record<string, McpServer>>(
     {},
   );
@@ -534,6 +659,21 @@ export function ConfigPane({
     null,
   );
   const [routinesExpanded, setRoutinesExpanded] = useState(false);
+
+  // ── Webhooks ──
+  const [attachedWebhooks, setAttachedWebhooks] = useState<
+    ThreadWebhookBinding[]
+  >([]);
+  const [webhooksLoading, setWebhooksLoading] = useState(false);
+  const [showWebhookAttachPicker, setShowWebhookAttachPicker] = useState(false);
+  const [detachingWebhookId, setDetachingWebhookId] = useState<string | null>(
+    null,
+  );
+  const [editingWebhookAttachmentId, setEditingWebhookAttachmentId] = useState<
+    string | null
+  >(null);
+  const [editingWebhookPrompt, setEditingWebhookPrompt] = useState("");
+  const [webhookPromptSaving, setWebhookPromptSaving] = useState(false);
   const [mcpExpanded, setMcpExpanded] = useState(false);
 
   // ── Persona memories ──
@@ -546,11 +686,39 @@ export function ConfigPane({
   const [deletingMemoryId, setDeletingMemoryId] = useState<string | null>(null);
   const [memoriesExpanded, setMemoriesExpanded] = useState(false);
 
+  // ── User timezone ──
+  const [userTimezone, setUserTimezone] = useState<string>("");
+
+  useEffect(() => {
+    profileApi
+      .get()
+      .then((res) => {
+        const tz =
+          res.data.timezone ||
+          (() => {
+            try {
+              return Intl.DateTimeFormat().resolvedOptions().timeZone;
+            } catch {
+              return "";
+            }
+          })();
+        setUserTimezone(tz);
+      })
+      .catch(() => {
+        try {
+          setUserTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone);
+        } catch {
+          /* ignore */
+        }
+      });
+  }, []);
+
   // Sync local state when thread prop changes (different thread selected)
   useEffect(() => {
     setAddendum(thread.system_prompt_addendum ?? "");
     setShowSystemEvents(thread.show_system_events ?? false);
     setAutoSummarize(thread.auto_summarize ?? true);
+    setAutoRetitle(thread.auto_retitle ?? false);
     setShowAttachPicker(false);
     setShowArchiveConfirm(false);
     // Reset routines form state on thread switch
@@ -558,6 +726,12 @@ export function ConfigPane({
     setShowRoutineForm(false);
     setEditingRoutine(null);
     setRoutineFormError(null);
+    // Reset webhooks state on thread switch
+    setAttachedWebhooks([]);
+    setWebhooksLoading(false);
+    setShowWebhookAttachPicker(false);
+    setEditingWebhookAttachmentId(null);
+    setEditingWebhookPrompt("");
     // Reset persona memories on thread switch
     setPersonaMemories([]);
     setPersonaMemoriesTotal(0);
@@ -569,6 +743,7 @@ export function ConfigPane({
     thread.system_prompt_addendum,
     thread.show_system_events,
     thread.auto_summarize,
+    thread.auto_retitle,
   ]);
 
   // Load attached MCP servers whenever the pane opens or thread changes
@@ -698,6 +873,27 @@ export function ConfigPane({
     };
   }, [isOpen, thread.id]);
 
+  // Load attached webhook bindings whenever the pane opens or thread changes
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    setWebhooksLoading(true);
+    threadWebhookBindingsApi
+      .list(thread.id)
+      .then((res) => {
+        if (!cancelled) {
+          setAttachedWebhooks(res.data);
+          setWebhooksLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setWebhooksLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, thread.id]);
+
   // ── Handlers ──
 
   const handleAddendumBlur = async () => {
@@ -750,6 +946,23 @@ export function ConfigPane({
       setAutoSummarize(!val); // revert on error
     } finally {
       setIsSavingAutoSummarize(false);
+    }
+  };
+
+  const handleAutoRetitleChange = async (val: boolean) => {
+    setAutoRetitle(val);
+    setIsSavingAutoRetitle(true);
+    try {
+      const res = await threadsApi.update(thread.id, {
+        auto_retitle: val,
+      });
+      if (res.data) {
+        onThreadUpdated(res.data);
+      }
+    } catch {
+      setAutoRetitle(!val); // revert on error
+    } finally {
+      setIsSavingAutoRetitle(false);
     }
   };
 
@@ -921,6 +1134,59 @@ export function ConfigPane({
       /* non-critical */
     } finally {
       setDeletingRoutineId(null);
+    }
+  }
+
+  async function handleWebhookDetach(attachmentId: string) {
+    setDetachingWebhookId(attachmentId);
+    try {
+      await threadWebhookBindingsApi.detach(thread.id, attachmentId);
+      setAttachedWebhooks((prev) => prev.filter((w) => w.id !== attachmentId));
+    } finally {
+      setDetachingWebhookId(null);
+    }
+  }
+
+  function openWebhookPromptEditor(w: ThreadWebhookBinding) {
+    setEditingWebhookAttachmentId(w.id);
+    setEditingWebhookPrompt(w.prompt ?? "");
+  }
+
+  function closeWebhookPromptEditor() {
+    setEditingWebhookAttachmentId(null);
+    setEditingWebhookPrompt("");
+  }
+
+  async function handleWebhookPromptSave() {
+    if (!editingWebhookAttachmentId) return;
+    setWebhookPromptSaving(true);
+    try {
+      const prompt = editingWebhookPrompt.trim() || null;
+      const res = await threadWebhookBindingsApi.updatePrompt(
+        thread.id,
+        editingWebhookAttachmentId,
+        prompt,
+      );
+      setAttachedWebhooks((prev) =>
+        prev.map((w) =>
+          w.id === editingWebhookAttachmentId
+            ? { ...w, prompt: res.data.prompt }
+            : w,
+        ),
+      );
+      closeWebhookPromptEditor();
+    } finally {
+      setWebhookPromptSaving(false);
+    }
+  }
+
+  async function handleWebhookAttach(binding: WebhookBinding) {
+    try {
+      const res = await threadWebhookBindingsApi.attach(thread.id, binding.id);
+      setAttachedWebhooks((prev) => [...prev, res.data]);
+      setShowWebhookAttachPicker(false);
+    } catch {
+      // ignore — picker stays open
     }
   }
 
@@ -1160,6 +1426,7 @@ export function ConfigPane({
                     <CronPicker
                       value={routineFormCron}
                       onChange={setRoutineFormCron}
+                      timezone={userTimezone}
                     />
 
                     {routineFormError && (
@@ -1178,6 +1445,120 @@ export function ConfigPane({
                       </button>
                     </div>
                   </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className={styles.divider} />
+
+          {/* ── Webhooks ── */}
+          <div className={styles.section}>
+            <div className={styles.sectionHeader}>
+              <span className={styles.sectionTitle}>Webhooks</span>
+              <button
+                className={
+                  showWebhookAttachPicker ? styles.cancelBtn : styles.addBtn
+                }
+                onClick={() => setShowWebhookAttachPicker((o) => !o)}
+              >
+                {showWebhookAttachPicker ? "✕ Cancel" : "＋ Attach"}
+              </button>
+            </div>
+
+            {webhooksLoading ? (
+              <div className={styles.emptyHint}>Loading…</div>
+            ) : (
+              <div className={styles.routineList}>
+                {attachedWebhooks.length === 0 && !showWebhookAttachPicker && (
+                  <div className={styles.emptyHint}>No webhooks attached.</div>
+                )}
+
+                {attachedWebhooks.map((w) => (
+                  <div key={w.id} className={styles.routineCard}>
+                    <div className={styles.routineCardTop}>
+                      <div className={styles.routineCardInfo}>
+                        <div className={styles.routineName}>{w.name}</div>
+                        <div className={styles.routineCron}>
+                          {w.source} · {w.enabled ? "● active" : "○ disabled"}
+                        </div>
+                      </div>
+                      <div className={styles.routineCardActions}>
+                        <button
+                          className={styles.routineEditBtn}
+                          onClick={() =>
+                            editingWebhookAttachmentId === w.id
+                              ? closeWebhookPromptEditor()
+                              : openWebhookPromptEditor(w)
+                          }
+                          title={
+                            editingWebhookAttachmentId === w.id
+                              ? "Cancel"
+                              : "Edit response instructions"
+                          }
+                        >
+                          {editingWebhookAttachmentId === w.id ? "✕" : "✎"}
+                        </button>
+                        <button
+                          className={styles.routineDeleteBtn}
+                          onClick={() => handleWebhookDetach(w.id)}
+                          disabled={detachingWebhookId === w.id}
+                          title="Detach"
+                        >
+                          {detachingWebhookId === w.id ? "…" : "✕"}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Prompt preview — shown when not editing */}
+                    {editingWebhookAttachmentId !== w.id && w.prompt && (
+                      <div className={styles.routinePromptPreview}>
+                        {w.prompt.length > 80
+                          ? w.prompt.slice(0, 80) + "…"
+                          : w.prompt}
+                      </div>
+                    )}
+
+                    {/* Inline prompt editor */}
+                    {editingWebhookAttachmentId === w.id && (
+                      <div
+                        className={styles.routineForm}
+                        style={{ marginTop: 8 }}
+                      >
+                        <label className={styles.routineFormLabel}>
+                          Response instructions
+                        </label>
+                        <textarea
+                          className={styles.routineFormTextarea}
+                          placeholder="What should the agent do when this webhook fires?"
+                          value={editingWebhookPrompt}
+                          onChange={(e) =>
+                            setEditingWebhookPrompt(e.target.value)
+                          }
+                          disabled={webhookPromptSaving}
+                          rows={3}
+                        />
+                        <div className={styles.routineFormActions}>
+                          <button
+                            className={styles.routineFormSave}
+                            onClick={handleWebhookPromptSave}
+                            disabled={webhookPromptSaving}
+                          >
+                            {webhookPromptSaving ? "Saving…" : "Save"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+
+                {showWebhookAttachPicker && (
+                  <AttachWebhookPicker
+                    attachedIds={
+                      new Set(attachedWebhooks.map((w) => w.webhook_binding_id))
+                    }
+                    onAttach={handleWebhookAttach}
+                  />
                 )}
               </div>
             )}
@@ -1213,9 +1594,17 @@ export function ConfigPane({
                       <McpServerCard
                         key={entry.id}
                         server={server}
+                        entry={entry}
                         tools={toolsMap[server.id] ?? null}
                         onRemove={() => handleDetachServer(server.id)}
                         onLoadTools={() => handleLoadTools(server.id)}
+                        onEntryUpdate={(updated) =>
+                          setAttachedEntries((prev) =>
+                            prev.map((e) =>
+                              e.id === updated.id ? updated : e,
+                            ),
+                          )
+                        }
                       />
                     );
                   })}
@@ -1363,6 +1752,26 @@ export function ConfigPane({
                     disabled={isSavingAutoSummarize}
                   />
                 </div>
+
+                {/* Auto-retitle toggle — only shown when auto_summarize is on */}
+                {autoSummarize && (
+                  <div className={styles.toolActivityRow}>
+                    <div className={styles.toolActivityInfo}>
+                      <div className={styles.toolActivityLabel}>
+                        Auto-retitle from summary
+                      </div>
+                      <div className={styles.toolActivityHint}>
+                        Regenerate the thread title each time a new compaction
+                        summary is written
+                      </div>
+                    </div>
+                    <Toggle
+                      checked={autoRetitle}
+                      onChange={handleAutoRetitleChange}
+                      disabled={isSavingAutoRetitle}
+                    />
+                  </div>
+                )}
 
                 {/* Last summarized hint */}
                 {thread.summary && thread.summary_updated_at && (

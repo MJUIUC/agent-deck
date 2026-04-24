@@ -12,7 +12,7 @@ use sqlx::SqlitePool;
 use std::collections::HashMap;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex, RwLock};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, RwLock as TokioRwLock};
 use tokio::task::JoinHandle;
 
 use tower_http::{services::ServeDir, trace::TraceLayer};
@@ -44,8 +44,11 @@ pub mod routines;
 pub mod setup;
 
 pub mod sse;
+pub mod tailscale;
 pub mod threads;
 pub mod tokens;
+pub mod webhook_bindings;
+pub mod webhooks;
 
 /// A unit of work — kept for compatibility with any remaining references,
 /// but the channel-based agent dispatch has been replaced with per-thread
@@ -141,6 +144,17 @@ pub struct AppState {
     /// PKCS8 PEM-encoded VAPID private key. Loaded from app_config at startup.
     /// Used by the push dispatch service. Never logged or returned by any endpoint.
     pub vapid_private_pem: String,
+    /// Tailscale status cache. Invalidated on connect/funnel toggle.
+    pub tailscale_status_cache: Arc<
+        TokioRwLock<
+            Option<(
+                crate::services::tailscale::TailscaleStatus,
+                std::time::Instant,
+            )>,
+        >,
+    >,
+    /// The port this server is listening on. Needed by Tailscale Funnel commands.
+    pub server_port: u16,
 }
 
 impl AppState {
@@ -211,6 +225,8 @@ pub async fn build_router(
         scheduler_tx,
         vapid_public_key,
         vapid_private_pem,
+        tailscale_status_cache: Arc::new(TokioRwLock::new(None)),
+        server_port: config.port,
     });
 
     // Start copilot-api supervision in the background.
@@ -218,6 +234,26 @@ pub async fn build_router(
 
     // Connect all enabled MCP servers.
     mcp.start().await;
+
+    // Warm up the Tailscale status cache in the background — non-blocking.
+    {
+        let state = state.clone();
+        tokio::spawn(async move {
+            let status = crate::services::tailscale::get_status(state.server_port).await;
+            crate::routes::tailscale::log_status(&status);
+            let status = if status.connected && !status.serving {
+                tracing::info!(
+                    "tailscale: auto-starting serve on port {}",
+                    state.server_port
+                );
+                crate::services::tailscale::enable_serve(state.server_port).await
+            } else {
+                status
+            };
+            let mut cache = state.tailscale_status_cache.write().await;
+            *cache = Some((status, std::time::Instant::now()));
+        });
+    }
 
     // Start the routine scheduler in the background.
     let scheduler =
@@ -238,7 +274,8 @@ pub async fn build_router(
         .route(
             "/api/push/vapid-public-key",
             get(push::get_vapid_public_key),
-        );
+        )
+        .route("/api/webhooks", axum::routing::post(webhooks::receive));
 
     // Protected API routes (auth required)
     let protected_api = Router::new()
@@ -301,6 +338,10 @@ pub async fn build_router(
                 .delete(tokens::delete_mcp),
         )
         .route("/api/mcp-servers/:id/tools", get(tokens::list_mcp_tools))
+        .route(
+            "/api/mcp-servers/:id/restart",
+            axum::routing::post(tokens::restart_mcp),
+        )
         // Threads
         .route("/api/threads", get(threads::list).post(threads::create))
         .route(
@@ -327,7 +368,7 @@ pub async fn build_router(
         )
         .route(
             "/api/threads/:id/mcp-servers/:mcp_id",
-            axum::routing::delete(threads::detach_mcp),
+            axum::routing::delete(threads::detach_mcp).patch(threads::update_thread_mcp),
         )
         // Messages
         .route(
@@ -404,6 +445,48 @@ pub async fn build_router(
         .route("/api/fs/read", get(fs::read_file))
         .route("/api/fs/download", get(fs::download_file))
         .route("/api/fs/workspace", get(fs::get_workspace))
+        // Tailscale
+        .route("/api/tailscale/status", get(tailscale::get_status))
+        .route(
+            "/api/tailscale/connect",
+            axum::routing::post(tailscale::connect),
+        )
+        .route(
+            "/api/tailscale/serve",
+            axum::routing::post(tailscale::serve),
+        )
+        .route(
+            "/api/tailscale/funnel/enable",
+            axum::routing::post(tailscale::enable_funnel),
+        )
+        .route(
+            "/api/tailscale/funnel/disable",
+            axum::routing::post(tailscale::disable_funnel),
+        )
+        // Webhook bindings — global registry
+        .route(
+            "/api/webhook-bindings",
+            get(webhook_bindings::list_global).post(webhook_bindings::create_global),
+        )
+        .route(
+            "/api/webhook-bindings/:id",
+            axum::routing::delete(webhook_bindings::delete_global)
+                .patch(webhook_bindings::update_global),
+        )
+        .route(
+            "/api/webhook-bindings/:id/toggle",
+            axum::routing::patch(webhook_bindings::toggle_global),
+        )
+        // Webhook bindings — thread attachments
+        .route(
+            "/api/threads/:id/webhook-bindings",
+            get(webhook_bindings::list_attachments).post(webhook_bindings::attach),
+        )
+        .route(
+            "/api/threads/:id/webhook-bindings/:attachment_id",
+            axum::routing::delete(webhook_bindings::detach)
+                .patch(webhook_bindings::update_attachment),
+        )
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,
@@ -522,9 +605,12 @@ mod tests {
 
         let config = Config {
             port: 7474,
+            process_dir: std::path::PathBuf::from("/tmp/test-deck/.process"),
             data_dir: std::path::PathBuf::from("/tmp/test-deck"),
             mcp_dir: std::path::PathBuf::from("/tmp/test-deck/mcp"),
             personas_dir: std::path::PathBuf::from("/tmp/test-deck/personas"),
+            workspaces_dir: std::path::PathBuf::from("/tmp/test-deck/workspaces"),
+            skills_dir: std::path::PathBuf::from("/tmp/test-deck/skills"),
             database_url: "sqlite::memory:".to_string(),
             public_dir: "./public".to_string(),
             fcm_service_account_json: None,
@@ -714,9 +800,12 @@ mod tests {
             pool,
             config: Config {
                 port: 7474,
+                process_dir: std::path::PathBuf::from("/tmp/test-deck/.process"),
                 data_dir: std::path::PathBuf::from("/tmp/test-deck"),
                 mcp_dir: std::path::PathBuf::from("/tmp/test-deck/mcp"),
                 personas_dir: std::path::PathBuf::from("/tmp/test-deck/personas"),
+                workspaces_dir: std::path::PathBuf::from("/tmp/test-deck/workspaces"),
+                skills_dir: std::path::PathBuf::from("/tmp/test-deck/skills"),
                 database_url: "sqlite::memory:".to_string(),
                 public_dir: "./public".to_string(),
                 fcm_service_account_json: None,
@@ -733,6 +822,8 @@ mod tests {
             scheduler_tx: tokio::sync::mpsc::channel(1).0,
             vapid_public_key: String::new(),
             vapid_private_pem: String::new(),
+            tailscale_status_cache: Arc::new(TokioRwLock::new(None)),
+            server_port: 7474,
         };
 
         let rs1 = app_state.get_run_state("thread-abc");
@@ -764,9 +855,12 @@ mod tests {
             pool,
             config: Config {
                 port: 7474,
+                process_dir: std::path::PathBuf::from("/tmp/test-deck/.process"),
                 data_dir: std::path::PathBuf::from("/tmp/test-deck"),
                 mcp_dir: std::path::PathBuf::from("/tmp/test-deck/mcp"),
                 personas_dir: std::path::PathBuf::from("/tmp/test-deck/personas"),
+                workspaces_dir: std::path::PathBuf::from("/tmp/test-deck/workspaces"),
+                skills_dir: std::path::PathBuf::from("/tmp/test-deck/skills"),
                 database_url: "sqlite::memory:".to_string(),
                 public_dir: "./public".to_string(),
                 fcm_service_account_json: None,
@@ -783,6 +877,8 @@ mod tests {
             scheduler_tx: tokio::sync::mpsc::channel(1).0,
             vapid_public_key: String::new(),
             vapid_private_pem: String::new(),
+            tailscale_status_cache: Arc::new(TokioRwLock::new(None)),
+            server_port: 7474,
         };
 
         let rs_a = app_state.get_run_state("thread-aaa");
@@ -825,9 +921,12 @@ mod tests {
             pool,
             config: Config {
                 port: 7474,
+                process_dir: std::path::PathBuf::from("/tmp/test-deck/.process"),
                 data_dir: std::path::PathBuf::from("/tmp/test-deck"),
                 mcp_dir: std::path::PathBuf::from("/tmp/test-deck/mcp"),
                 personas_dir: std::path::PathBuf::from("/tmp/test-deck/personas"),
+                workspaces_dir: std::path::PathBuf::from("/tmp/test-deck/workspaces"),
+                skills_dir: std::path::PathBuf::from("/tmp/test-deck/skills"),
                 database_url: "sqlite::memory:".to_string(),
                 public_dir: "./public".to_string(),
                 fcm_service_account_json: None,
@@ -844,6 +943,8 @@ mod tests {
             scheduler_tx: tokio::sync::mpsc::channel(1).0,
             vapid_public_key: String::new(),
             vapid_private_pem: String::new(),
+            tailscale_status_cache: Arc::new(TokioRwLock::new(None)),
+            server_port: 7474,
         });
 
         // Simulate two requests receiving their own clone of the Arc —

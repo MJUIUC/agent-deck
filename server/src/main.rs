@@ -31,32 +31,126 @@ async fn main() -> Result<()> {
 
     // ── Create data directory tree ────────────────────────────────────────────
     // Ensure all required directories exist before doing anything else.
-    let db_dir = config.data_dir.join(".database");
-    tokio::fs::create_dir_all(&db_dir).await?;
+    tokio::fs::create_dir_all(&config.process_dir).await?;
+    tokio::fs::create_dir_all(config.process_dir.join(".database")).await?;
     tokio::fs::create_dir_all(&config.mcp_dir).await?;
     tokio::fs::create_dir_all(&config.personas_dir).await?;
+    tokio::fs::create_dir_all(&config.workspaces_dir).await?;
+    tokio::fs::create_dir_all(&config.skills_dir).await?;
+
+    // ── Write README.md into data_dir ────────────────────────────────────────
+    // Written once on first run so the directory is self-documenting.
+    {
+        let readme_path = config.data_dir.join("README.md");
+        if tokio::fs::metadata(&readme_path).await.is_err() {
+            let readme_content = "# ~/.agent-deck
+
+This directory is the home of your agent-deck installation.
+
+## Directories
+
+| Directory    | Purpose                                                  |
+|--------------|----------------------------------------------------------|
+| mcp/         | MCP server configs and locally installed MCP binaries    |
+| personas/    | Persona avatars and assets                               |
+| skills/      | Skill definitions                                        |
+| workspaces/  | Per-thread file workspaces used by the agent at runtime  |
+| .process/    | Runtime internals — binary, database, logs, assets       |
+
+## .process/
+
+This hidden directory is agent-deck's action space for the lifetime of the
+installation. It is created and managed by the server automatically. You
+should not need to modify anything inside it directly.
+
+| Path                    | Purpose                        |
+|-------------------------|--------------------------------|
+| .process/bin/           | The agent-deck server binary   |
+| .process/.database/     | SQLite database                |
+| .process/public/        | Web frontend assets            |
+| .process/server.log     | Server log file                |
+| .process/agent-deck.pid | PID of the running server      |
+
+## Data
+
+Your conversations, personas, memory, and credentials are stored in the
+SQLite database at `.process/.database/agent-deck.db`.
+
+Workspaces created by the agent during conversations are in `workspaces/`,
+organised by thread ID.
+";
+            if let Err(error) = tokio::fs::write(&readme_path, readme_content).await {
+                warn!("Failed to write README.md to data_dir: {}", error);
+            }
+        }
+    }
+
+    // ── Seed bundled skill guides into skills_dir ─────────────────────────────
+    // Skills are documentation for agents — they are always overwritten on
+    // startup so they stay in sync with the server binary across upgrades.
+    // Users should not edit these files; any changes will be lost on restart.
+    {
+        const SKILLS: &[(&str, &str)] = &[
+            (
+                "credentials.md",
+                include_str!("../../docs/skills/credentials.md"),
+            ),
+            ("webhooks.md", include_str!("../../docs/skills/webhooks.md")),
+            (
+                "configure-mcp.md",
+                include_str!("../../docs/skills/configure-mcp.md"),
+            ),
+            (
+                "create-routine.md",
+                include_str!("../../docs/skills/create-routine.md"),
+            ),
+        ];
+
+        for (filename, content) in SKILLS {
+            let path = config.skills_dir.join(filename);
+            if let Err(e) = tokio::fs::write(&path, content).await {
+                warn!("Failed to write skill guide '{}': {}", filename, e);
+            }
+        }
+    }
 
     info!("data_dir: {}", config.data_dir.display());
 
-    // ── Dev-path migration hint ───────────────────────────────────────────────
-    // If the old default SQLite file exists at ./data/agent-deck.db and the new
-    // path does not yet exist, warn the user and temporarily override the URL so
-    // existing dev data is not lost without an explicit migration step.
+    // ── Legacy migration hints ────────────────────────────────────────────────
+    // Check for databases from earlier layout variants. Checks are ordered from
+    // oldest to newest so that the most recent pre-migration path takes effect
+    // when multiple legacy files happen to exist.
     {
-        let legacy_path = std::path::Path::new("./data/agent-deck.db");
-        let new_db_path = config.data_dir.join(".database").join("agent-deck.db");
+        let new_db_path = config.process_dir.join(".database").join("agent-deck.db");
 
-        if legacy_path.exists() && !new_db_path.exists() {
+        // 1. Dev-era path: ./data/agent-deck.db
+        let dev_legacy_path = std::path::Path::new("./data/agent-deck.db");
+        if dev_legacy_path.exists() && !new_db_path.exists() {
             warn!(
                 "mcp: legacy database found at {} but new path {} does not exist yet. \
                  Using legacy path for this run. Copy or move the file to migrate: \
                  cp {} {}",
-                legacy_path.display(),
+                dev_legacy_path.display(),
                 new_db_path.display(),
-                legacy_path.display(),
+                dev_legacy_path.display(),
                 new_db_path.display(),
             );
-            config.database_url = format!("sqlite:{}", legacy_path.display());
+            config.database_url = format!("sqlite:{}", dev_legacy_path.display());
+        }
+
+        // 2. Pre-.process layout: data_dir/.database/agent-deck.db
+        let pre_process_legacy_path = config.data_dir.join(".database").join("agent-deck.db");
+        if pre_process_legacy_path.exists() && !new_db_path.exists() {
+            warn!(
+                "mcp: legacy database found at {} but new path {} does not exist yet. \
+                 Using legacy path for this run. Copy or move the file to migrate: \
+                 cp {} {}",
+                pre_process_legacy_path.display(),
+                new_db_path.display(),
+                pre_process_legacy_path.display(),
+                new_db_path.display(),
+            );
+            config.database_url = format!("sqlite:{}", pre_process_legacy_path.display());
         }
     }
 

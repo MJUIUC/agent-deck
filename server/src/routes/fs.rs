@@ -261,13 +261,10 @@ pub(crate) async fn update_workspace_meta(
 }
 
 pub async fn get_workspace(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     Query(params): Query<WorkspaceParams>,
 ) -> AppResult<impl IntoResponse> {
-    let home = dirs::home_dir()
-        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("Could not determine home directory")))?;
-
-    let workspaces_root = home.join(".agent-deck").join("workspaces");
+    let workspaces_root = state.config.workspaces_dir.clone();
     let workspace_path = workspaces_root.join(&params.thread_id);
 
     tokio::fs::create_dir_all(&workspace_path)

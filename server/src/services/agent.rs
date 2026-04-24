@@ -23,7 +23,7 @@ use futures::StreamExt;
 use sqlx::SqlitePool;
 use std::sync::Arc;
 
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::services::copilot::GlobalEvent;
 use crate::{
@@ -45,6 +45,8 @@ use crate::{
 struct AttachedMcpServer {
     id: String,
     tag: String,
+    tool_call_timeout_secs: Option<i64>,
+    disabled_tools: Vec<String>,
 }
 
 // ─── Public entry point ────────────────────────────────────────────────────────
@@ -116,12 +118,17 @@ fn retry_strategy_for(error: &anyhow::Error) -> RetryStrategy {
         };
     }
 
-    // Context-length errors — summarize history and retry
+    // Context-length errors — summarize history and retry.
+    // Also covers HTTP 413 (Payload Too Large / Request Entity Too Large) which
+    // some providers return when the request body exceeds their size limit.
     if msg.contains("context_length_exceeded")
         || msg.contains("context window")
         || msg.contains("maximum context length")
         || msg.contains("prompt is too long")
         || msg.contains("context_window_exceeded")
+        || msg.contains("413")
+        || msg.contains("Payload Too Large")
+        || msg.contains("Request Entity Too Large")
     {
         return RetryStrategy::SummarizeAndRetry;
     }
@@ -298,17 +305,16 @@ async fn run_inner(
     is_routine: bool,
 ) -> Result<()> {
     // ── 1. Fetch the thread and its persona ────────────────────────────────────
-    let thread: crate::models::thread::Thread = sqlx::query_as(
-        "SELECT id, user_id, persona_id, title, active_model, active_provider,
-                system_prompt_addendum, status, show_tool_activity, show_system_events,
-                summary, summary_updated_at, summary_message_count, auto_summarize,
-                created_at, updated_at
-         FROM threads WHERE id = ?",
-    )
-    .bind(thread_id)
-    .fetch_one(&state.pool)
-    .await
-    .map_err(|e| anyhow!("Failed to load thread {}: {}", thread_id, e))?;
+    debug!(thread_id = %thread_id, "run_inner: fetching thread");
+    let thread: crate::models::thread::Thread =
+        crate::db::threads::fetch_by_id(&state.pool, thread_id)
+            .await
+            .map_err(|e| {
+                error!(thread_id = %thread_id, error = ?e, error.display = %e, "run_inner: failed to fetch thread");
+                anyhow!("Failed to load thread {}: {}", thread_id, e)
+            })?
+            .ok_or_else(|| anyhow!("Thread {} not found", thread_id))?;
+    debug!(thread_id = %thread_id, "run_inner: thread fetched successfully");
 
     let user_id = &thread.user_id;
     let persona_id = &thread.persona_id;
@@ -508,8 +514,11 @@ async fn run_inner(
 
     // ── 4.5. Load attached MCP servers and build namespaced tool list ─────────
     let attached: Vec<AttachedMcpServer> = {
-        let rows: Vec<(String, String)> = sqlx::query_as(
-            "SELECT ms.id, ms.tag
+        let rows: Vec<(String, String, Option<i64>, String, String)> = sqlx::query_as(
+            "SELECT ms.id, ms.tag,
+                    COALESCE(tms.tool_call_timeout_secs, ms.tool_call_timeout_secs) AS tool_call_timeout_secs,
+                    ms.disabled_tools AS server_disabled,
+                    tms.disabled_tools AS thread_disabled
              FROM thread_mcp_servers tms
              JOIN mcp_servers ms ON ms.id = tms.mcp_server_id
              WHERE tms.thread_id = ? AND tms.enabled = 1 AND ms.enabled = 1",
@@ -523,7 +532,27 @@ async fn run_inner(
         });
 
         rows.into_iter()
-            .map(|(id, tag)| AttachedMcpServer { id, tag })
+            .map(
+                |(id, tag, timeout, server_disabled_json, thread_disabled_json)| {
+                    let server_disabled: Vec<String> =
+                        serde_json::from_str(&server_disabled_json).unwrap_or_default();
+                    let thread_disabled: Vec<String> =
+                        serde_json::from_str(&thread_disabled_json).unwrap_or_default();
+                    // Union: server-level always applies; thread adds on top
+                    let mut disabled_tools = server_disabled;
+                    for t in thread_disabled {
+                        if !disabled_tools.contains(&t) {
+                            disabled_tools.push(t);
+                        }
+                    }
+                    AttachedMcpServer {
+                        id,
+                        tag,
+                        tool_call_timeout_secs: timeout,
+                        disabled_tools,
+                    }
+                },
+            )
             .collect()
     };
 
@@ -532,6 +561,10 @@ async fn run_inner(
     for server in &attached {
         let tools = state.mcp.cached_tools(&server.id).await;
         for tool in tools {
+            // Skip tools that have been disabled for this server.
+            if server.disabled_tools.contains(&tool.name) {
+                continue;
+            }
             let namespaced_name = format!("{}__{}", server.tag, tool.name);
             let tool_def = async_openai::types::ChatCompletionTool {
                 r#type: async_openai::types::ChatCompletionToolType::Function,
@@ -549,28 +582,18 @@ async fn run_inner(
     // Resolve the thread's workspace directory. Created if it doesn't exist.
     // Skipped for routine runs — routines don't need file-sharing instructions.
     let workspace_path: Option<String> = if !is_routine {
-        match dirs::home_dir() {
-            Some(home) => {
-                let workspace_dir = home.join(".agent-deck").join("workspaces").join(thread_id);
-                if let Err(e) = tokio::fs::create_dir_all(&workspace_dir).await {
-                    warn!(thread_id = %thread_id, error = %e, "Failed to create workspace dir; continuing without it");
-                    None
-                } else {
-                    // Update workspace meta.json with the thread's human-readable title
-                    let workspaces_root = home.join(".agent-deck").join("workspaces");
-                    crate::routes::fs::update_workspace_meta(
-                        &workspaces_root,
-                        thread_id,
-                        &thread.title,
-                    )
-                    .await;
-                    Some(workspace_dir.to_string_lossy().into_owned())
-                }
-            }
-            None => {
-                warn!(thread_id = %thread_id, "Could not determine home directory; workspace path skipped");
-                None
-            }
+        let workspace_dir = state.config.workspaces_dir.join(thread_id);
+        if let Err(e) = tokio::fs::create_dir_all(&workspace_dir).await {
+            warn!(thread_id = %thread_id, error = %e, "Failed to create workspace dir; continuing without it");
+            None
+        } else {
+            crate::routes::fs::update_workspace_meta(
+                &state.config.workspaces_dir,
+                thread_id,
+                &thread.title,
+            )
+            .await;
+            Some(workspace_dir.to_string_lossy().into_owned())
         }
     } else {
         None
@@ -607,6 +630,7 @@ async fn run_inner(
         },
         mcp_tools: mcp_tool_defs.clone(),
         workspace_path: workspace_path.clone(),
+        skills_dir: Some(state.config.skills_dir.to_string_lossy().into_owned()),
     });
 
     // ── 5. Generation loop — with reactive summarization on context-length error ──
@@ -642,16 +666,12 @@ async fn run_inner(
                 let _ = crate::services::summarization::summarize_thread(state, thread_id).await;
 
                 // Reload thread with updated summary fields
-                let updated: crate::models::thread::Thread = match sqlx::query_as(
-                    "SELECT id, user_id, persona_id, title, active_model, active_provider,
-                            system_prompt_addendum, status, show_tool_activity, show_system_events,
-                            summary, summary_updated_at, summary_message_count, auto_summarize,
-                            created_at, updated_at
-                     FROM threads WHERE id = ?",
+                let updated: crate::models::thread::Thread = match crate::db::threads::fetch_by_id(
+                    &state.pool,
+                    thread_id,
                 )
-                .bind(thread_id)
-                .fetch_one(&state.pool)
                 .await
+                .and_then(|opt| opt.ok_or(sqlx::Error::RowNotFound))
                 {
                     Ok(t) => t,
                     Err(e) => {
@@ -715,6 +735,7 @@ async fn run_inner(
                     },
                     mcp_tools: mcp_tool_defs.clone(),
                     workspace_path: workspace_path.clone(),
+                    skills_dir: Some(state.config.skills_dir.to_string_lossy().into_owned()),
                 });
                 continue;
             }
@@ -1667,10 +1688,15 @@ async fn execute_tool_calls(
 
                 if let Some(tool) = maybe_built_in {
                     // ── Built-in tool ──────────────────────────────────────────
-                    let args: serde_json::Value = match serde_json::from_str(&tool_args) {
+                    let args_str = if tool_args.trim().is_empty() {
+                        "{}"
+                    } else {
+                        &tool_args
+                    };
+                    let args: serde_json::Value = match serde_json::from_str(args_str) {
                         Ok(v) => v,
                         Err(e) => {
-                            return (tool_json_parse_error(&tool_name, &e, &tool_args), vec![]);
+                            return (tool_json_parse_error(&tool_name, &e, args_str), vec![]);
                         }
                     };
                     let context = ToolContext {
@@ -1903,10 +1929,49 @@ async fn execute_mcp_tool(
                 );
             }
 
+            // Resolve any {credential:<key>} placeholders in the args before
+            // forwarding to the MCP server.  The stored tool call message above
+            // keeps the raw placeholder text so secrets never reach the database.
+            let args = match crate::services::credentials::inject_credentials(
+                args,
+                &state.pool,
+                &state.credential_master_key,
+            )
+            .await
+            {
+                Ok(a) => a,
+                Err(e) => {
+                    warn!(
+                        tool = %tc.name,
+                        error = %e,
+                        "execute_mcp_tool: credential injection failed"
+                    );
+                    return (
+                        Ok(format!(
+                            "Tool execution failed: credential could not be resolved: {}",
+                            e
+                        )),
+                        hidden_ids,
+                    );
+                }
+            };
+
             let mut cancellation_watcher = cancellation_rx.clone();
+            let timeout_secs = s.tool_call_timeout_secs;
             tokio::select! {
                 biased;
-                res = state.mcp.call_tool(&s.id, tool_name, args) => {
+                res = async {
+                    if let Some(secs) = timeout_secs {
+                        tokio::time::timeout(
+                            std::time::Duration::from_secs(secs as u64),
+                            state.mcp.call_tool(&s.id, tool_name, args),
+                        )
+                        .await
+                        .unwrap_or_else(|_| Err(anyhow::anyhow!("Tool call timed out after {}s", secs)))
+                    } else {
+                        state.mcp.call_tool(&s.id, tool_name, args).await
+                    }
+                } => {
                     info!(
                         thread_id = %thread_id,
                         server_id = %s.id,
@@ -2344,6 +2409,24 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn retry_strategy_413_is_summarize_and_retry() {
+        let err = anyhow::anyhow!("Provider X returned 413 — Request Entity Too Large");
+        assert_eq!(retry_strategy_for(&err), RetryStrategy::SummarizeAndRetry);
+    }
+
+    #[test]
+    fn retry_strategy_payload_too_large_is_summarize_and_retry() {
+        let err = anyhow::anyhow!("Provider X returned 413 — Payload Too Large");
+        assert_eq!(retry_strategy_for(&err), RetryStrategy::SummarizeAndRetry);
+    }
+
+    #[test]
+    fn retry_strategy_request_entity_too_large_is_summarize_and_retry() {
+        let err = anyhow::anyhow!("Request Entity Too Large");
+        assert_eq!(retry_strategy_for(&err), RetryStrategy::SummarizeAndRetry);
     }
 
     #[test]

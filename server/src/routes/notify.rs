@@ -1,15 +1,3 @@
-//! Notify route — Story 5.1 Part C
-//!
-//! `POST /api/threads/:id/notify`
-//!
-//! Allows clients to emit structured system events into a thread.  Each event
-//! type can independently:
-//!   - `persist`: insert a hidden `system_event` message into the DB and
-//!     broadcast it on the thread's SSE stream so connected clients can
-//!     optionally surface it in the UI.
-//!   - `trigger`: fire the agent run-loop with the event content as the
-//!     user message (used for `routine_fired` events).
-
 use axum::{
     extract::{Path, State},
     response::IntoResponse,
@@ -39,6 +27,7 @@ pub enum SystemEventType {
     McpServerDetached,
     AddendumUpdated,
     RoutineFired,
+    WebhookExecuted,
 }
 
 impl SystemEventType {
@@ -50,18 +39,19 @@ impl SystemEventType {
             "mcp_server_detached" => Some(Self::McpServerDetached),
             "addendum_updated" => Some(Self::AddendumUpdated),
             "routine_fired" => Some(Self::RoutineFired),
+            "webhook_executed" => Some(Self::WebhookExecuted),
             _ => None,
         }
     }
 
     /// Whether this event type should be persisted as a hidden system message.
     pub fn persist(&self) -> bool {
-        !matches!(self, Self::RoutineFired)
+        !matches!(self, Self::RoutineFired | Self::WebhookExecuted)
     }
 
     /// Whether this event type should trigger an agent run.
     pub fn trigger(&self) -> bool {
-        matches!(self, Self::RoutineFired)
+        matches!(self, Self::RoutineFired | Self::WebhookExecuted)
     }
 
     pub fn as_str(&self) -> &'static str {
@@ -72,6 +62,7 @@ impl SystemEventType {
             Self::McpServerDetached => "mcp_server_detached",
             Self::AddendumUpdated => "addendum_updated",
             Self::RoutineFired => "routine_fired",
+            Self::WebhookExecuted => "webhook_executed",
         }
     }
 
@@ -113,8 +104,8 @@ impl SystemEventType {
                 format!("MCP server '{}' detached from this thread", name)
             }
             Self::AddendumUpdated => "System prompt addendum updated".to_string(),
-            Self::RoutineFired => {
-                // For routine_fired, the payload itself is the agent instruction
+            Self::RoutineFired | Self::WebhookExecuted => {
+                // For these trigger-only types, the payload itself is the agent instruction.
                 payload
                     .as_ref()
                     .map(|v| match v {
@@ -143,27 +134,21 @@ pub struct NotifyResponse {
     pub message_id: Option<String>,
 }
 
-// ─── Handler ──────────────────────────────────────────────────────────────────
+// ─── Core logic ───────────────────────────────────────────────────────────────
 
-/// `POST /api/threads/:id/notify`
-///
-/// Emits a structured system event into the thread.  Depending on the event
-/// type the handler may:
-///   1. Insert a hidden `system_event` message into the DB.
-///   2. Broadcast a `system_event` SSE event to connected clients.
-///   3. Trigger the agent run-loop (for `routine_fired`).
-pub async fn notify(
-    State(state): State<Arc<AppState>>,
-    Path(thread_id): Path<String>,
-    Json(body): Json<NotifyRequest>,
-) -> AppResult<impl IntoResponse> {
-    let user_id = get_user_id(&state).await?;
-    verify_thread_ownership(&state, &thread_id, &user_id).await?;
+/// Emit a structured system event into a thread.  Called by the `notify`
+/// handler (after auth) and by the webhook receiver (no auth needed there —
+/// the HMAC signature is the authentication mechanism).
+pub async fn notify_internal(
+    state: &Arc<AppState>,
+    thread_id: &str,
+    event_type: &str,
+    payload: serde_json::Value,
+) -> AppResult<NotifyResponse> {
+    let event_type = SystemEventType::from_str(event_type)
+        .ok_or_else(|| AppError::BadRequest(format!("Unknown event_type: {}", event_type)))?;
 
-    let event_type = SystemEventType::from_str(&body.event_type)
-        .ok_or_else(|| AppError::BadRequest(format!("Unknown event_type: {}", body.event_type)))?;
-
-    let content = event_type.format_content(&body.payload);
+    let content = event_type.format_content(&Some(payload));
     let mut message_id: Option<String> = None;
 
     // ── Persist ───────────────────────────────────────────────────────────────
@@ -180,7 +165,7 @@ pub async fn notify(
              VALUES (?, ?, 'system', ?, 'system_event', NULL, 'hidden', NULL, ?, 0, ?)",
         )
         .bind(&msg_id)
-        .bind(&thread_id)
+        .bind(thread_id)
         .bind(&content)
         .bind(event_type.as_str())
         .bind(&now)
@@ -189,9 +174,8 @@ pub async fn notify(
 
         message_id = Some(msg_id);
 
-        // Broadcast system_event SSE so connected clients can react immediately
         state.send_thread_event(
-            &thread_id,
+            thread_id,
             crate::routes::sse::ThreadEvent::SystemEvent {
                 event_type: event_type.as_str().to_string(),
                 content: content.clone(),
@@ -201,29 +185,25 @@ pub async fn notify(
 
     // ── Trigger ───────────────────────────────────────────────────────────────
     if event_type.trigger() {
-        let run_state = state.get_run_state(&thread_id);
+        let run_state = state.get_run_state(thread_id);
 
-        // Routine runs are not depth-limited — they originate from the server
-        // itself rather than from user-initiated sends.
+        // Trigger-only runs are not depth-limited — they originate from the
+        // server itself rather than from user-initiated sends.
         run_state.depth.fetch_add(1, Ordering::SeqCst);
-
-        let state_clone = state.clone();
-        let tid = thread_id.clone();
-        let trigger_content = content.clone();
 
         let (cancellation_tx, cancellation_rx) = tokio::sync::watch::channel(false);
         let turn_id = uuid::Uuid::new_v4();
 
         let handle = tokio::spawn({
             let run_state = run_state.clone();
-            let state = state_clone.clone();
-            let tid = tid.clone();
-            let trigger_content = trigger_content.clone();
+            let state = state.clone();
+            let thread_id = thread_id.to_string();
+            let trigger_content = content.clone();
             async move {
                 let _permit = run_state.semaphore.acquire().await.unwrap();
                 crate::services::agent::run(
                     state,
-                    tid,
+                    thread_id,
                     trigger_content,
                     cancellation_rx,
                     run_state.clone(),
@@ -240,20 +220,46 @@ pub async fn notify(
             *slot = Some(crate::routes::RunningTurn {
                 task: handle,
                 cancellation_tx,
-                thread_id: thread_id.clone(),
+                thread_id: thread_id.to_string(),
                 turn_id,
             });
         }
     }
 
-    Ok(Json(json!({
-        "data": {
-            "event_type": event_type.as_str(),
-            "persisted": event_type.persist(),
-            "triggered": event_type.trigger(),
-            "message_id": message_id,
-        }
-    })))
+    Ok(NotifyResponse {
+        event_type: event_type.as_str().to_string(),
+        persisted: event_type.persist(),
+        triggered: event_type.trigger(),
+        message_id,
+    })
+}
+
+// ─── Handler ──────────────────────────────────────────────────────────────────
+
+/// `POST /api/threads/:id/notify`
+///
+/// Emits a structured system event into the thread.  Depending on the event
+/// type the handler may:
+///   1. Insert a hidden `system_event` message into the DB.
+///   2. Broadcast a `system_event` SSE event to connected clients.
+///   3. Trigger the agent run-loop (for `routine_fired` / `webhook_executed`).
+pub async fn notify(
+    State(state): State<Arc<AppState>>,
+    Path(thread_id): Path<String>,
+    Json(body): Json<NotifyRequest>,
+) -> AppResult<impl IntoResponse> {
+    let user_id = get_user_id(&state).await?;
+    verify_thread_ownership(&state, &thread_id, &user_id).await?;
+
+    let response = notify_internal(
+        &state,
+        &thread_id,
+        &body.event_type,
+        body.payload.unwrap_or(Value::Null),
+    )
+    .await?;
+
+    Ok(Json(json!({ "data": response })))
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -297,6 +303,10 @@ mod tests {
         assert_eq!(
             SystemEventType::from_str("routine_fired"),
             Some(SystemEventType::RoutineFired)
+        );
+        assert_eq!(
+            SystemEventType::from_str("webhook_executed"),
+            Some(SystemEventType::WebhookExecuted)
         );
     }
 
@@ -345,6 +355,13 @@ mod tests {
     }
 
     #[test]
+    fn webhook_executed_has_persist_false_trigger_true() {
+        let et = SystemEventType::WebhookExecuted;
+        assert!(!et.persist());
+        assert!(et.trigger());
+    }
+
+    #[test]
     fn all_registered_types_have_at_least_one_flag_true() {
         let all = [
             SystemEventType::ModelSwitched,
@@ -353,6 +370,7 @@ mod tests {
             SystemEventType::McpServerDetached,
             SystemEventType::AddendumUpdated,
             SystemEventType::RoutineFired,
+            SystemEventType::WebhookExecuted,
         ];
         for et in &all {
             assert!(
@@ -374,6 +392,7 @@ mod tests {
             SystemEventType::McpServerDetached,
             SystemEventType::AddendumUpdated,
             SystemEventType::RoutineFired,
+            SystemEventType::WebhookExecuted,
         ];
         for et in &all {
             let s = et.as_str();
@@ -453,7 +472,6 @@ mod tests {
 
     #[test]
     fn addendum_updated_content_is_fixed_string() {
-        // The content should be the same fixed string regardless of payload.
         let with_payload =
             SystemEventType::AddendumUpdated.format_content(&Some(json!({ "anything": true })));
         let without_payload = SystemEventType::AddendumUpdated.format_content(&None);
@@ -471,6 +489,21 @@ mod tests {
     #[test]
     fn routine_fired_content_is_empty_when_no_payload() {
         let content = SystemEventType::RoutineFired.format_content(&None);
+        assert_eq!(content, "");
+    }
+
+    #[test]
+    fn webhook_executed_content_is_payload_string() {
+        let payload = Some(Value::String(
+            "GitHub: New PR #42 opened by @alice".to_string(),
+        ));
+        let content = SystemEventType::WebhookExecuted.format_content(&payload);
+        assert_eq!(content, "GitHub: New PR #42 opened by @alice");
+    }
+
+    #[test]
+    fn webhook_executed_content_is_empty_when_no_payload() {
+        let content = SystemEventType::WebhookExecuted.format_content(&None);
         assert_eq!(content, "");
     }
 }

@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect } from "react";
 import { WizardShell } from "../shared/WizardShell";
 import type { WizardStepMeta } from "../shared/types";
 import { Step1Welcome } from "./Step1Welcome";
+import { StepTailscale } from "./StepTailscale";
 import { Step2Name } from "./Step2Name";
 import { Step2bAboutYou } from "./Step2bAboutYou";
 import type { AboutYouDraft } from "./Step2bAboutYou";
@@ -66,6 +67,7 @@ function clearWizardState() {
 
 const STEPS: WizardStepMeta[] = [
   { label: "Welcome" },
+  { label: "Tailscale" },
   { label: "Your name" },
   { label: "About you", skippable: true },
   { label: "Provider", skippable: true },
@@ -154,7 +156,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const handleAboutYouNext = useCallback(
     (draft: AboutYouDraft | null) => {
       setProfileDraft(draft);
-      goTo(4);
+      goTo(5);
     },
     [goTo],
   );
@@ -177,7 +179,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         setPersonaSkipped(true);
         setPersona(null);
         setModels([]);
-        goTo(6);
+        goTo(7);
         return;
       }
 
@@ -218,7 +220,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         setModels([]);
       }
 
-      goTo(5);
+      goTo(6);
     },
     [goTo],
   );
@@ -229,7 +231,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     (config: PersonaConfig | null) => {
       setPersona(config);
       setPersonaSkipped(config === null);
-      goTo(6);
+      goTo(7);
     },
     [goTo],
   );
@@ -352,40 +354,44 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       {step === 1 && <Step1Welcome onNext={() => goTo(2)} />}
 
       {step === 2 && (
-        <Step2Name
-          displayName={displayName}
-          onChange={setDisplayName}
-          onBack={() => goTo(1)}
-          onNext={() => goTo(3)}
-        />
+        <StepTailscale onNext={() => goTo(3)} onSkip={() => goTo(3)} />
       )}
 
       {step === 3 && (
-        <Step2bAboutYou
-          initialDraft={profileDraft}
+        <Step2Name
+          displayName={displayName}
+          onChange={setDisplayName}
           onBack={() => goTo(2)}
-          onNext={handleAboutYouNext}
+          onNext={() => goTo(4)}
         />
       )}
 
       {step === 4 && (
-        <Step3Provider
-          initialDraft={providerDraft}
+        <Step2bAboutYou
+          initialDraft={profileDraft}
           onBack={() => goTo(3)}
-          onNext={handleProviderNext}
+          onNext={handleAboutYouNext}
         />
       )}
 
       {step === 5 && (
-        <Step4Persona
-          models={models}
-          modelsLoading={modelsLoading}
+        <Step3Provider
+          initialDraft={providerDraft}
           onBack={() => goTo(4)}
-          onNext={handlePersonaNext}
+          onNext={handleProviderNext}
         />
       )}
 
       {step === 6 && (
+        <Step4Persona
+          models={models}
+          modelsLoading={modelsLoading}
+          onBack={() => goTo(5)}
+          onNext={handlePersonaNext}
+        />
+      )}
+
+      {step === 7 && (
         <Step5Done
           displayName={displayName}
           providerName={providerDraft?.name ?? null}

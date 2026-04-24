@@ -6,8 +6,11 @@ import { ProviderSettings } from "./ProviderSettings";
 import { PersonaSettings } from "./PersonaSettings";
 import { CredentialsSettings } from "./CredentialsSettings";
 import { McpServerSettings } from "./McpServerSettings";
-
-import { GeneralSettings } from "./GeneralSettings";
+import { WebhookSettings } from "./WebhookSettings";
+import { ProfileSettings } from "./ProfileSettings";
+import { AppearanceSettings } from "./AppearanceSettings";
+import { TailscaleSettings } from "./TailscaleSettings";
+import { AccessSettings } from "./AccessSettings";
 import { ArchivedThreadsSettings } from "./ArchivedThreadsSettings";
 
 export interface SettingsModalProps {
@@ -107,7 +110,47 @@ export function SettingsModal({
             transition: "opacity 0.2s, transform 0.2s",
           }}
         >
-          <SettingsSidebar tab={tab} onTabChange={setTab} onClose={onClose} />
+          <SettingsSidebar tab={tab} onTabChange={setTab} />
+
+          {/* Close button */}
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close settings"
+            style={{
+              position: "absolute",
+              top: 14,
+              right: 16,
+              width: 28,
+              height: 28,
+              borderRadius: 7,
+              border: "none",
+              background: "transparent",
+              color: "var(--text-tertiary)",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: 18,
+              lineHeight: 1,
+              zIndex: 10,
+              transition: "background 0.15s, color 0.15s",
+            }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.background =
+                "var(--bg-tertiary)";
+              (e.currentTarget as HTMLButtonElement).style.color =
+                "var(--text-primary)";
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.background =
+                "transparent";
+              (e.currentTarget as HTMLButtonElement).style.color =
+                "var(--text-tertiary)";
+            }}
+          >
+            ×
+          </button>
 
           {/* Main content */}
           <div
@@ -130,8 +173,11 @@ export function SettingsModal({
                 <PersonaSettings onDataChanged={handleDataChanged} />
               )}
               {tab === "mcp-servers" && <McpServerSettings />}
-
-              {tab === "general" && <GeneralSettings />}
+              {tab === "webhooks" && <WebhookSettings />}
+              {tab === "profile" && <ProfileSettings />}
+              {tab === "appearance" && <AppearanceSettings />}
+              {tab === "tailscale" && <TailscaleSettings />}
+              {tab === "access" && <AccessSettings />}
               {tab === "archived-threads" && <ArchivedThreadsSettings />}
             </div>
           </div>

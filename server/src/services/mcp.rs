@@ -1634,18 +1634,42 @@ impl McpConnectionManager {
 
     // ─── Credential placeholder resolution ───────────────────────────────────
 
-    /// Resolve a `{credential:<key>}` placeholder in an env var value.
-    /// Plain values (without the placeholder) are returned unchanged.
+    /// Resolve a `{credential:<key>}` or `{credential:<key>:<field>}` placeholder
+    /// in an env var value.  Plain values (without the placeholder) are returned
+    /// unchanged.
+    ///
+    /// Supported forms:
+    /// - `{credential:schwab}`          → backwards-compat, returns `secret` field
+    /// - `{credential:schwab:secret}`   → explicit, returns `secret` field
+    /// - `{credential:schwab:password}` → returns `password` field
     async fn resolve_env_value(&self, value: &str) -> Result<String> {
-        if let Some(cred_key) = value
+        let inner = match value
             .strip_prefix("{credential:")
             .and_then(|s| s.strip_suffix('}'))
         {
-            credentials::resolve_secret(&self.pool, &self.master_key, cred_key)
+            Some(s) => s,
+            None => return Ok(value.to_string()),
+        };
+
+        // Split on the first `:` to separate key from optional field selector.
+        match inner.split_once(':') {
+            // `{credential:key:field}` form
+            Some((cred_key, field)) => {
+                credentials::resolve_field(&self.pool, &self.master_key, cred_key, field)
+                    .await
+                    .map_err(|e| {
+                        anyhow!(
+                            "env credential '{}' field '{}' not found: {}",
+                            cred_key,
+                            field,
+                            e
+                        )
+                    })
+            }
+            // `{credential:key}` form — backwards-compat, returns `secret`
+            None => credentials::resolve_secret(&self.pool, &self.master_key, inner)
                 .await
-                .map_err(|e| anyhow!("env credential '{}' not found: {}", cred_key, e))
-        } else {
-            Ok(value.to_string())
+                .map_err(|e| anyhow!("env credential '{}' not found: {}", inner, e)),
         }
     }
 }
@@ -1775,12 +1799,56 @@ mod tests {
     }
 
     #[test]
-    fn resolve_env_value_extracts_key() {
+    fn resolve_env_value_extracts_key_no_field() {
+        // `{credential:github_pat}` — plain form, no field selector.
         let value = "{credential:github_pat}";
-        let key = value
+        let inner = value
+            .strip_prefix("{credential:")
+            .and_then(|s| s.strip_suffix('}'))
+            .expect("should be a placeholder");
+        let parsed = inner.split_once(':');
+        assert!(
+            parsed.is_none(),
+            "no field selector expected for plain form"
+        );
+        assert_eq!(inner, "github_pat");
+    }
+
+    #[test]
+    fn resolve_env_value_extracts_key_and_field_secret() {
+        // `{credential:schwab:secret}` — explicit secret field selector.
+        let value = "{credential:schwab:secret}";
+        let inner = value
+            .strip_prefix("{credential:")
+            .and_then(|s| s.strip_suffix('}'))
+            .expect("placeholder");
+        let (key, field) = inner.split_once(':').expect("field separator");
+        assert_eq!(key, "schwab");
+        assert_eq!(field, "secret");
+    }
+
+    #[test]
+    fn resolve_env_value_extracts_key_and_field_password() {
+        // `{credential:schwab:password}` — password field selector.
+        let value = "{credential:schwab:password}";
+        let inner = value
+            .strip_prefix("{credential:")
+            .and_then(|s| s.strip_suffix('}'))
+            .expect("placeholder");
+        let (key, field) = inner.split_once(':').expect("field separator");
+        assert_eq!(key, "schwab");
+        assert_eq!(field, "password");
+    }
+
+    #[test]
+    fn resolve_env_value_no_false_positive_on_similar_prefix() {
+        // A value that starts with `{credential:` but has no closing `}` should
+        // NOT match the placeholder.
+        let value = "{credential:oops";
+        let inner = value
             .strip_prefix("{credential:")
             .and_then(|s| s.strip_suffix('}'));
-        assert_eq!(key, Some("github_pat"));
+        assert!(inner.is_none(), "missing closing brace must not match");
     }
 
     // ── JsonRpcRequest serialisation ─────────────────────────────────────────
@@ -1898,6 +1966,8 @@ mod tests {
             config: r#"{"executable":"docker","args":[],"env":{}}"#.to_string(),
             status: "inactive".to_string(),
             enabled: true,
+            tool_call_timeout_secs: None,
+            disabled_tools: "[]".to_string(),
             created_at: "2024-01-01T00:00:00Z".to_string(),
             updated_at: "2024-01-01T00:00:00Z".to_string(),
         };

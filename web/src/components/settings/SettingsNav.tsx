@@ -4,9 +4,13 @@ import {
   Password,
   UserAvatar,
   ToolKit,
-  Settings,
   Archive,
   Ai,
+  UserProfile,
+  ColorPalette,
+  Network_3,
+  Certificate,
+  Webhook,
 } from "@carbon/icons-react";
 import type { SettingsTab } from "./shared";
 
@@ -59,51 +63,47 @@ export function NavItem({
   );
 }
 
-// ─── BackLink ─────────────────────────────────────────────────────────────────
+// ─── SectionLabel ─────────────────────────────────────────────────────────────
 
-export function BackLink({ onClick }: { onClick: () => void }) {
-  const [hovered, setHovered] = useState(false);
+function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+    <div
       style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 7,
-        padding: "7px 16px",
-        margin: "0 8px 12px",
-        borderRadius: 6,
-        fontSize: 13,
-        color: hovered ? "var(--text-primary)" : "var(--text-secondary)",
-        cursor: "pointer",
-        background: hovered ? "var(--bg-tertiary)" : "none",
-        border: "none",
-        transition: "background 0.15s, color 0.15s",
-        fontFamily: "inherit",
+        padding: "10px 16px 4px",
+        fontSize: 10,
+        fontWeight: 600,
+        color: "var(--text-tertiary)",
+        textTransform: "uppercase",
+        letterSpacing: "0.08em",
       }}
     >
-      ← Back to Chats
-    </button>
+      {children}
+    </div>
+  );
+}
+
+// ─── Divider ──────────────────────────────────────────────────────────────────
+
+function NavDivider() {
+  return (
+    <div
+      style={{
+        height: 1,
+        background: "var(--border-subtle)",
+        margin: "8px 16px",
+      }}
+    />
   );
 }
 
 // ─── SettingsSidebar ──────────────────────────────────────────────────────────
 
-/**
- * The 220px left sidebar inside SettingsModal.
- * Renders the brand header, back link, nav section label, and tab nav items.
- */
 export function SettingsSidebar({
   tab,
   onTabChange,
-  onClose,
 }: {
   tab: SettingsTab;
   onTabChange: (t: SettingsTab) => void;
-  onClose: () => void;
 }) {
   return (
     <aside
@@ -115,6 +115,7 @@ export function SettingsSidebar({
         display: "flex",
         flexDirection: "column",
         padding: "20px 0",
+        overflowY: "auto",
       }}
     >
       {/* Brand */}
@@ -125,7 +126,7 @@ export function SettingsSidebar({
           gap: 8,
           padding: "0 16px 20px",
           borderBottom: "1px solid var(--border-subtle)",
-          marginBottom: 12,
+          marginBottom: 8,
         }}
       >
         <Ai size={20} />
@@ -139,21 +140,6 @@ export function SettingsSidebar({
         >
           agent-deck
         </span>
-      </div>
-
-      <BackLink onClick={onClose} />
-
-      <div
-        style={{
-          padding: "4px 16px 6px",
-          fontSize: 10,
-          fontWeight: 600,
-          color: "var(--text-tertiary)",
-          textTransform: "uppercase",
-          letterSpacing: "0.08em",
-        }}
-      >
-        Settings
       </div>
 
       <NavItem
@@ -180,13 +166,38 @@ export function SettingsSidebar({
         active={tab === "mcp-servers"}
         onClick={() => onTabChange("mcp-servers")}
       />
+      <NavItem
+        icon={<Webhook size={16} />}
+        label="Webhooks"
+        active={tab === "webhooks"}
+        onClick={() => onTabChange("webhooks")}
+      />
 
       <NavItem
-        icon={<Settings size={16} />}
-        label="General"
-        active={tab === "general"}
-        onClick={() => onTabChange("general")}
+        icon={<UserProfile size={16} />}
+        label="User Profile"
+        active={tab === "profile"}
+        onClick={() => onTabChange("profile")}
       />
+      <NavItem
+        icon={<ColorPalette size={16} />}
+        label="Appearance"
+        active={tab === "appearance"}
+        onClick={() => onTabChange("appearance")}
+      />
+      <NavItem
+        icon={<Network_3 size={16} />}
+        label="Tailscale VPN"
+        active={tab === "tailscale"}
+        onClick={() => onTabChange("tailscale")}
+      />
+      <NavItem
+        icon={<Certificate size={16} />}
+        label="Access"
+        active={tab === "access"}
+        onClick={() => onTabChange("access")}
+      />
+
       <NavItem
         icon={<Archive size={16} />}
         label="Archived Threads"

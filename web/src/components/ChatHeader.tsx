@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { Thread, Provider, Model } from "@/types";
-import { providersApi, modelsApi } from "@/api/client";
+import { useThreadStore } from "@/stores/useThreadStore";
+import { providersApi, modelsApi, threadsApi } from "@/api/client";
 import { Menu, FolderOpen } from "lucide-react";
 import styles from "./ChatHeader.module.css";
 
@@ -10,6 +11,7 @@ interface ChatHeaderProps {
   onToggleConfig?: () => void;
   onMobileMenuOpen?: () => void;
   onOpenExplorer?: () => void;
+  onTitleUpdate?: (updated: Thread) => void;
 }
 
 // Module-level cache so all ChatHeader instances share one fetch per session.
@@ -63,6 +65,7 @@ export function ChatHeader({
   onToggleConfig,
   onMobileMenuOpen,
   onOpenExplorer,
+  onTitleUpdate,
 }: ChatHeaderProps) {
   const persona = thread.persona;
   const emoji = persona?.emoji ?? "🤖";
@@ -70,6 +73,12 @@ export function ChatHeader({
 
   const [providerName, setProviderName] = useState<string | null>(null);
   const [modelName, setModelName] = useState<string | null>(null);
+
+  const [editing, setEditing] = useState(false);
+  const [editValue, setEditValue] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -96,10 +105,66 @@ export function ChatHeader({
     thread.persona?.default_model,
   ]);
 
+  useEffect(() => {
+    if (editing) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }
+  }, [editing]);
+
   const parts: string[] = [personaName];
   if (providerName) parts.push(providerName);
   if (modelName) parts.push(modelName);
   const subtitle = parts.join(" · ");
+
+  function startEditing() {
+    setEditValue(thread.title ?? "");
+    setEditing(true);
+  }
+
+  function cancelEditing() {
+    setEditing(false);
+    setEditValue("");
+  }
+
+  async function commitEdit() {
+    const trimmed = editValue.trim();
+    if (!trimmed || trimmed === thread.title) {
+      cancelEditing();
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const res = await threadsApi.update(thread.id, { title: trimmed });
+      useThreadStore.getState().upsertThread(res.data);
+      onTitleUpdate?.(res.data);
+    } catch {
+      // Leave editing mode even on failure — the caller's state will not update,
+      // so the title will revert to the previous value on next render.
+    } finally {
+      setSaving(false);
+      setEditing(false);
+      setEditValue("");
+    }
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      commitEdit();
+    } else if (e.key === "Escape") {
+      cancelEditing();
+    }
+  }
+
+  // Prevent the blur-triggered commitEdit from double-firing after Enter/Escape
+  // already closed editing. We track whether we initiated the blur ourselves.
+  function handleBlur() {
+    if (editing) {
+      commitEdit();
+    }
+  }
 
   return (
     <div className={styles.header}>
@@ -118,7 +183,34 @@ export function ChatHeader({
         <div className={styles.avatar}>{emoji}</div>
 
         <div className={styles.meta}>
-          <div className={styles.title}>{thread.title}</div>
+          {editing ? (
+            <input
+              ref={inputRef}
+              className={styles.titleInput}
+              value={editValue}
+              disabled={saving}
+              onChange={(e) => setEditValue(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onBlur={handleBlur}
+              aria-label="Edit thread title"
+            />
+          ) : (
+            <div
+              className={`${styles.title} ${styles.titleEditable}`}
+              onClick={startEditing}
+              title="Click to rename"
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  startEditing();
+                }
+              }}
+            >
+              {thread.title}
+            </div>
+          )}
           <div className={styles.subtitle}>{subtitle}</div>
         </div>
       </div>

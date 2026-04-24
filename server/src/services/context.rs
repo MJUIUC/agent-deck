@@ -55,6 +55,18 @@ You also have access to a `recall_conversation` tool that lets you look up summa
 
 **`recall_memory` vs `recall_conversation`:** Use `recall_memory` for facts, preferences, names, and things the user has told you directly (e.g. "what's my dog's name?", "what stack do I use?"). Use `recall_conversation` when the user references a past discussion or a specific time period (e.g. "remember when we talked about X last week?", "what did we decide about the migration in March?"). When the intent is ambiguous, you may call both. They are complementary — facts live in memory, narrative context lives in conversation summaries."#;
 
+/// Skills block template — formatted with the actual skills_dir path at runtime.
+const SKILLS_BLOCK_TEMPLATE: &str = "\
+## Skill Guides
+
+Skill guides are available that document how to use this platform's built-in features. They are Markdown files stored in {skills_dir}. Only read a guide when the user explicitly asks for help with that feature.
+
+List available guides:
+  GET /api/fs/list?path={skills_dir}
+
+Read a guide:
+  GET /api/fs/read?path={skills_dir}/credentials.md";
+
 // ─── Input types ──────────────────────────────────────────────────────────────
 
 /// A single message from the thread history as loaded from the database.
@@ -112,6 +124,9 @@ pub struct AssemblyInput {
     /// When present (non-routine runs only), a system message is injected teaching
     /// the agent where to write files and how to share file:// links in chat.
     pub workspace_path: Option<String>,
+    /// Absolute path to the skills directory. When present, a system message is
+    /// injected telling the agent how to discover and read skill guides on demand.
+    pub skills_dir: Option<String>,
 }
 
 // ─── Output type ──────────────────────────────────────────────────────────────
@@ -250,6 +265,18 @@ pub fn assemble(input: AssemblyInput) -> AssembledContext {
                 .content(block)
                 .build()
                 .expect("workspace message build")
+                .into(),
+        );
+    }
+
+    // ── 2.4. System message: skills directory (always when present) ───────────
+    if let Some(ref skills_dir) = input.skills_dir {
+        let block = SKILLS_BLOCK_TEMPLATE.replace("{skills_dir}", skills_dir);
+        messages.push(
+            ChatCompletionRequestSystemMessageArgs::default()
+                .content(block)
+                .build()
+                .expect("skills message build")
                 .into(),
         );
     }
@@ -536,6 +563,7 @@ mod tests {
             mcp_tools: vec![],
             conversation_summary: None,
             workspace_path: None,
+            skills_dir: None,
         }
     }
 
@@ -865,8 +893,8 @@ mod tests {
         let defs = built_in_tool_defs_for_test();
         assert_eq!(
             defs.len(),
-            4,
-            "expected exactly save_memory, recall_memory, delete_memory, and recall_conversation in the built-in registry"
+            5,
+            "expected exactly save_memory, recall_memory, delete_memory, recall_conversation, and tailscale_status in the built-in registry"
         );
     }
 
@@ -960,6 +988,7 @@ mod tests {
             mcp_tools: vec![],
             conversation_summary: None,
             workspace_path: None,
+            skills_dir: None,
         };
 
         let ctx = assemble(input);
@@ -988,7 +1017,7 @@ mod tests {
         );
 
         // Tools
-        assert_eq!(ctx.tools.len(), 4);
+        assert_eq!(ctx.tools.len(), 5);
     }
 
     #[test]
@@ -1008,6 +1037,7 @@ mod tests {
             mcp_tools: vec![],
             conversation_summary: None,
             workspace_path: None,
+            skills_dir: None,
         };
         let ctx = assemble(input);
         // System message must not contain memory instructions
@@ -1060,6 +1090,7 @@ mod tests {
             mcp_tools: vec![mcp_tool],
             conversation_summary: None,
             workspace_path: None,
+            skills_dir: None,
         };
         let ctx = assemble(input);
         assert_eq!(
