@@ -338,6 +338,10 @@ pub async fn build_router(
                 .delete(tokens::delete_mcp),
         )
         .route("/api/mcp-servers/:id/tools", get(tokens::list_mcp_tools))
+        .route(
+            "/api/mcp-servers/:id/restart",
+            axum::routing::post(tokens::restart_mcp),
+        )
         // Threads
         .route("/api/threads", get(threads::list).post(threads::create))
         .route(

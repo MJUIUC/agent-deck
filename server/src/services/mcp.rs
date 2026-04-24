@@ -1807,7 +1807,10 @@ mod tests {
             .and_then(|s| s.strip_suffix('}'))
             .expect("should be a placeholder");
         let parsed = inner.split_once(':');
-        assert!(parsed.is_none(), "no field selector expected for plain form");
+        assert!(
+            parsed.is_none(),
+            "no field selector expected for plain form"
+        );
         assert_eq!(inner, "github_pat");
     }
 
@@ -1963,6 +1966,8 @@ mod tests {
             config: r#"{"executable":"docker","args":[],"env":{}}"#.to_string(),
             status: "inactive".to_string(),
             enabled: true,
+            tool_call_timeout_secs: None,
+            disabled_tools: "[]".to_string(),
             created_at: "2024-01-01T00:00:00Z".to_string(),
             updated_at: "2024-01-01T00:00:00Z".to_string(),
         };

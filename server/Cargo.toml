@@ -35,6 +35,8 @@ hmac = { workspace = true }
 cookie = { workspace = true }
 axum-extra = { workspace = true }
 
+iana-time-zone = { workspace = true }
+chrono-tz = { workspace = true }
 futures = { workspace = true }
 tokio-stream = { workspace = true }
 async-trait = { workspace = true }

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { profileApi } from "@/api/client";
 import type { UserProfile } from "@/types";
+import { profileApi } from "@/api/client";
 import { Btn, FieldInput, FieldLabel, FieldTextarea } from "./shared";
 
 // ─── Section card ─────────────────────────────────────────────────────────────
@@ -170,6 +170,78 @@ function AboutField({
   );
 }
 
+// ─── TimezoneField ────────────────────────────────────────────────────────────
+
+function TimezoneField({
+  value,
+  detectedTimezone,
+  saving,
+  onBlurSave,
+}: {
+  value: string;
+  detectedTimezone: string;
+  saving: boolean;
+  onBlurSave: (field: keyof UserProfile, value: string) => void;
+}) {
+  const [localValue, setLocalValue] = useState(value);
+
+  useEffect(() => {
+    setLocalValue(value);
+  }, [value]);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}
+      >
+        <FieldLabel>
+          Timezone
+          {saving && (
+            <span
+              style={{
+                marginLeft: 6,
+                fontSize: 10,
+                color: "var(--text-tertiary)",
+              }}
+            >
+              Saving…
+            </span>
+          )}
+        </FieldLabel>
+        {detectedTimezone && value !== detectedTimezone && (
+          <button
+            type="button"
+            onClick={() => onBlurSave("timezone", detectedTimezone)}
+            style={{
+              background: "none",
+              border: "none",
+              padding: "2px 0",
+              fontSize: 11,
+              color: "var(--accent-primary)",
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            Use detected: {detectedTimezone}
+          </button>
+        )}
+      </div>
+      <FieldInput
+        value={localValue}
+        placeholder={detectedTimezone || "e.g. America/Los_Angeles"}
+        disabled={saving}
+        onChange={(e) => setLocalValue(e.target.value)}
+        onBlur={() => onBlurSave("timezone", localValue)}
+        style={{ opacity: saving ? 0.6 : 1 }}
+      />
+    </div>
+  );
+}
+
 // ─── ProfileSettings ──────────────────────────────────────────────────────────
 
 export function ProfileSettings() {
@@ -272,11 +344,9 @@ export function ProfileSettings() {
             saving={profileSaving === "location"}
             onBlurSave={handleProfileBlur}
           />
-          <ProfileField
-            label="Timezone"
-            field="timezone"
-            value={profile?.timezone ?? detectedTimezone}
-            placeholder="e.g. America/Los_Angeles"
+          <TimezoneField
+            value={profile?.timezone ?? ""}
+            detectedTimezone={detectedTimezone}
             saving={profileSaving === "timezone"}
             onBlurSave={handleProfileBlur}
           />

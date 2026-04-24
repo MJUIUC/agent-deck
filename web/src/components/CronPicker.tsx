@@ -19,6 +19,8 @@ export interface CronPickerProps {
   value: string;
   /** Called whenever the picker generates a new expression */
   onChange: (expr: string) => void;
+  /** IANA timezone name shown to the user so they know what timezone their schedule runs in */
+  timezone?: string;
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -154,7 +156,7 @@ function cx(...args: (string | false | undefined | null)[]): string {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function CronPicker({ value, onChange }: CronPickerProps) {
+export function CronPicker({ value, onChange, timezone }: CronPickerProps) {
   const [open, setOpen] = useState(false);
   const [state, setState] = useState<PickerState>(() => parseCron(value));
 
@@ -316,6 +318,14 @@ export function CronPicker({ value, onChange }: CronPickerProps) {
 
           {/* 4. Human-readable description */}
           {description && <p className={styles.description}>{description}</p>}
+          {timezone && (
+            <p
+              className={styles.description}
+              style={{ marginTop: 4, opacity: 0.7 }}
+            >
+              🕐 Runs in <strong>{timezone}</strong>
+            </p>
+          )}
         </div>
       )}
     </div>

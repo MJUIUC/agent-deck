@@ -68,9 +68,12 @@ pub async fn complete(
     // Create the single user row
     let user = User::new(payload.display_name.trim());
 
-    sqlx::query("INSERT INTO users (id, display_name, created_at) VALUES (?, ?, ?)")
+    let system_tz = iana_time_zone::get_timezone().unwrap_or_else(|_| "UTC".to_string());
+
+    sqlx::query("INSERT INTO users (id, display_name, timezone, created_at) VALUES (?, ?, ?, ?)")
         .bind(&user.id)
         .bind(&user.display_name)
+        .bind(&system_tz)
         .bind(&user.created_at)
         .execute(&state.pool)
         .await?;

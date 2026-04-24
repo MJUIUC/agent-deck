@@ -334,6 +334,44 @@ pub async fn delete_mcp(
     Ok((StatusCode::OK, Json(json!({ "data": { "deleted": true } }))))
 }
 
+// ─── Restart MCP Server ────────────────────────────────────────────────────────
+
+/// POST /api/mcp-servers/:id/restart
+///
+/// Restart an enabled MCP server by disconnecting and reconnecting it.
+pub async fn restart_mcp(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> AppResult<impl IntoResponse> {
+    let user_id = get_user_id(&state).await?;
+
+    let server: Option<McpServer> = sqlx::query_as(
+        "SELECT id, user_id, name, tag, description, source_url, server_type, config, status, enabled, tool_call_timeout_secs, disabled_tools, created_at, updated_at
+         FROM mcp_servers
+         WHERE id = ? AND user_id = ?",
+    )
+    .bind(&id)
+    .bind(&user_id)
+    .fetch_optional(&state.pool)
+    .await?;
+
+    let server = match server {
+        Some(s) => s,
+        None => return Err(AppError::NotFound(format!("MCP server '{}' not found", id))),
+    };
+
+    if !server.enabled {
+        return Err(AppError::BadRequest("Server is not enabled".to_string()));
+    }
+
+    state.mcp.connect_server(&id).await;
+
+    Ok((
+        StatusCode::OK,
+        Json(json!({ "data": { "restarted": true } })),
+    ))
+}
+
 // ─── Device Tokens ─────────────────────────────────────────────────────────────
 
 /// POST /api/device-tokens

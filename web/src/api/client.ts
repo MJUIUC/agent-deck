@@ -496,6 +496,10 @@ export const mcpServersApi = {
   listTools(id: string): Promise<{ data: McpTool[] }> {
     return apiFetch(`/api/mcp-servers/${id}/tools`);
   },
+
+  restart(id: string): Promise<{ data: { restarted: boolean } }> {
+    return apiFetch(`/api/mcp-servers/${id}/restart`, { method: "POST" });
+  },
 };
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
@@ -508,7 +512,13 @@ export const authApi = {
   },
 
   getConfig(): Promise<{
-    data: { setup_complete: boolean; port: number; version: string };
+    data: {
+      setup_complete: boolean;
+      port: number;
+      version: string;
+      database_path: string;
+      system_timezone: string;
+    };
   }> {
     return apiFetch("/api/config");
   },

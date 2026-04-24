@@ -1261,6 +1261,20 @@ function McpServerCard({
   onServerUpdate: (server: McpServer) => void;
 }) {
   const isError = server.status === "error";
+  const [restarting, setRestarting] = React.useState(false);
+
+  const handleRestart = async () => {
+    setRestarting(true);
+    try {
+      await mcpServersApi.restart(server.id);
+      // Optimistically show connecting status while the server reconnects
+      onServerUpdate({ ...server, status: "connecting" });
+    } catch {
+      // silently ignore — status will update via SSE
+    } finally {
+      setRestarting(false);
+    }
+  };
 
   return (
     <div
@@ -1386,6 +1400,11 @@ function McpServerCard({
         <Btn variant="ghost" sm onClick={() => onEdit(server)}>
           Edit
         </Btn>
+        {server.enabled && (
+          <Btn variant="ghost" sm onClick={handleRestart} disabled={restarting}>
+            {restarting ? "Restarting…" : "Restart"}
+          </Btn>
+        )}
         <Btn variant="danger" sm onClick={() => onDelete(server)}>
           Delete
         </Btn>

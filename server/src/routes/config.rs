@@ -27,6 +27,8 @@ pub async fn get_config(State(state): State<Arc<AppState>>) -> AppResult<impl In
         .unwrap_or(&state.config.database_url)
         .to_string();
 
+    let system_timezone = iana_time_zone::get_timezone().unwrap_or_else(|_| "UTC".to_string());
+
     Ok((
         StatusCode::OK,
         Json(json!({
@@ -34,6 +36,7 @@ pub async fn get_config(State(state): State<Arc<AppState>>) -> AppResult<impl In
                 "setup_complete": setup_complete,
                 "version": env!("CARGO_PKG_VERSION"),
                 "database_path": database_path,
+                "system_timezone": system_timezone,
             }
         })),
     ))

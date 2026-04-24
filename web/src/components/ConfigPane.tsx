@@ -19,6 +19,7 @@ import {
   modelsApi,
   routinesApi,
   memoriesApi,
+  profileApi,
   webhookBindingsApi,
   threadWebhookBindingsApi,
   type WebhookBinding,
@@ -684,6 +685,33 @@ export function ConfigPane({
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [deletingMemoryId, setDeletingMemoryId] = useState<string | null>(null);
   const [memoriesExpanded, setMemoriesExpanded] = useState(false);
+
+  // ── User timezone ──
+  const [userTimezone, setUserTimezone] = useState<string>("");
+
+  useEffect(() => {
+    profileApi
+      .get()
+      .then((res) => {
+        const tz =
+          res.data.timezone ||
+          (() => {
+            try {
+              return Intl.DateTimeFormat().resolvedOptions().timeZone;
+            } catch {
+              return "";
+            }
+          })();
+        setUserTimezone(tz);
+      })
+      .catch(() => {
+        try {
+          setUserTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone);
+        } catch {
+          /* ignore */
+        }
+      });
+  }, []);
 
   // Sync local state when thread prop changes (different thread selected)
   useEffect(() => {
@@ -1398,6 +1426,7 @@ export function ConfigPane({
                     <CronPicker
                       value={routineFormCron}
                       onChange={setRoutineFormCron}
+                      timezone={userTimezone}
                     />
 
                     {routineFormError && (
