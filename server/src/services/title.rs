@@ -75,7 +75,7 @@ pub async fn try_llm_title(
     // ── Load the provider row ─────────────────────────────────────────────────
 
     let provider_row: Option<crate::models::provider::Provider> = sqlx::query_as(
-        "SELECT id, user_id, name, kind, base_url, api_key, enabled, created_at
+        "SELECT id, user_id, name, kind, base_url, api_key, enabled, vision, created_at
          FROM providers WHERE id = ? AND user_id = ?",
     )
     .bind(&provider_id)
