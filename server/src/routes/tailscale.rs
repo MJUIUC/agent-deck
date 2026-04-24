@@ -39,12 +39,12 @@ pub fn log_status(status: &TailscaleStatus) {
 
 /// Returns true if the fields that are worth surfacing in logs have changed.
 fn status_changed(old: &TailscaleStatus, new: &TailscaleStatus) -> bool {
+    // Only compare boolean state — URL fields can flicker between polls due to
+    // non-deterministic CLI output parsing and should not trigger a log line.
     old.installed != new.installed
         || old.connected != new.connected
         || old.funnel_enabled != new.funnel_enabled
-        || old.funnel_url != new.funnel_url
         || old.serving != new.serving
-        || old.serve_url != new.serve_url
 }
 
 pub async fn get_status(State(state): State<Arc<AppState>>) -> AppResult<impl IntoResponse> {
