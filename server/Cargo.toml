@@ -45,6 +45,7 @@ dirs = { workspace = true }
 tokio-util = { workspace = true }
 p256 = { workspace = true }
 web-push = { workspace = true }
+image = { workspace = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }

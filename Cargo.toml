@@ -43,3 +43,4 @@ dirs = "5"
 tokio-util = { version = "0.7", features = ["rt", "io"] }
 p256 = { version = "0.13", features = ["pkcs8", "pem"] }
 web-push = { version = "0.11.0", default-features = false }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "bmp"] }
