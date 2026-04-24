@@ -28,15 +28,7 @@ async fn get_user_id(state: &AppState) -> AppResult<String> {
 
 /// Helper: verify a provider belongs to the current user and return it.
 async fn get_provider(state: &AppState, provider_id: &str, user_id: &str) -> AppResult<Provider> {
-    let provider: Option<Provider> = sqlx::query_as(
-        "SELECT id, user_id, name, kind, base_url, api_key, enabled, vision, created_at
-         FROM providers
-         WHERE id = ? AND user_id = ?",
-    )
-    .bind(provider_id)
-    .bind(user_id)
-    .fetch_optional(&state.pool)
-    .await?;
+    let provider: Option<Provider> = Provider::fetch(&state.pool, provider_id, user_id).await?;
 
     provider.ok_or_else(|| AppError::NotFound(format!("Provider '{}' not found", provider_id)))
 }

@@ -28,15 +28,7 @@ async fn get_user_id(state: &AppState) -> AppResult<String> {
 pub async fn list(State(state): State<Arc<AppState>>) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
 
-    let providers: Vec<Provider> = sqlx::query_as(
-        "SELECT id, user_id, name, kind, base_url, api_key, enabled, vision, created_at
-         FROM providers
-         WHERE user_id = ?
-         ORDER BY created_at ASC",
-    )
-    .bind(&user_id)
-    .fetch_all(&state.pool)
-    .await?;
+    let providers: Vec<Provider> = Provider::fetch_all(&state.pool, &user_id).await?;
 
     let responses: Vec<ProviderResponse> = providers.into_iter().map(Into::into).collect();
 
@@ -50,15 +42,7 @@ pub async fn get(
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
 
-    let provider: Option<Provider> = sqlx::query_as(
-        "SELECT id, user_id, name, kind, base_url, api_key, enabled, vision, created_at
-         FROM providers
-         WHERE id = ? AND user_id = ?",
-    )
-    .bind(&id)
-    .bind(&user_id)
-    .fetch_optional(&state.pool)
-    .await?;
+    let provider: Option<Provider> = Provider::fetch(&state.pool, &id, &user_id).await?;
 
     match provider {
         Some(p) => Ok((
@@ -145,15 +129,7 @@ pub async fn update(
     let user_id = get_user_id(&state).await?;
 
     // Verify provider exists
-    let existing: Option<Provider> = sqlx::query_as(
-        "SELECT id, user_id, name, kind, base_url, api_key, enabled, vision, created_at
-         FROM providers
-         WHERE id = ? AND user_id = ?",
-    )
-    .bind(&id)
-    .bind(&user_id)
-    .fetch_optional(&state.pool)
-    .await?;
+    let existing: Option<Provider> = Provider::fetch(&state.pool, &id, &user_id).await?;
 
     let existing = match existing {
         Some(p) => p,
@@ -249,15 +225,7 @@ pub async fn test_connection(
 ) -> AppResult<impl IntoResponse> {
     let user_id = get_user_id(&state).await?;
 
-    let provider: Option<Provider> = sqlx::query_as(
-        "SELECT id, user_id, name, kind, base_url, api_key, enabled, vision, created_at
-         FROM providers
-         WHERE id = ? AND user_id = ?",
-    )
-    .bind(&id)
-    .bind(&user_id)
-    .fetch_optional(&state.pool)
-    .await?;
+    let provider: Option<Provider> = Provider::fetch(&state.pool, &id, &user_id).await?;
 
     let provider = match provider {
         Some(p) => p,

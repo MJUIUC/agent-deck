@@ -445,14 +445,8 @@ async fn run_inner(
     };
 
     // Load the provider row from the database.
-    let provider_row: Option<crate::models::provider::Provider> = sqlx::query_as(
-        "SELECT id, user_id, name, kind, base_url, api_key, enabled, vision, created_at
-         FROM providers WHERE id = ? AND user_id = ?",
-    )
-    .bind(&provider_id)
-    .bind(user_id)
-    .fetch_optional(&state.pool)
-    .await?;
+    let provider_row: Option<crate::models::provider::Provider> =
+        crate::models::provider::Provider::fetch(&state.pool, &provider_id, user_id).await?;
 
     let provider_row = match provider_row {
         Some(p) if p.enabled => p,
