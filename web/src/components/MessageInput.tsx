@@ -117,7 +117,10 @@ export function MessageInput({
 
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const files = Array.from(e.target.files ?? []);
+      const files = Array.from(e.target.files ?? []).map((file, i) => {
+        const uniqueName = `${Date.now() + i}_${file.name}`;
+        return new File([file], uniqueName, { type: file.type });
+      });
       setPendingFiles((prev) => [...prev, ...files]);
       // Reset input so same file can be re-selected
       e.target.value = "";
