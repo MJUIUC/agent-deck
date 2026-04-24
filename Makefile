@@ -1,3 +1,15 @@
+CURDIR := $(shell pwd)
+
+## dev: Build the React app then start the server pointing at the local server/public dir
+.PHONY: dev
+dev: build-web
+	PUBLIC_DIR="$(CURDIR)/server/public" cargo run
+
+## build-web: Build the React frontend into server/public/
+.PHONY: build-web
+build-web:
+	cd web && npm ci && npm run build
+
 TERMINAL_MCP_REPO := https://github.com/iris-networks/terminal_mcp.git
 TERMINAL_MCP_HASH := 73f111d580bd5c64a8d8742e4be5bc4698794234
 TERMINAL_MCP_INSTALL_DIR := $(HOME)/.agent-deck/mcp/terminalmcp

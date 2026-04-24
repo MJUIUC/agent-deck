@@ -16,6 +16,28 @@ async fn main() -> Result<()> {
     // Load .env file if present
     dotenvy::dotenv().ok();
 
+    // ── Parse CLI flags ───────────────────────────────────────────────────────
+    // --public-dir <path>  Override the directory the server serves static
+    //                      frontend assets from. Takes precedence over the
+    //                      PUBLIC_DIR environment variable.
+    {
+        let args: Vec<String> = std::env::args().collect();
+        let mut i = 1;
+        while i < args.len() {
+            if args[i] == "--public-dir" {
+                if let Some(val) = args.get(i + 1) {
+                    std::env::set_var("PUBLIC_DIR", val);
+                    i += 2;
+                } else {
+                    eprintln!("Error: --public-dir requires a path argument");
+                    std::process::exit(1);
+                }
+            } else {
+                i += 1;
+            }
+        }
+    }
+
     // Initialize tracing
     tracing_subscriber::fmt()
         .with_env_filter(
