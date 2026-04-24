@@ -117,13 +117,39 @@ The installer stops any running instance, rebuilds, redeploys, and restarts.
 
 ---
 
+## Local development
+
+The server and frontend are built and run independently.
+
+```bash
+# Terminal 1 — rebuild the React app whenever you make frontend changes
+cd web && npm run build
+
+# Terminal 2 — run the Rust server (serves the build above)
+cd server && cargo run
+```
+
+`npm run dev` runs Vite's dev server on `:5173` with hot-reload and proxies API calls to the Rust server on `:7474`. It's useful for fast frontend iteration on the same machine, but **mobile and remote devices always hit the Rust server directly** — so you need `npm run build` to make those reflect your latest changes.
+
+To avoid setting `PUBLIC_DIR` on every run, copy the example env file and fill it in:
+
+```bash
+cp server/.env.example server/.env
+# then set PUBLIC_DIR to the absolute path of server/public
+```
+
+`cargo run` picks up `server/.env` automatically via `dotenvy`.
+
+---
+
 ## Environment variables
 
 | Variable | Default | Description |
 |---|---|---|
-| `AGENT_DECK_HOME` | `~/.agent-deck` | Root data and install directory |
-| `AGENT_DECK_PORT` | `7474` | Server listen port |
-| `FCM_SERVICE_ACCOUNT_JSON` | *(unset)* | Firebase service account path for push notifications |
+| `PORT` | `7474` | Server listen port |
+| `PUBLIC_DIR` | `~/.agent-deck/.process/public` | Path to compiled React SPA static files |
+| `AGENT_DECK_DATA_DIR` | `~/.agent-deck` | Root data directory (database, workspaces, MCP configs) |
+| `FCM_SERVICE_ACCOUNT_JSON` | *(unset)* | Absolute path to Firebase service account JSON for push notifications |
 | `RUST_LOG` | `info` | Log level (`info`, `debug`, `trace`) |
 
 ---
