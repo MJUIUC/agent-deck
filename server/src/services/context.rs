@@ -180,11 +180,28 @@ fn compress_image_for_llm(data: &[u8]) -> anyhow::Result<Vec<u8>> {
     const MAX_DIM: u32 = 2048;
     const JPEG_QUALITY: u8 = 82;
 
+    let start = std::time::Instant::now();
+    let original_size = data.len();
+
     let img = image::load_from_memory(data)?;
+    let (orig_w, orig_h) = (img.width(), img.height());
 
     let img = if img.width() > MAX_DIM || img.height() > MAX_DIM {
-        img.resize(MAX_DIM, MAX_DIM, image::imageops::FilterType::Lanczos3)
+        let resized = img.resize(MAX_DIM, MAX_DIM, image::imageops::FilterType::Lanczos3);
+        tracing::info!(
+            original_width = orig_w,
+            original_height = orig_h,
+            resized_width = resized.width(),
+            resized_height = resized.height(),
+            "image resized for LLM"
+        );
+        resized
     } else {
+        tracing::debug!(
+            width = orig_w,
+            height = orig_h,
+            "image within size limit, skipping resize"
+        );
         img
     };
 
@@ -199,6 +216,19 @@ fn compress_image_for_llm(data: &[u8]) -> anyhow::Result<Vec<u8>> {
         rgb.height(),
         image::ExtendedColorType::Rgb8,
     )?;
+
+    let compressed_size = buf.len();
+    let elapsed = start.elapsed();
+    tracing::info!(
+        original_bytes = original_size,
+        compressed_bytes = compressed_size,
+        saving_pct = ((original_size.saturating_sub(compressed_size)) * 100)
+            .checked_div(original_size)
+            .unwrap_or(0),
+        quality = JPEG_QUALITY,
+        elapsed_ms = elapsed.as_millis(),
+        "image compressed for LLM"
+    );
 
     Ok(buf)
 }
@@ -546,12 +576,19 @@ pub fn assemble(input: AssemblyInput) -> AssembledContext {
                 Ok(raw) => {
                     // Compress before base64-encoding to reduce payload size sent to the LLM.
                     // Falls back to the original bytes if compression fails.
+                    tracing::info!(
+                        filename = %attachment.filename,
+                        path = %attachment.path,
+                        size_bytes = raw.len(),
+                        "compressing image attachment for LLM"
+                    );
                     let (bytes, mime) = match compress_image_for_llm(&raw) {
                         Ok(compressed) => (compressed, "image/jpeg".to_string()),
                         Err(e) => {
                             tracing::warn!(
-                                "Image compression for LLM failed, using original: {}",
-                                e
+                                filename = %attachment.filename,
+                                error = %e,
+                                "image compression for LLM failed, using original"
                             );
                             (raw, attachment.content_type.clone())
                         }
