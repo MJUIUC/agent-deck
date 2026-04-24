@@ -43,7 +43,8 @@ pub struct MessageResponse {
     pub execution_id: Option<String>,
     pub event_type: Option<String>,
     pub stopped: bool,
-    pub attachments: Option<String>,
+    /// Parsed from the stored JSON string so the client receives a proper array.
+    pub attachments: Option<serde_json::Value>,
     pub created_at: String,
 }
 
@@ -192,7 +193,9 @@ impl From<Message> for MessageResponse {
             execution_id: m.execution_id,
             event_type: m.event_type,
             stopped: m.stopped,
-            attachments: m.attachments,
+            // Parse the stored JSON string into a Value so the API response
+            // contains a proper array rather than a raw JSON string.
+            attachments: m.attachments.and_then(|s| serde_json::from_str(&s).ok()),
             created_at: m.created_at,
         }
     }
