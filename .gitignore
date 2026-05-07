@@ -69,4 +69,6 @@ data/avatars/
 docs/*
 !docs/skills
 !docs/skills/**
+!docs/deep-dive
+!docs/deep-dive/**
 mockups/
