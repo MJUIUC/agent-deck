@@ -1319,11 +1319,11 @@ export function ConfigPane({
             <div className={styles.sectionHeader}>
               <span className={styles.sectionTitle}>Routines</span>
               <button
-                className={showRoutineForm ? styles.cancelBtn : styles.addBtn}
-                onClick={showRoutineForm ? closeRoutineForm : openAddForm}
-                disabled={routineFormSaving}
+                className={styles.addBtn}
+                onClick={openAddForm}
+                disabled={routineFormSaving || showRoutineForm}
               >
-                {showRoutineForm ? "✕ Cancel" : "＋ Add"}
+                ＋ Add
               </button>
             </div>
 
@@ -1475,6 +1475,13 @@ export function ConfigPane({
                     )}
 
                     <div className={styles.routineFormActions}>
+                      <button
+                        className={styles.routineFormCancel}
+                        onClick={closeRoutineForm}
+                        disabled={routineFormSaving}
+                      >
+                        Cancel
+                      </button>
                       <button
                         className={styles.routineFormSave}
                         onClick={handleRoutineSave}
