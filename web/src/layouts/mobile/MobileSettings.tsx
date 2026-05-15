@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Pencil, Eye, EyeOff } from "lucide-react";
+import { Edit, View, ViewOff } from "@carbon/icons-react";
 import { TailscaleStatusCard } from "../../components/settings/TailscaleStatusCard";
 import {
   useThemeStore,
@@ -913,7 +913,7 @@ export function MobileSettings() {
                       onClick={() => handleEditCredential(credential)}
                       title="Edit"
                     >
-                      <Pencil size={13} />
+                      <Edit size={13} />
                     </button>
                     <button
                       className={styles.deleteButton}
@@ -944,10 +944,7 @@ export function MobileSettings() {
           <div className={styles.sectionLabel}>MCP Servers</div>
           <div className={styles.sectionCard}>
             {mcpServers.map((server) => (
-              <div
-                key={server.id}
-                style={{ display: "flex", flexDirection: "column" }}
-              >
+              <div key={server.id} className={styles.mcpServerBlock}>
                 <div className={styles.listRow}>
                   <span
                     className={`${styles.mcpStatusDot} ${mcpStatusDotClass(server.status)}`}
@@ -1473,9 +1470,9 @@ export function MobileSettings() {
                     tabIndex={-1}
                   >
                     {credShowPassword ? (
-                      <EyeOff size={16} />
+                      <ViewOff size={16} />
                     ) : (
-                      <Eye size={16} />
+                      <View size={16} />
                     )}
                   </button>
                 </div>
@@ -1508,7 +1505,7 @@ export function MobileSettings() {
                   onClick={() => setCredShowSecret((v) => !v)}
                   tabIndex={-1}
                 >
-                  {credShowSecret ? <EyeOff size={16} /> : <Eye size={16} />}
+                  {credShowSecret ? <ViewOff size={16} /> : <View size={16} />}
                 </button>
               </div>
             </div>
@@ -1537,7 +1534,11 @@ export function MobileSettings() {
                   onClick={() => setCredShowPassword((v) => !v)}
                   tabIndex={-1}
                 >
-                  {credShowPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  {credShowPassword ? (
+                    <ViewOff size={16} />
+                  ) : (
+                    <View size={16} />
+                  )}
                 </button>
               </div>
             </div>

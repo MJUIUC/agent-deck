@@ -10,12 +10,12 @@ import {
   useRef,
   useCallback,
 } from "react";
-import { FolderOpen } from "lucide-react";
-import type { Thread } from "@/types";
+import { FolderOpen, Attachment, InProgress } from "@carbon/icons-react";
+import type { Thread, MessageAttachment } from "@/types";
 import { useMessageStore } from "@/stores/useMessageStore";
 import { useSseStore } from "@/stores/useSseStore";
 import { useThreadStore } from "@/stores/useThreadStore";
-import { fsApi, threadsApi } from "@/api/client";
+import { fsApi, threadsApi, uploadsApi } from "@/api/client";
 import { resolveDisplayNames } from "@/components/ChatHeader";
 import { MessageBubble, StreamingBubble } from "@/components/MessageBubble";
 import { ProcessingBubble } from "@/components/ProcessingBlock";
@@ -29,7 +29,7 @@ import styles from "./MobileChatView.module.css";
 interface MobileChatViewProps {
   thread: Thread | null;
   onBack: () => void;
-  onFirstSend?: (content: string) => Promise<void>;
+  onFirstSend?: (content: string, files: File[]) => Promise<void>;
 }
 
 // ─── Icon sub-components ──────────────────────────────────────────────────────
@@ -124,6 +124,10 @@ export function MobileChatView({
   onFirstSend,
 }: MobileChatViewProps) {
   const [inputValue, setInputValue] = useState("");
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const fileInputMobileRef = useRef<HTMLInputElement>(null);
   const [configSheetOpen, setConfigSheetOpen] = useState(false);
   const [titleEditing, setTitleEditing] = useState(false);
   const [titleEditValue, setTitleEditValue] = useState("");
@@ -321,21 +325,78 @@ export function MobileChatView({
 
   const handleSend = useCallback(async () => {
     const content = inputValue.trim();
-    if (!content || isStreaming || !threadId) return;
+    if (
+      (!content && pendingFiles.length === 0) ||
+      isStreaming ||
+      !threadId ||
+      uploading
+    )
+      return;
 
+    const filesToSend = [...pendingFiles];
     setInputValue("");
+    setPendingFiles([]);
 
     // Reset textarea height
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
 
+    // Pending thread: delegate to onFirstSend which creates the thread first,
+    // then uploads files to the newly created thread.
     if (threadId === "pending" && onFirstSend) {
-      await onFirstSend(content);
-    } else {
-      await sendMessage(threadId, content);
+      const fallbackContent =
+        content || filesToSend.map((f) => f.name).join(", ");
+      await onFirstSend(fallbackContent, filesToSend);
+      return;
     }
-  }, [inputValue, isStreaming, threadId, onFirstSend, sendMessage]);
+
+    // Existing thread: upload files, then send message.
+    const uploaded: MessageAttachment[] = [];
+    try {
+      setUploading(true);
+      setUploadError(null);
+      for (const file of filesToSend) {
+        const res = await uploadsApi.upload(threadId, file);
+        uploaded.push({
+          path: res.data.path,
+          filename: res.data.filename,
+          content_type: res.data.content_type,
+        });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Upload failed";
+      console.error("Upload failed:", msg);
+      setUploadError(msg);
+      setUploading(false);
+      // Re-add the files to pendingFiles so the user can retry
+      setPendingFiles(filesToSend);
+      setInputValue(content);
+      return;
+    } finally {
+      setUploading(false);
+    }
+
+    const finalContent = content || filesToSend.map((f) => f.name).join(", ");
+    await sendMessage(threadId, finalContent, uploaded);
+  }, [
+    inputValue,
+    pendingFiles.length,
+    isStreaming,
+    uploading,
+    threadId,
+    onFirstSend,
+    sendMessage,
+  ]);
+
+  const handleFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(e.target.files ?? []);
+      setPendingFiles((prev) => [...prev, ...files]);
+      e.target.value = "";
+    },
+    [],
+  );
 
   const handleInputChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -418,7 +479,10 @@ export function MobileChatView({
 
   // ── Thread selected ──────────────────────────────────────────────────────────
 
-  const sendDisabled = !inputValue.trim() || isStreaming;
+  const sendDisabled =
+    (!inputValue.trim() && pendingFiles.length === 0) ||
+    isStreaming ||
+    uploading;
 
   return (
     <div className={styles.container}>
@@ -626,9 +690,118 @@ export function MobileChatView({
           paddingBottom: `calc(${keyboardOffset}px + env(safe-area-inset-bottom, 0px) + 8px)`,
         }}
       >
+        {/* Upload error */}
+        {uploadError && (
+          <div
+            style={{
+              padding: "4px 16px 0",
+              fontSize: 12,
+              color: "var(--error, #e05252)",
+            }}
+          >
+            Upload failed: {uploadError}
+          </div>
+        )}
+
+        {/* Attachment chips */}
+        {pendingFiles.length > 0 && (
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 6,
+              padding: "6px 16px 0",
+            }}
+          >
+            {pendingFiles.map((file, idx) => (
+              <div
+                key={idx}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 5,
+                  background: "var(--bg-elevated)",
+                  border: "1px solid var(--border-subtle)",
+                  borderRadius: 8,
+                  padding: "3px 8px 3px 5px",
+                  fontSize: 12,
+                  color: "var(--text-secondary)",
+                  maxWidth: 200,
+                }}
+              >
+                {file.type.startsWith("image/") ? (
+                  <img
+                    src={URL.createObjectURL(file)}
+                    alt={file.name}
+                    style={{
+                      width: 22,
+                      height: 22,
+                      objectFit: "cover",
+                      borderRadius: 4,
+                    }}
+                  />
+                ) : (
+                  <Attachment size={14} />
+                )}
+                <span
+                  style={{
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    maxWidth: 100,
+                  }}
+                >
+                  {file.name}
+                </span>
+                {uploading ? (
+                  <InProgress size={14} />
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPendingFiles((p) => p.filter((_, i) => i !== idx))
+                    }
+                    style={{
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      color: "var(--text-tertiary)",
+                      fontSize: 14,
+                      padding: "0 2px",
+                    }}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
         <div className={styles.inputRow}>
           {/* Pill-shaped input wrap */}
           <div className={styles.inputWrap}>
+            {/* Paperclip button */}
+            <button
+              type="button"
+              aria-label="Attach file"
+              onClick={() => fileInputMobileRef.current?.click()}
+              disabled={isStreaming || uploading}
+              style={{
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                color: "var(--text-tertiary)",
+                fontSize: 18,
+                padding: "0 4px",
+                display: "flex",
+                alignItems: "center",
+                flexShrink: 0,
+                opacity: isStreaming || uploading ? 0.4 : 1,
+              }}
+            >
+              <Attachment size={18} />
+            </button>
             <textarea
               ref={textareaRef}
               className={styles.chatInput}
@@ -663,6 +836,16 @@ export function MobileChatView({
             )}
           </div>
         </div>
+
+        {/* Hidden file input */}
+        <input
+          ref={fileInputMobileRef}
+          type="file"
+          multiple
+          accept="image/*,application/pdf,text/*,.md,.csv,.json,.txt,.ts,.tsx,.js,.jsx,.py,.rs"
+          style={{ display: "none" }}
+          onChange={handleFileChange}
+        />
       </div>
 
       {/* ── Config bottom-sheet ── */}

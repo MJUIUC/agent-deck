@@ -17,6 +17,30 @@ use crate::{
     services::{encryption, provider as provider_service},
 };
 
+/// Infer vision capability from the model's API identifier.
+/// Matches known vision-capable model families by substring so new versions
+/// (e.g. claude-sonnet-4-7) are picked up automatically.
+fn infer_vision(model_id: &str) -> bool {
+    let id = model_id.to_lowercase();
+    // Anthropic — all Claude 3+ models support vision
+    if id.contains("claude-3") || id.contains("claude-sonnet") || id.contains("claude-haiku")
+        || id.contains("claude-opus")
+    {
+        return true;
+    }
+    // OpenAI — gpt-4o, gpt-4-turbo, gpt-4-vision, o1, o3, o4
+    if id.contains("gpt-4o") || id.contains("gpt-4-turbo") || id.contains("gpt-4-vision")
+        || id.starts_with("o1") || id.starts_with("o3") || id.starts_with("o4")
+    {
+        return true;
+    }
+    // Google — all Gemini 1.5+ and 2.x support vision
+    if id.contains("gemini-1.5") || id.contains("gemini-2") || id.contains("gemini-pro-vision") {
+        return true;
+    }
+    false
+}
+
 /// Helper: get the single user id from the DB.
 async fn get_user_id(state: &AppState) -> AppResult<String> {
     let row: Option<(String,)> = sqlx::query_as("SELECT id FROM users LIMIT 1")
@@ -28,15 +52,7 @@ async fn get_user_id(state: &AppState) -> AppResult<String> {
 
 /// Helper: verify a provider belongs to the current user and return it.
 async fn get_provider(state: &AppState, provider_id: &str, user_id: &str) -> AppResult<Provider> {
-    let provider: Option<Provider> = sqlx::query_as(
-        "SELECT id, user_id, name, kind, base_url, api_key, enabled, created_at
-         FROM providers
-         WHERE id = ? AND user_id = ?",
-    )
-    .bind(provider_id)
-    .bind(user_id)
-    .fetch_optional(&state.pool)
-    .await?;
+    let provider: Option<Provider> = Provider::fetch(&state.pool, provider_id, user_id).await?;
 
     provider.ok_or_else(|| AppError::NotFound(format!("Provider '{}' not found", provider_id)))
 }
@@ -52,7 +68,7 @@ pub async fn list(
     let _ = get_provider(&state, &provider_id, &user_id).await?;
 
     let models: Vec<Model> = sqlx::query_as(
-        "SELECT id, provider_id, model_id, display_name, enabled
+        "SELECT id, provider_id, model_id, display_name, enabled, vision
          FROM models
          WHERE provider_id = ?
          ORDER BY display_name ASC",
@@ -73,7 +89,7 @@ pub async fn get(
     let _ = get_provider(&state, &provider_id, &user_id).await?;
 
     let model: Option<Model> = sqlx::query_as(
-        "SELECT id, provider_id, model_id, display_name, enabled
+        "SELECT id, provider_id, model_id, display_name, enabled, vision
          FROM models
          WHERE id = ? AND provider_id = ?",
     )
@@ -136,14 +152,16 @@ pub async fn sync(
 
         if existing.is_none() {
             let id = uuid::Uuid::new_v4().to_string();
+            let vision = infer_vision(&remote.id);
             sqlx::query(
-                "INSERT INTO models (id, provider_id, model_id, display_name, enabled)
-                 VALUES (?, ?, ?, ?, 1)",
+                "INSERT INTO models (id, provider_id, model_id, display_name, enabled, vision)
+                 VALUES (?, ?, ?, ?, 1, ?)",
             )
             .bind(&id)
             .bind(&provider_id)
             .bind(&remote.id)
             .bind(&remote.display_name)
+            .bind(vision)
             .execute(&state.pool)
             .await?;
             synced_count += 1;
@@ -152,7 +170,7 @@ pub async fn sync(
 
     // Return the full updated list
     let models: Vec<Model> = sqlx::query_as(
-        "SELECT id, provider_id, model_id, display_name, enabled
+        "SELECT id, provider_id, model_id, display_name, enabled, vision
          FROM models
          WHERE provider_id = ?
          ORDER BY display_name ASC",
@@ -174,7 +192,7 @@ pub async fn update(
     let _ = get_provider(&state, &provider_id, &user_id).await?;
 
     let existing: Option<Model> = sqlx::query_as(
-        "SELECT id, provider_id, model_id, display_name, enabled
+        "SELECT id, provider_id, model_id, display_name, enabled, vision
          FROM models
          WHERE id = ? AND provider_id = ?",
     )
@@ -198,14 +216,18 @@ pub async fn update(
         .as_deref()
         .unwrap_or(&existing.display_name);
     let enabled = payload.enabled.unwrap_or(existing.enabled);
+    let vision = payload.vision.unwrap_or(existing.vision);
 
-    sqlx::query("UPDATE models SET display_name = ?, enabled = ? WHERE id = ? AND provider_id = ?")
-        .bind(display_name)
-        .bind(enabled)
-        .bind(&model_id)
-        .bind(&provider_id)
-        .execute(&state.pool)
-        .await?;
+    sqlx::query(
+        "UPDATE models SET display_name = ?, enabled = ?, vision = ? WHERE id = ? AND provider_id = ?",
+    )
+    .bind(display_name)
+    .bind(enabled)
+    .bind(vision)
+    .bind(&model_id)
+    .bind(&provider_id)
+    .execute(&state.pool)
+    .await?;
 
     let updated = Model {
         id: existing.id,
@@ -213,6 +235,7 @@ pub async fn update(
         model_id: existing.model_id,
         display_name: display_name.to_string(),
         enabled,
+        vision,
     };
 
     Ok((StatusCode::OK, Json(json!({ "data": updated }))))

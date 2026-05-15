@@ -1,5 +1,12 @@
 import React, { useState, useEffect, useCallback, type FormEvent } from "react";
-import { Plus, Pencil, Trash2, KeyRound, Eye, EyeOff } from "lucide-react";
+import {
+  Add,
+  Edit,
+  TrashCan,
+  Password,
+  View,
+  ViewOff,
+} from "@carbon/icons-react";
 import {
   credentialsApi,
   type Credential,
@@ -344,7 +351,7 @@ function CredentialForm({
                       padding: 0,
                     }}
                   >
-                    {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                    {showPassword ? <ViewOff size={14} /> : <View size={14} />}
                   </button>
                 </div>
                 <FieldHint>
@@ -427,7 +434,7 @@ function CredentialForm({
                     padding: 0,
                   }}
                 >
-                  {showSecret ? <EyeOff size={14} /> : <Eye size={14} />}
+                  {showSecret ? <ViewOff size={14} /> : <View size={14} />}
                 </button>
               </div>
               <FieldHint>
@@ -478,7 +485,7 @@ function CredentialForm({
                     padding: 0,
                   }}
                 >
-                  {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                  {showPassword ? <ViewOff size={14} /> : <View size={14} />}
                 </button>
               </div>
             </div>
@@ -558,7 +565,7 @@ function CredentialForm({
               onClick={() => onDelete(editing)}
               style={{ marginRight: "auto" }}
             >
-              <Trash2 size={12} />
+              <TrashCan size={12} />
               Delete
             </Btn>
           )}
@@ -815,7 +822,7 @@ function CredentialRow({ credential, onEdit }: CredentialRowProps) {
             (e.currentTarget.style.color = "var(--text-tertiary)")
           }
         >
-          <Pencil size={11} />
+          <Edit size={11} />
           Edit
         </button>
       </div>
@@ -1022,7 +1029,7 @@ export function CredentialsSettings() {
           }}
         >
           <div style={{ fontSize: 40, marginBottom: 14, opacity: 0.2 }}>
-            <KeyRound size={40} style={{ margin: "0 auto" }} />
+            <Password size={40} style={{ margin: "0 auto" }} />
           </div>
           <div
             style={{
@@ -1039,7 +1046,7 @@ export function CredentialsSettings() {
             reference them by key.
           </div>
           <Btn variant="primary" onClick={openAdd}>
-            <Plus size={14} />
+            <Add size={14} />
             Add Credential
           </Btn>
         </div>
@@ -1050,7 +1057,7 @@ export function CredentialsSettings() {
             <CredentialTable credentials={credentials} onEdit={handleEdit} />
             <div style={{ marginTop: 14 }}>
               <Btn variant="ghost" onClick={openAdd}>
-                <Plus size={13} />
+                <Add size={13} />
                 Add Credential
               </Btn>
             </div>

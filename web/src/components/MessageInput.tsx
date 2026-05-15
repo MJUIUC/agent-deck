@@ -1,5 +1,13 @@
 import { useRef, useState, useCallback, useEffect } from "react";
-import { SendHorizonal, Square } from "lucide-react";
+import {
+  Attachment,
+  Close,
+  SendAlt,
+  StopFilled,
+  InProgress,
+} from "@carbon/icons-react";
+import { uploadsApi } from "@/api/client";
+import type { MessageAttachment } from "@/types";
 import styles from "./MessageInput.module.css";
 
 interface MessageInputProps {
@@ -7,7 +15,7 @@ interface MessageInputProps {
   personaName?: string;
   isSending: boolean;
   isStreaming?: boolean;
-  onSend: (content: string) => void;
+  onSend: (content: string, attachments: MessageAttachment[]) => void;
   onCancel?: () => void;
   queuedCount?: number;
 }
@@ -22,11 +30,16 @@ export function MessageInput({
   queuedCount = 0,
 }: MessageInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [value, setValue] = useState("");
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   // Reset input and focus when thread changes
   useEffect(() => {
     setValue("");
+    setPendingFiles([]);
     if (textareaRef.current) {
       textareaRef.current.style.height = "22px";
       textareaRef.current.focus();
@@ -57,23 +70,45 @@ export function MessageInput({
     [resize],
   );
 
-  const handleSubmit = useCallback(() => {
+  const handleSubmit = useCallback(async () => {
     const trimmed = value.trim();
-    // Allow sending while streaming (queues behind current run)
-    // Only block while isSending (optimistic phase, before SSE started)
-    if (!trimmed || isSending) return;
-    onSend(trimmed);
-    setValue("");
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "22px";
+    if ((!trimmed && pendingFiles.length === 0) || isSending || uploading)
+      return;
+
+    setUploading(true);
+    setUploadError(null);
+    const uploaded: MessageAttachment[] = [];
+    try {
+      for (const file of pendingFiles) {
+        const res = await uploadsApi.upload(threadId, file);
+        uploaded.push({
+          path: res.data.path,
+          filename: res.data.filename,
+          content_type: res.data.content_type,
+        });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Upload failed";
+      console.error("Upload failed:", msg);
+      setUploadError(msg);
+      setUploading(false);
+      return;
+    } finally {
+      setUploading(false);
     }
-  }, [value, isSending, onSend]);
+
+    setUploadError(null);
+    onSend(trimmed, uploaded);
+    setValue("");
+    setPendingFiles([]);
+    if (textareaRef.current) textareaRef.current.style.height = "22px";
+  }, [value, pendingFiles, isSending, uploading, onSend, threadId]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
-        handleSubmit();
+        void handleSubmit();
       }
     },
     [handleSubmit],
@@ -83,12 +118,93 @@ export function MessageInput({
     if (onCancel) onCancel();
   }, [onCancel]);
 
-  const isEmpty = value.trim().length === 0;
+  const removeFile = useCallback((idx: number) => {
+    setPendingFiles((prev) => prev.filter((_, i) => i !== idx));
+  }, []);
+
+  const handleFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(e.target.files ?? []);
+      setPendingFiles((prev) => [...prev, ...files]);
+      // Reset input so same file can be re-selected
+      e.target.value = "";
+    },
+    [],
+  );
+
+  const isEmpty = value.trim().length === 0 && pendingFiles.length === 0;
 
   return (
-    <div className={styles.wrap}>
+    <div
+      className={styles.wrap}
+      // Clear upload error when user interacts with the input area
+      onClick={() => uploadError && setUploadError(null)}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => {
+        e.preventDefault();
+        const files = Array.from(e.dataTransfer.files);
+        if (files.length) setPendingFiles((prev) => [...prev, ...files]);
+      }}
+    >
+      {/* Upload error */}
+      {uploadError && (
+        <div
+          style={{
+            padding: "4px 6px",
+            fontSize: "0.75rem",
+            color: "var(--error, #e05252)",
+          }}
+        >
+          Upload failed: {uploadError}
+        </div>
+      )}
+
+      {/* Attachment chips */}
+      {pendingFiles.length > 0 && (
+        <div className={styles.attachmentChips}>
+          {pendingFiles.map((file, idx) => (
+            <div key={idx} className={styles.chip}>
+              {file.type.startsWith("image/") ? (
+                <img
+                  src={URL.createObjectURL(file)}
+                  alt={file.name}
+                  className={styles.chipThumb}
+                />
+              ) : (
+                <Attachment size={14} />
+              )}
+              <span className={styles.chipName}>{file.name}</span>
+              {uploading ? (
+                <InProgress size={14} />
+              ) : (
+                <button
+                  type="button"
+                  className={styles.chipRemove}
+                  onClick={() => removeFile(idx)}
+                  aria-label={`Remove ${file.name}`}
+                >
+                  <Close size={12} />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Input row */}
       <div className={styles.inputRow}>
+        {/* Paperclip button */}
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={isSending || uploading}
+          aria-label="Attach file"
+          title="Attach file"
+          className={styles.attachBtn}
+        >
+          <Attachment size={15} />
+        </button>
+
         <textarea
           ref={textareaRef}
           rows={1}
@@ -113,18 +229,18 @@ export function MessageInput({
             title="Stop"
             className={styles.stopBtn}
           >
-            <Square size={14} strokeWidth={2} fill="currentColor" />
+            <StopFilled size={14} />
           </button>
         ) : (
           /* Send button */
           <button
-            onClick={handleSubmit}
-            disabled={isEmpty || isSending}
+            onClick={() => void handleSubmit()}
+            disabled={isEmpty || isSending || uploading}
             aria-label="Send message"
             title="Send"
             className={styles.sendBtn}
           >
-            <SendHorizonal size={15} strokeWidth={2} />
+            <SendAlt size={15} />
           </button>
         )}
       </div>
@@ -138,6 +254,16 @@ export function MessageInput({
           </span>
         )}
       </div>
+
+      {/* Hidden file input */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept="image/*,application/pdf,text/*,.md,.csv,.json,.txt,.ts,.tsx,.js,.jsx,.py,.rs"
+        style={{ display: "none" }}
+        onChange={handleFileChange}
+      />
     </div>
   );
 }

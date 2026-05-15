@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { Plus } from "lucide-react";
-import { Webhook } from "@carbon/icons-react";
+import { Webhook, Add } from "@carbon/icons-react";
 import { webhookBindingsApi, tailscaleApi } from "@/api/client";
 import type { WebhookBinding } from "@/api/client";
 import {
@@ -981,7 +980,7 @@ export function WebhookSettings() {
           {formMode === "hidden" && !pendingSecret && (
             <div style={{ marginTop: 14 }}>
               <Btn variant="ghost" onClick={handleAdd}>
-                <Plus size={13} />
+                <Add size={13} />
                 New Binding
               </Btn>
             </div>

@@ -49,7 +49,22 @@ export interface Message {
   execution_id: string | null;
   event_type?: string;
   stopped?: boolean;
+  attachments?: MessageAttachment[] | null;
   created_at: string;
+}
+
+export interface MessageAttachment {
+  path: string;
+  filename: string;
+  content_type: string;
+}
+
+export interface UploadedFile {
+  path: string;
+  filename: string;
+  size: number;
+  content_type: string;
+  is_image: boolean;
 }
 
 export interface Provider {
@@ -59,6 +74,7 @@ export interface Provider {
   kind: string;
   base_url: string;
   enabled: boolean;
+  vision: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -69,6 +85,7 @@ export interface Model {
   model_id: string;
   display_name: string;
   enabled: boolean;
+  vision: boolean;
   created_at: string;
   updated_at: string;
 }

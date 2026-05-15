@@ -425,13 +425,14 @@ async fn run_inner(
 
     // Resolve the model UUID (FK stored on the thread) to the actual model_id
     // string (e.g. "gpt-4o") that the provider API expects.
-    let model_row: Option<(String,)> = sqlx::query_as("SELECT model_id FROM models WHERE id = ?")
-        .bind(&model_uuid)
-        .fetch_optional(&state.pool)
-        .await?;
+    let model_row: Option<(String, bool)> =
+        sqlx::query_as("SELECT model_id, vision FROM models WHERE id = ?")
+            .bind(&model_uuid)
+            .fetch_optional(&state.pool)
+            .await?;
 
-    let model_id = match model_row {
-        Some((mid,)) => mid,
+    let (model_id, model_vision) = match model_row {
+        Some((mid, vis)) => (mid, vis),
         None => {
             // Fall back to using the value as-is in case it was already a
             // raw model string rather than a UUID (e.g. during manual testing).
@@ -440,19 +441,13 @@ async fn run_inner(
                 model_uuid = %model_uuid,
                 "Model UUID not found in DB — using value as raw model_id"
             );
-            model_uuid
+            (model_uuid, false)
         }
     };
 
     // Load the provider row from the database.
-    let provider_row: Option<crate::models::provider::Provider> = sqlx::query_as(
-        "SELECT id, user_id, name, kind, base_url, api_key, enabled, created_at
-         FROM providers WHERE id = ? AND user_id = ?",
-    )
-    .bind(&provider_id)
-    .bind(user_id)
-    .fetch_optional(&state.pool)
-    .await?;
+    let provider_row: Option<crate::models::provider::Provider> =
+        crate::models::provider::Provider::fetch(&state.pool, &provider_id, user_id).await?;
 
     let provider_row = match provider_row {
         Some(p) if p.enabled => p,
@@ -599,6 +594,25 @@ async fn run_inner(
         None
     };
 
+    // Parse stored attachments from the user message record (if any).
+    let message_attachments: Vec<context::MessageAttachment> = if !is_routine {
+        let row: Option<(Option<String>,)> = sqlx::query_as(
+            "SELECT attachments FROM messages
+             WHERE thread_id = ? AND role = 'user'
+             ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(thread_id)
+        .fetch_optional(&state.pool)
+        .await
+        .unwrap_or(None);
+
+        row.and_then(|(s,)| s)
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
+    } else {
+        vec![]
+    };
+
     let mut assembled = context::assemble(AssemblyInput {
         persona_emoji: Some(persona.emoji.clone()),
         persona_system_prompt: persona.system_prompt.clone(),
@@ -631,6 +645,8 @@ async fn run_inner(
         mcp_tools: mcp_tool_defs.clone(),
         workspace_path: workspace_path.clone(),
         skills_dir: Some(state.config.skills_dir.to_string_lossy().into_owned()),
+        attachments: message_attachments.clone(),
+        provider_supports_vision: model_vision,
     });
 
     // ── 5. Generation loop — with reactive summarization on context-length error ──
@@ -736,6 +752,8 @@ async fn run_inner(
                     mcp_tools: mcp_tool_defs.clone(),
                     workspace_path: workspace_path.clone(),
                     skills_dir: Some(state.config.skills_dir.to_string_lossy().into_owned()),
+                    attachments: message_attachments.clone(),
+                    provider_supports_vision: model_vision,
                 });
                 continue;
             }
@@ -1083,6 +1101,8 @@ async fn generation_loop(
             cancellation_rx,
             execution_id,
             (tool_rounds + 1) as u32,
+            provider,
+            model_id,
         )
         .await;
         run_context.hidden_message_ids.extend(hidden_ids);
@@ -1636,6 +1656,8 @@ async fn execute_tool_calls(
     cancellation_rx: &tokio::sync::watch::Receiver<bool>,
     execution_id: Option<&str>,
     round: u32,
+    provider: &dyn LlmProvider,
+    model_id: &str,
 ) -> (Vec<String>, Vec<String>) {
     use crate::services::tools::ToolContext;
 
@@ -1704,6 +1726,8 @@ async fn execute_tool_calls(
                         user_id,
                         persona_id,
                         thread_id,
+                        provider,
+                        model_id,
                     };
                     let output = match tool.run(args, &context).await {
                         Ok(r) => {
@@ -2078,6 +2102,7 @@ async fn persist_tool_message(
         execution_id: execution_id.map(|s| s.to_string()),
         event_type: None,
         stopped: false,
+        attachments: None,
         created_at: chrono::Utc::now()
             .format("%Y-%m-%dT%H:%M:%S%.3fZ")
             .to_string(),

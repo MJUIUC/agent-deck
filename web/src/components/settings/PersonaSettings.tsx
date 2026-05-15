@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { Plus, Pencil, Trash2 } from "lucide-react";
-import { Bot } from "@carbon/icons-react";
+import { Bot, Add, Edit, TrashCan } from "@carbon/icons-react";
 import type { AgentPersona, Provider, Model, MemoryEntry } from "@/types";
 import {
   personasApi,
@@ -397,7 +396,7 @@ function PersonaCard({
           </Btn>
         )}
         <Btn sm variant="ghost" onClick={onEdit}>
-          <Pencil size={12} /> Edit
+          <Edit size={12} /> Edit
         </Btn>
         {confirmDelete ? (
           <>
@@ -424,7 +423,7 @@ function PersonaCard({
             style={{ marginLeft: "auto" }}
             onClick={() => setConfirmDelete(true)}
           >
-            <Trash2 size={12} /> Delete
+            <TrashCan size={12} /> Delete
           </Btn>
         )}
       </div>
@@ -635,7 +634,7 @@ export function PersonaSettings({ onDataChanged }: PersonaSettingsProps) {
             model.
           </div>
           <Btn variant="primary" onClick={openAdd}>
-            <Plus size={14} />
+            <Add size={14} />
             New Persona
           </Btn>
         </div>

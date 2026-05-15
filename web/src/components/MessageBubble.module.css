@@ -57,7 +57,7 @@
 .bubble {
     max-width: 68%;
     min-width: 140px;
-    padding: 9px 13px;
+    padding: 9px 13px 12px;
     font-size: 0.875rem;
     line-height: 1.55;
     color: var(--text-primary);

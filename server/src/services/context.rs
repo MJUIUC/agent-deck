@@ -23,9 +23,12 @@
 
 use async_openai::types::{
     ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
+    ChatCompletionRequestMessageContentPartImage, ChatCompletionRequestMessageContentPartText,
     ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
-    ChatCompletionTool, ChatCompletionToolType, FunctionObject,
+    ChatCompletionRequestUserMessageContentPart, ChatCompletionTool, ChatCompletionToolType,
+    FunctionObject, ImageDetail, ImageUrl,
 };
+use image::ImageEncoder;
 use serde_json::json;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -68,6 +71,17 @@ Read a guide:
   GET /api/fs/read?path={skills_dir}/credentials.md";
 
 // ─── Input types ──────────────────────────────────────────────────────────────
+
+/// A file attached to a user message.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MessageAttachment {
+    /// Absolute path to the file on disk.
+    pub path: String,
+    /// MIME type, e.g. "image/png".
+    pub content_type: String,
+    /// Original filename.
+    pub filename: String,
+}
 
 /// A single message from the thread history as loaded from the database.
 #[derive(Debug, Clone)]
@@ -127,6 +141,13 @@ pub struct AssemblyInput {
     /// Absolute path to the skills directory. When present, a system message is
     /// injected telling the agent how to discover and read skill guides on demand.
     pub skills_dir: Option<String>,
+    /// Attachments from the user message. Images are sent as image_url content
+    /// parts when `provider_supports_vision` is true. Non-image attachments are
+    /// appended as a text note.
+    pub attachments: Vec<MessageAttachment>,
+    /// Whether the active provider/model supports vision (image input).
+    /// When false, image attachments are sent as a text note instead.
+    pub provider_supports_vision: bool,
 }
 
 // ─── Output type ──────────────────────────────────────────────────────────────
@@ -145,11 +166,73 @@ pub struct AssembledContext {
 
 /// Assemble the full context window for an LLM request.
 ///
-/// This is a pure, synchronous function — no I/O, no side effects.
+/// This function performs file I/O when image attachments are present and
+/// `provider_supports_vision` is true (reads attachment bytes from disk to
+/// base64-encode them as inline data URIs). For all other cases it is pure.
 ///
 /// ## Panics
 /// Does not panic.  All input validation is lenient: empty prompts produce
 /// an empty system message rather than an error.
+/// Resize an image to fit within MAX_DIM on each side and re-encode as JPEG
+/// at JPEG_QUALITY. Called just before base64-encoding images for the LLM so
+/// the stored file is always the original but the model receives a compact copy.
+fn compress_image_for_llm(data: &[u8]) -> anyhow::Result<Vec<u8>> {
+    const MAX_DIM: u32 = 2048;
+    const JPEG_QUALITY: u8 = 82;
+
+    let start = std::time::Instant::now();
+    let original_size = data.len();
+
+    let img = image::load_from_memory(data)?;
+    let (orig_w, orig_h) = (img.width(), img.height());
+
+    let img = if img.width() > MAX_DIM || img.height() > MAX_DIM {
+        let resized = img.resize(MAX_DIM, MAX_DIM, image::imageops::FilterType::Lanczos3);
+        tracing::info!(
+            original_width = orig_w,
+            original_height = orig_h,
+            resized_width = resized.width(),
+            resized_height = resized.height(),
+            "image resized for LLM"
+        );
+        resized
+    } else {
+        tracing::debug!(
+            width = orig_w,
+            height = orig_h,
+            "image within size limit, skipping resize"
+        );
+        img
+    };
+
+    // JPEG has no alpha channel — flatten to RGB8 first.
+    let rgb = img.to_rgb8();
+
+    let mut buf = Vec::new();
+    let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, JPEG_QUALITY);
+    encoder.write_image(
+        rgb.as_raw(),
+        rgb.width(),
+        rgb.height(),
+        image::ExtendedColorType::Rgb8,
+    )?;
+
+    let compressed_size = buf.len();
+    let elapsed = start.elapsed();
+    tracing::info!(
+        original_bytes = original_size,
+        compressed_bytes = compressed_size,
+        saving_pct = ((original_size.saturating_sub(compressed_size)) * 100)
+            .checked_div(original_size)
+            .unwrap_or(0),
+        quality = JPEG_QUALITY,
+        elapsed_ms = elapsed.as_millis(),
+        "image compressed for LLM"
+    );
+
+    Ok(buf)
+}
+
 pub fn assemble(input: AssemblyInput) -> AssembledContext {
     let mut messages: Vec<ChatCompletionRequestMessage> = Vec::new();
 
@@ -434,13 +517,118 @@ pub fn assemble(input: AssemblyInput) -> AssembledContext {
     }
 
     // ── 5. New user message ───────────────────────────────────────────────────
-    messages.push(
-        ChatCompletionRequestUserMessageArgs::default()
-            .content(input.user_message.as_str())
-            .build()
-            .expect("user message build")
-            .into(),
+    let image_attachments: Vec<&MessageAttachment> = input
+        .attachments
+        .iter()
+        .filter(|a| a.content_type.starts_with("image/"))
+        .collect();
+    let non_image_attachments: Vec<&MessageAttachment> = input
+        .attachments
+        .iter()
+        .filter(|a| !a.content_type.starts_with("image/"))
+        .collect();
+
+    // Build a text suffix for non-image attachments (always appended as text).
+    let non_image_note: String = if non_image_attachments.is_empty() {
+        String::new()
+    } else {
+        let lines: Vec<String> = non_image_attachments
+            .iter()
+            .map(|a| format!("[Attached file: {} — available at {}]", a.filename, a.path))
+            .collect();
+        format!("\n\n{}", lines.join("\n"))
+    };
+
+    // When vision is not supported, still tell the LLM about image attachments
+    // as text path notes so it can use workspace tools to process them rather
+    // than silently ignoring them.
+    let image_fallback_note: String =
+        if !input.provider_supports_vision && !image_attachments.is_empty() {
+            let lines: Vec<String> = image_attachments
+                .iter()
+                .map(|a| format!("[Attached image: {} — available at {}]", a.filename, a.path))
+                .collect();
+            format!("\n\n{}", lines.join("\n"))
+        } else {
+            String::new()
+        };
+
+    let full_text = format!(
+        "{}{}{}",
+        input.user_message, non_image_note, image_fallback_note
     );
+
+    if input.provider_supports_vision && !image_attachments.is_empty() {
+        // Build a multi-part user message: text + one image part per image.
+        // Images are read from disk and base64-encoded inline as data: URIs.
+        let mut parts: Vec<ChatCompletionRequestUserMessageContentPart> = Vec::new();
+
+        // Text part (always first)
+        parts.push(ChatCompletionRequestUserMessageContentPart::Text(
+            ChatCompletionRequestMessageContentPartText {
+                text: full_text.clone(),
+            },
+        ));
+
+        // Image parts
+        for attachment in &image_attachments {
+            match std::fs::read(&attachment.path) {
+                Ok(raw) => {
+                    // Compress before base64-encoding to reduce payload size sent to the LLM.
+                    // Falls back to the original bytes if compression fails.
+                    tracing::info!(
+                        filename = %attachment.filename,
+                        path = %attachment.path,
+                        size_bytes = raw.len(),
+                        "compressing image attachment for LLM"
+                    );
+                    let (bytes, mime) = match compress_image_for_llm(&raw) {
+                        Ok(compressed) => (compressed, "image/jpeg".to_string()),
+                        Err(e) => {
+                            tracing::warn!(
+                                filename = %attachment.filename,
+                                error = %e,
+                                "image compression for LLM failed, using original"
+                            );
+                            (raw, attachment.content_type.clone())
+                        }
+                    };
+                    use base64::Engine;
+                    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+                    let data_uri = format!("data:{};base64,{}", mime, b64);
+                    parts.push(ChatCompletionRequestUserMessageContentPart::ImageUrl(
+                        ChatCompletionRequestMessageContentPartImage {
+                            image_url: ImageUrl {
+                                url: data_uri,
+                                detail: Some(ImageDetail::Auto),
+                            },
+                        },
+                    ));
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to read attachment {}: {}", attachment.path, e);
+                    // Fall back: skip this image (non-image note already handles text-only fallback)
+                }
+            }
+        }
+
+        messages.push(
+            ChatCompletionRequestUserMessageArgs::default()
+                .content(parts)
+                .build()
+                .expect("user message build")
+                .into(),
+        );
+    } else {
+        // No vision or no image attachments — plain text (may include non-image note)
+        messages.push(
+            ChatCompletionRequestUserMessageArgs::default()
+                .content(full_text.as_str())
+                .build()
+                .expect("user message build")
+                .into(),
+        );
+    }
 
     // ── Tool definitions ──────────────────────────────────────────────────────
     let tools = if input.supports_tools {
@@ -564,6 +752,8 @@ mod tests {
             conversation_summary: None,
             workspace_path: None,
             skills_dir: None,
+            attachments: vec![],
+            provider_supports_vision: false,
         }
     }
 
@@ -893,8 +1083,8 @@ mod tests {
         let defs = built_in_tool_defs_for_test();
         assert_eq!(
             defs.len(),
-            5,
-            "expected exactly save_memory, recall_memory, delete_memory, recall_conversation, and tailscale_status in the built-in registry"
+            7,
+            "expected exactly save_memory, recall_memory, delete_memory, recall_conversation, tailscale_status, set_mcp_timeout, and describe_image in the built-in registry"
         );
     }
 
@@ -989,6 +1179,8 @@ mod tests {
             conversation_summary: None,
             workspace_path: None,
             skills_dir: None,
+            attachments: vec![],
+            provider_supports_vision: false,
         };
 
         let ctx = assemble(input);
@@ -1038,6 +1230,8 @@ mod tests {
             conversation_summary: None,
             workspace_path: None,
             skills_dir: None,
+            attachments: vec![],
+            provider_supports_vision: false,
         };
         let ctx = assemble(input);
         // System message must not contain memory instructions
@@ -1091,6 +1285,8 @@ mod tests {
             conversation_summary: None,
             workspace_path: None,
             skills_dir: None,
+            attachments: vec![],
+            provider_supports_vision: false,
         };
         let ctx = assemble(input);
         assert_eq!(

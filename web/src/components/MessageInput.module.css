@@ -107,3 +107,93 @@
     color: var(--accent-muted, #6b7fc9);
     font-style: italic;
 }
+
+.attachmentChips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 0 2px 8px;
+}
+
+.chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    padding: 3px 8px 3px 5px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    max-width: 200px;
+}
+
+.chipThumb {
+    width: 22px;
+    height: 22px;
+    object-fit: cover;
+    border-radius: 4px;
+    flex-shrink: 0;
+}
+
+.chipIcon {
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.chipName {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 120px;
+}
+
+.chipSpinner {
+    font-size: 12px;
+    flex-shrink: 0;
+}
+
+.chipRemove {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-tertiary);
+    font-size: 14px;
+    line-height: 1;
+    padding: 0 2px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+}
+
+.chipRemove:hover {
+    color: var(--text-primary);
+}
+
+.attachBtn {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    cursor: pointer;
+    background: transparent;
+    color: var(--text-tertiary);
+    transition:
+        color 0.15s,
+        background 0.15s;
+    padding: 0;
+}
+
+.attachBtn:hover:not(:disabled) {
+    color: var(--text-primary);
+    background: var(--bg-elevated);
+}
+
+.attachBtn:disabled {
+    opacity: 0.4;
+    cursor: default;
+}

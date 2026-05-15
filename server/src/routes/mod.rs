@@ -47,6 +47,7 @@ pub mod sse;
 pub mod tailscale;
 pub mod threads;
 pub mod tokens;
+pub mod uploads;
 pub mod webhook_bindings;
 pub mod webhooks;
 
@@ -313,7 +314,8 @@ pub async fn build_router(
         )
         .route(
             "/api/personas/:id/avatar",
-            axum::routing::post(personas::upload_avatar),
+            axum::routing::post(personas::upload_avatar)
+                .layer(axum::extract::DefaultBodyLimit::max(25 * 1024 * 1024)),
         )
         // Credentials
         .route(
@@ -445,6 +447,7 @@ pub async fn build_router(
         .route("/api/fs/read", get(fs::read_file))
         .route("/api/fs/download", get(fs::download_file))
         .route("/api/fs/workspace", get(fs::get_workspace))
+        .route("/api/fs/image", get(fs::serve_image))
         // Tailscale
         .route("/api/tailscale/status", get(tailscale::get_status))
         .route(
@@ -478,6 +481,11 @@ pub async fn build_router(
             axum::routing::patch(webhook_bindings::toggle_global),
         )
         // Webhook bindings — thread attachments
+        .route(
+            "/api/threads/:id/upload",
+            axum::routing::post(uploads::upload_file)
+                .layer(axum::extract::DefaultBodyLimit::max(25 * 1024 * 1024)),
+        )
         .route(
             "/api/threads/:id/webhook-bindings",
             get(webhook_bindings::list_attachments).post(webhook_bindings::attach),

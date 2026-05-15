@@ -13,6 +13,7 @@ pub struct Message {
     pub execution_id: Option<String>,
     pub event_type: Option<String>,
     pub stopped: bool,
+    pub attachments: Option<String>,
     pub created_at: String,
 }
 
@@ -27,6 +28,7 @@ pub struct CreateMessage {
     #[serde(default = "default_visibility")]
     pub visibility: String,
     pub execution_id: Option<String>,
+    pub attachments: Option<Vec<serde_json::Value>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -41,6 +43,8 @@ pub struct MessageResponse {
     pub execution_id: Option<String>,
     pub event_type: Option<String>,
     pub stopped: bool,
+    /// Parsed from the stored JSON string so the client receives a proper array.
+    pub attachments: Option<serde_json::Value>,
     pub created_at: String,
 }
 
@@ -69,6 +73,7 @@ impl Message {
             execution_id: req.execution_id,
             event_type: None,
             stopped: false,
+            attachments: None,
             created_at: chrono::Utc::now()
                 .format("%Y-%m-%dT%H:%M:%S%.3fZ")
                 .to_string(),
@@ -87,6 +92,7 @@ impl Message {
             execution_id: None,
             event_type: None,
             stopped: false,
+            attachments: None,
             created_at: chrono::Utc::now()
                 .format("%Y-%m-%dT%H:%M:%S%.3fZ")
                 .to_string(),
@@ -105,6 +111,7 @@ impl Message {
             execution_id: None,
             event_type: None,
             stopped: false,
+            attachments: None,
             created_at: chrono::Utc::now()
                 .format("%Y-%m-%dT%H:%M:%S%.3fZ")
                 .to_string(),
@@ -123,6 +130,7 @@ impl Message {
             execution_id: None,
             event_type: None,
             stopped: true,
+            attachments: None,
             created_at: chrono::Utc::now()
                 .format("%Y-%m-%dT%H:%M:%S%.3fZ")
                 .to_string(),
@@ -145,11 +153,13 @@ impl Message {
             execution_id: None,
             event_type: None,
             stopped: false,
+            attachments: None,
             created_at: chrono::Utc::now()
                 .format("%Y-%m-%dT%H:%M:%S%.3fZ")
                 .to_string(),
         }
     }
+
     pub fn new_chat_segment(thread_id: impl Into<String>, content: impl Into<String>) -> Self {
         Self {
             id: Uuid::new_v4().to_string(),
@@ -162,6 +172,7 @@ impl Message {
             execution_id: None,
             event_type: Some("chat_segment".to_string()),
             stopped: false,
+            attachments: None,
             created_at: chrono::Utc::now()
                 .format("%Y-%m-%dT%H:%M:%S%.3fZ")
                 .to_string(),
@@ -182,6 +193,9 @@ impl From<Message> for MessageResponse {
             execution_id: m.execution_id,
             event_type: m.event_type,
             stopped: m.stopped,
+            // Parse the stored JSON string into a Value so the API response
+            // contains a proper array rather than a raw JSON string.
+            attachments: m.attachments.and_then(|s| serde_json::from_str(&s).ok()),
             created_at: m.created_at,
         }
     }

@@ -8,7 +8,7 @@ import {
   Component,
 } from "react";
 import type { ReactNode, ErrorInfo } from "react";
-import type { Thread, ThreadState } from "@/types";
+import type { Thread, ThreadState, MessageAttachment } from "@/types";
 import { useMessageStore } from "@/stores/useMessageStore";
 import { useSseStore } from "@/stores/useSseStore";
 import { useThreadStore } from "@/stores/useThreadStore";
@@ -22,6 +22,7 @@ import { ConfigPane } from "./ConfigPane";
 import { FileExplorerModal } from "./FileExplorerModal";
 import { fsApi } from "@/api/client";
 
+import { WarningAlt } from "@carbon/icons-react";
 import styles from "./ChatView.module.css";
 
 // ── MessageListErrorBoundary ──────────────────────────────────────────────────
@@ -63,7 +64,7 @@ class MessageListErrorBoundary extends Component<
           <div
             style={{ fontWeight: 600, color: "var(--error)", marginBottom: 6 }}
           >
-            ⚠ Unable to render messages
+            <WarningAlt size={14} /> Unable to render messages
           </div>
           <div style={{ marginBottom: 12 }}>
             One or more messages in this thread could not be displayed. This is
@@ -108,8 +109,12 @@ class MessageListErrorBoundary extends Component<
 interface ChatViewProps {
   thread: Thread;
   /** Provided only in draft mode (thread.id === "pending"). Called with the
-   *  user's message content; creates the real thread and sends the message. */
-  onFirstSend?: (content: string) => Promise<void>;
+   *  user's message content and any attachments; creates the real thread and
+   *  sends the message. */
+  onFirstSend?: (
+    content: string,
+    attachments: MessageAttachment[],
+  ) => Promise<void>;
   onMobileMenuOpen?: () => void;
 }
 
@@ -278,12 +283,12 @@ export function ChatView({
   }, [cancelRun, thread.id]);
 
   const handleSend = useCallback(
-    (content: string) => {
+    (content: string, attachments: MessageAttachment[]) => {
       if (isDraft && onFirstSend) {
-        // Draft mode: delegate to App.tsx which creates the real thread first
-        onFirstSend(content);
+        // Draft mode: delegate to layout which creates the real thread first
+        onFirstSend(content, attachments);
       } else {
-        sendMessage(thread.id, content);
+        sendMessage(thread.id, content, attachments);
       }
     },
     [isDraft, onFirstSend, thread.id, sendMessage],
@@ -483,7 +488,9 @@ export function ChatView({
 
         {/* Error banner */}
         {messageError && !isStreaming && (
-          <div className={styles.errorBanner}>⚠ {messageError}</div>
+          <div className={styles.errorBanner}>
+            <WarningAlt size={14} /> {messageError}
+          </div>
         )}
       </div>
 

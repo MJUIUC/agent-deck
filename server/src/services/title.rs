@@ -74,16 +74,11 @@ pub async fn try_llm_title(
 
     // ── Load the provider row ─────────────────────────────────────────────────
 
-    let provider_row: Option<crate::models::provider::Provider> = sqlx::query_as(
-        "SELECT id, user_id, name, kind, base_url, api_key, enabled, created_at
-         FROM providers WHERE id = ? AND user_id = ?",
-    )
-    .bind(&provider_id)
-    .bind(&thread.user_id)
-    .fetch_optional(&state.pool)
-    .await
-    .ok()
-    .flatten();
+    let provider_row: Option<crate::models::provider::Provider> =
+        crate::models::provider::Provider::fetch(&state.pool, &provider_id, &thread.user_id)
+            .await
+            .ok()
+            .flatten();
 
     let provider_row = match provider_row {
         Some(r) => r,

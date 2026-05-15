@@ -16,6 +16,7 @@ import type {
   FsFileContent,
   TailscaleStatus,
   ThreadMcpServer,
+  UploadedFile,
 } from "@/types";
 
 // ── Credential types ──────────────────────────────────────────────────────────
@@ -80,7 +81,9 @@ async function apiFetch<T>(
   options: RequestInit = {},
 ): Promise<T> {
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
+    ...(!(options?.body instanceof FormData)
+      ? { "Content-Type": "application/json" }
+      : {}),
     ...(options.headers ?? {}),
   } as Record<string, string>;
 
@@ -296,10 +299,17 @@ export const messagesApi = {
     return apiFetch(`/api/threads/${threadId}/messages${qs ? `?${qs}` : ""}`);
   },
 
-  send(threadId: string, content: string): Promise<{ data: Message }> {
+  send(
+    threadId: string,
+    content: string,
+    attachments?: import("@/types").MessageAttachment[],
+  ): Promise<{ data: Message }> {
     return apiFetch(`/api/threads/${threadId}/messages`, {
       method: "POST",
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({
+        content,
+        ...(attachments?.length ? { attachments } : {}),
+      }),
     });
   },
 
@@ -337,6 +347,7 @@ export const providersApi = {
     kind: string;
     base_url: string;
     api_key?: string;
+    vision?: boolean;
   }): Promise<{ data: Provider }> {
     return apiFetch("/api/providers", {
       method: "POST",
@@ -352,6 +363,7 @@ export const providersApi = {
       base_url?: string;
       api_key?: string;
       enabled?: boolean;
+      vision?: boolean;
     },
   ): Promise<{ data: Provider }> {
     return apiFetch(`/api/providers/${id}`, {
@@ -385,7 +397,7 @@ export const modelsApi = {
   update(
     providerId: string,
     modelId: string,
-    payload: { enabled?: boolean; display_name?: string },
+    payload: { enabled?: boolean; display_name?: string; vision?: boolean },
   ): Promise<{ data: Model }> {
     return apiFetch(`/api/providers/${providerId}/models/${modelId}`, {
       method: "PUT",
@@ -499,6 +511,20 @@ export const mcpServersApi = {
 
   restart(id: string): Promise<{ data: { restarted: boolean } }> {
     return apiFetch(`/api/mcp-servers/${id}/restart`, { method: "POST" });
+  },
+};
+
+// ── Uploads ───────────────────────────────────────────────────────────────────
+
+export const uploadsApi = {
+  upload(threadId: string, file: File): Promise<{ data: UploadedFile }> {
+    const form = new FormData();
+    form.append("file", file);
+    // Note: do NOT set Content-Type header — let the browser set multipart boundary
+    return apiFetch(`/api/threads/${threadId}/upload`, {
+      method: "POST",
+      body: form,
+    });
   },
 };
 

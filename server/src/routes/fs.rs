@@ -342,3 +342,52 @@ pub async fn download_file(
 
     Ok(response)
 }
+
+pub async fn serve_image(
+    State(_state): State<Arc<AppState>>,
+    Query(params): Query<PathParams>,
+) -> AppResult<impl IntoResponse> {
+    let canonical = validate_path(&params.path).map_err(|e| AppError::Forbidden(e.to_string()))?;
+
+    if !canonical.is_file() {
+        return Err(AppError::BadRequest(format!(
+            "'{}' is not a file",
+            canonical.display()
+        )));
+    }
+
+    let extension = canonical
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+
+    let content_type = match extension.as_str() {
+        "jpg" | "jpeg" => "image/jpeg",
+        "png" => "image/png",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "bmp" => "image/bmp",
+        _ => "application/octet-stream",
+    };
+
+    let metadata = tokio::fs::metadata(&canonical)
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to read metadata: {}", e)))?;
+
+    let file = tokio::fs::File::open(&canonical)
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to open file: {}", e)))?;
+
+    let stream = ReaderStream::new(file);
+    let body = Body::from_stream(stream);
+
+    let response = axum::response::Response::builder()
+        .header(header::CONTENT_TYPE, content_type)
+        .header(header::CONTENT_DISPOSITION, "inline")
+        .header(header::CONTENT_LENGTH, metadata.len())
+        .body(body)
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to build response: {}", e)))?;
+
+    Ok(response)
+}
