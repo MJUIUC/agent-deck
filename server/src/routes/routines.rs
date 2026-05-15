@@ -919,4 +919,155 @@ mod tests {
             "toggle on an unknown routine id should return 404"
         );
     }
+
+    // ── Timezone tests ────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_create_routine_with_timezone() {
+        let (app, token, thread_id) = setup_app().await;
+
+        let payload = serde_json::json!({
+            "name": "TZ Routine",
+            "prompt": "say hi",
+            "cron_expr": "0 9 * * *",
+            "timezone": "America/Los_Angeles"
+        })
+        .to_string();
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/threads/{}/routines", thread_id))
+                    .header("Authorization", format!("Bearer {}", token))
+                    .header("content-type", "application/json")
+                    .body(Body::from(payload))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::CREATED);
+
+        let body_bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(json["data"]["timezone"], "America/Los_Angeles");
+    }
+
+    #[tokio::test]
+    async fn test_create_routine_timezone_defaults_to_utc() {
+        let (app, token, thread_id) = setup_app().await;
+
+        let payload = serde_json::json!({
+            "name": "No TZ Routine",
+            "prompt": "say hi",
+            "cron_expr": "0 9 * * *"
+        })
+        .to_string();
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/threads/{}/routines", thread_id))
+                    .header("Authorization", format!("Bearer {}", token))
+                    .header("content-type", "application/json")
+                    .body(Body::from(payload))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::CREATED);
+
+        let body_bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(json["data"]["timezone"], "UTC");
+    }
+
+    #[tokio::test]
+    async fn test_create_routine_invalid_timezone() {
+        let (app, token, thread_id) = setup_app().await;
+
+        let payload = serde_json::json!({
+            "name": "Bad TZ",
+            "prompt": "say hi",
+            "cron_expr": "0 9 * * *",
+            "timezone": "Fake/Zone"
+        })
+        .to_string();
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/threads/{}/routines", thread_id))
+                    .header("Authorization", format!("Bearer {}", token))
+                    .header("content-type", "application/json")
+                    .body(Body::from(payload))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_update_routine_timezone() {
+        let (app, token, thread_id) = setup_app().await;
+        let routine_id = create_routine(&app, &token, &thread_id, "Update TZ Test").await;
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri(format!(
+                        "/api/threads/{}/routines/{}",
+                        thread_id, routine_id
+                    ))
+                    .header("Authorization", format!("Bearer {}", token))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"timezone":"Europe/London"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body_bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(json["data"]["timezone"], "Europe/London");
+    }
+
+    #[tokio::test]
+    async fn test_update_routine_invalid_timezone() {
+        let (app, token, thread_id) = setup_app().await;
+        let routine_id = create_routine(&app, &token, &thread_id, "Bad TZ Update").await;
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri(format!(
+                        "/api/threads/{}/routines/{}",
+                        thread_id, routine_id
+                    ))
+                    .header("Authorization", format!("Bearer {}", token))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"timezone":"Not/Real"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
 }
