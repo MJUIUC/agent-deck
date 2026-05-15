@@ -446,3 +446,45 @@ impl SchedulerService {
         Ok(row.map_or(false, |(status,)| status == "active"))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use chrono_tz::Tz;
+
+    /// Verify that the timezone strings we store in the DB round-trip through
+    /// chrono_tz correctly.  This is the parse path used in register_routine.
+    #[test]
+    fn test_valid_timezone_parses() {
+        for tz_str in &["UTC", "America/Los_Angeles", "Europe/London", "Asia/Tokyo"] {
+            let result = tz_str.parse::<Tz>();
+            assert!(
+                result.is_ok(),
+                "Expected '{}' to parse as a valid timezone",
+                tz_str
+            );
+        }
+    }
+
+    #[test]
+    fn test_invalid_timezone_fails() {
+        assert!("Fake/Zone".parse::<Tz>().is_err());
+        assert!("Not/Real".parse::<Tz>().is_err());
+        assert!("".parse::<Tz>().is_err());
+    }
+
+    /// Verify LA timezone is 7 or 8 hours behind UTC (PDT/PST).
+    /// This confirms chrono_tz correctly models UTC offsets for DST zones.
+    #[test]
+    fn test_la_timezone_offset_from_utc() {
+        use chrono::{Offset, TimeZone};
+        let tz = "America/Los_Angeles".parse::<Tz>().unwrap();
+        // Jan 15 = PST (UTC-8)
+        let winter = tz.with_ymd_and_hms(2025, 1, 15, 21, 0, 0).unwrap();
+        let offset_hours = winter.offset().fix().local_minus_utc() / 3600;
+        assert_eq!(offset_hours, -8, "PST should be UTC-8");
+        // Jul 15 = PDT (UTC-7)
+        let summer = tz.with_ymd_and_hms(2025, 7, 15, 21, 0, 0).unwrap();
+        let offset_hours = summer.offset().fix().local_minus_utc() / 3600;
+        assert_eq!(offset_hours, -7, "PDT should be UTC-7");
+    }
+}

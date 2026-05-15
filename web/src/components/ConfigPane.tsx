@@ -1458,7 +1458,15 @@ export function ConfigPane({
                         ));
                       })()}
                     </select>
-                    <span className={styles.routineFormHint}>Routine fires at the time shown in {routineFormTimezone}</span>
+                    <span className={styles.routineFormHint}>
+                      {(() => {
+                        try {
+                          return `${cronstrue.toString(routineFormCron)} (${routineFormTimezone})`;
+                        } catch {
+                          return routineFormTimezone;
+                        }
+                      })()}
+                    </span>
 
                     {routineFormError && (
                       <div className={styles.routineFormError}>
