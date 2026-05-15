@@ -653,6 +653,7 @@ export function ConfigPane({
   const [routineFormName, setRoutineFormName] = useState("");
   const [routineFormPrompt, setRoutineFormPrompt] = useState("");
   const [routineFormCron, setRoutineFormCron] = useState("0 9 * * *");
+  const [routineFormTimezone, setRoutineFormTimezone] = useState<string>("");
   const [routineFormSaving, setRoutineFormSaving] = useState(false);
   const [routineFormError, setRoutineFormError] = useState<string | null>(null);
   const [deletingRoutineId, setDeletingRoutineId] = useState<string | null>(
@@ -726,6 +727,7 @@ export function ConfigPane({
     setShowRoutineForm(false);
     setEditingRoutine(null);
     setRoutineFormError(null);
+    setRoutineFormTimezone(userTimezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
     // Reset webhooks state on thread switch
     setAttachedWebhooks([]);
     setWebhooksLoading(false);
@@ -1059,6 +1061,7 @@ export function ConfigPane({
     setRoutineFormName(r.name);
     setRoutineFormPrompt(r.prompt);
     setRoutineFormCron(r.cron_expr);
+    setRoutineFormTimezone(r.timezone || userTimezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
     setRoutineFormError(null);
     setShowRoutineForm(true);
   }
@@ -1090,6 +1093,7 @@ export function ConfigPane({
           name: routineFormName.trim(),
           prompt: routineFormPrompt.trim(),
           cron_expr: routineFormCron.trim(),
+          timezone: routineFormTimezone,
         });
         setRoutines((rs) =>
           rs.map((r) => (r.id === editingRoutine.id ? res.data : r)),
@@ -1099,6 +1103,7 @@ export function ConfigPane({
           name: routineFormName.trim(),
           prompt: routineFormPrompt.trim(),
           cron_expr: routineFormCron.trim(),
+          timezone: routineFormTimezone,
         });
         setRoutines((rs) => [...rs, res.data]);
       }
@@ -1428,6 +1433,32 @@ export function ConfigPane({
                       onChange={setRoutineFormCron}
                       timezone={userTimezone}
                     />
+
+                    {/* Timezone */}
+                    <label className={styles.routineFormLabel}>Timezone</label>
+                    <select
+                      className={styles.routineFormInput}
+                      value={routineFormTimezone}
+                      onChange={(e) => setRoutineFormTimezone(e.target.value)}
+                      disabled={routineFormSaving}
+                    >
+                      {(() => {
+                        const zones = Intl.supportedValuesOf("timeZone");
+                        const groups: Record<string, string[]> = {};
+                        for (const z of zones) {
+                          const prefix = z.includes("/") ? z.split("/")[0] : "Other";
+                          (groups[prefix] ||= []).push(z);
+                        }
+                        return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b)).map(([group, tzs]) => (
+                          <optgroup key={group} label={group}>
+                            {tzs.map((tz) => (
+                              <option key={tz} value={tz}>{tz.replace(/_/g, " ")}</option>
+                            ))}
+                          </optgroup>
+                        ));
+                      })()}
+                    </select>
+                    <span className={styles.routineFormHint}>Routine fires at the time shown in {routineFormTimezone}</span>
 
                     {routineFormError && (
                       <div className={styles.routineFormError}>

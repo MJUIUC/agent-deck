@@ -131,6 +131,7 @@ export interface Routine {
   name: string;
   prompt: string;
   cron_expr: string;
+  timezone: string;
   enabled: boolean;
   created_at: string;
   updated_at: string;

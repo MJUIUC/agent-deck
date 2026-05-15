@@ -86,7 +86,7 @@ impl SchedulerService {
     pub async fn start(self: Arc<Self>, mut rx: tokio::sync::mpsc::Receiver<SchedulerCommand>) {
         // ── Load initial routines ─────────────────────────────────────────────
         let routines: Vec<Routine> = match sqlx::query_as(
-            "SELECT r.id, r.thread_id, r.name, r.prompt, r.cron_expr, r.enabled,
+            "SELECT r.id, r.thread_id, r.name, r.prompt, r.cron_expr, r.timezone, r.enabled,
                     r.run_count, r.last_run_at, r.next_run_at, r.created_at, r.updated_at
              FROM routines r
              JOIN threads t ON r.thread_id = t.id
@@ -239,7 +239,7 @@ impl SchedulerService {
 
     async fn handle_resume_thread(&self, thread_id: &str) {
         let routines: Vec<Routine> = match sqlx::query_as(
-            "SELECT id, thread_id, name, prompt, cron_expr, enabled,
+            "SELECT id, thread_id, name, prompt, cron_expr, timezone, enabled,
                     run_count, last_run_at, next_run_at, created_at, updated_at
              FROM routines
              WHERE thread_id = ? AND enabled = 1",
@@ -291,17 +291,13 @@ impl SchedulerService {
         let pool = self.pool.clone();
 
         // Look up the user's timezone preference; fall back to UTC.
-        let tz: Tz = {
-            let row: Option<(Option<String>,)> =
-                sqlx::query_as("SELECT timezone FROM users LIMIT 1")
-                    .fetch_optional(&self.pool)
-                    .await
-                    .unwrap_or(None);
-            let tz_str = row
-                .and_then(|(tz,)| tz)
-                .unwrap_or_else(|| "UTC".to_string());
-            tz_str.parse::<Tz>().unwrap_or(Tz::UTC)
-        };
+        let tz: Tz = routine.timezone.parse::<Tz>().unwrap_or_else(|_| {
+            warn!(
+                "Scheduler: unknown timezone '{}' for routine '{}', falling back to UTC",
+                routine.timezone, routine.id
+            );
+            Tz::UTC
+        });
 
         let job = Job::new_async_tz(cron_6.as_str(), tz, move |_uuid, _lock| {
             // Inner clones so each invocation gets its own owned copies.
@@ -428,7 +424,7 @@ impl SchedulerService {
     /// Load a single routine from the DB by its ID.
     async fn load_routine_from_db(&self, routine_id: &str) -> Result<Option<Routine>> {
         let routine: Option<Routine> = sqlx::query_as(
-            "SELECT id, thread_id, name, prompt, cron_expr, enabled,
+            "SELECT id, thread_id, name, prompt, cron_expr, timezone, enabled,
                     run_count, last_run_at, next_run_at, created_at, updated_at
              FROM routines
              WHERE id = ?",

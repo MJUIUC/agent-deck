@@ -698,7 +698,7 @@ export function MobileConfigSheet({
                           </span>
                           {humanLabel && (
                             <span className={styles.routineHuman}>
-                              {humanLabel}
+                              {humanLabel} ({routine.timezone || "UTC"})
                             </span>
                           )}
                         </div>

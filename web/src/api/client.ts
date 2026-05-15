@@ -615,7 +615,7 @@ export const routinesApi = {
   },
   create(
     threadId: string,
-    payload: { name: string; prompt: string; cron_expr: string },
+    payload: { name: string; prompt: string; cron_expr: string; timezone?: string },
   ): Promise<{ data: Routine }> {
     return apiFetch(`/api/threads/${threadId}/routines`, {
       method: "POST",
@@ -629,6 +629,7 @@ export const routinesApi = {
       name?: string;
       prompt?: string;
       cron_expr?: string;
+      timezone?: string;
       enabled?: boolean;
     },
   ): Promise<{ data: Routine }> {
