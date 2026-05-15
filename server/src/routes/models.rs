@@ -17,6 +17,30 @@ use crate::{
     services::{encryption, provider as provider_service},
 };
 
+/// Infer vision capability from the model's API identifier.
+/// Matches known vision-capable model families by substring so new versions
+/// (e.g. claude-sonnet-4-7) are picked up automatically.
+fn infer_vision(model_id: &str) -> bool {
+    let id = model_id.to_lowercase();
+    // Anthropic — all Claude 3+ models support vision
+    if id.contains("claude-3") || id.contains("claude-sonnet") || id.contains("claude-haiku")
+        || id.contains("claude-opus")
+    {
+        return true;
+    }
+    // OpenAI — gpt-4o, gpt-4-turbo, gpt-4-vision, o1, o3, o4
+    if id.contains("gpt-4o") || id.contains("gpt-4-turbo") || id.contains("gpt-4-vision")
+        || id.starts_with("o1") || id.starts_with("o3") || id.starts_with("o4")
+    {
+        return true;
+    }
+    // Google — all Gemini 1.5+ and 2.x support vision
+    if id.contains("gemini-1.5") || id.contains("gemini-2") || id.contains("gemini-pro-vision") {
+        return true;
+    }
+    false
+}
+
 /// Helper: get the single user id from the DB.
 async fn get_user_id(state: &AppState) -> AppResult<String> {
     let row: Option<(String,)> = sqlx::query_as("SELECT id FROM users LIMIT 1")
@@ -128,14 +152,16 @@ pub async fn sync(
 
         if existing.is_none() {
             let id = uuid::Uuid::new_v4().to_string();
+            let vision = infer_vision(&remote.id);
             sqlx::query(
                 "INSERT INTO models (id, provider_id, model_id, display_name, enabled, vision)
-                 VALUES (?, ?, ?, ?, 1, 0)",
+                 VALUES (?, ?, ?, ?, 1, ?)",
             )
             .bind(&id)
             .bind(&provider_id)
             .bind(&remote.id)
             .bind(&remote.display_name)
+            .bind(vision)
             .execute(&state.pool)
             .await?;
             synced_count += 1;
