@@ -65,7 +65,7 @@ pub async fn list(
     verify_thread_ownership(&state, &thread_id, &user_id).await?;
 
     let routines: Vec<Routine> = sqlx::query_as(
-        "SELECT id, thread_id, name, prompt, cron_expr, enabled,
+        "SELECT id, thread_id, name, prompt, cron_expr, timezone, enabled,
                 run_count, last_run_at, next_run_at, created_at, updated_at
          FROM routines
          WHERE thread_id = ?
@@ -87,7 +87,7 @@ pub async fn get(
     verify_thread_ownership(&state, &thread_id, &user_id).await?;
 
     let routine: Option<Routine> = sqlx::query_as(
-        "SELECT id, thread_id, name, prompt, cron_expr, enabled,
+        "SELECT id, thread_id, name, prompt, cron_expr, timezone, enabled,
                 run_count, last_run_at, next_run_at, created_at, updated_at
          FROM routines
          WHERE id = ? AND thread_id = ?",
@@ -132,6 +132,13 @@ pub async fn create(
         ));
     }
 
+    // Validate timezone if provided
+    if let Some(ref tz_str) = payload.timezone {
+        if tz_str.parse::<chrono_tz::Tz>().is_err() {
+            return Err(AppError::BadRequest(format!("Unknown timezone: '{}'", tz_str)));
+        }
+    }
+
     let user_id = get_user_id(&state).await?;
     verify_thread_ownership(&state, &thread_id, &user_id).await?;
 
@@ -139,15 +146,16 @@ pub async fn create(
 
     sqlx::query(
         "INSERT INTO routines
-             (id, thread_id, name, prompt, cron_expr, enabled,
+             (id, thread_id, name, prompt, cron_expr, timezone, enabled,
               run_count, last_run_at, next_run_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&routine.id)
     .bind(&routine.thread_id)
     .bind(&routine.name)
     .bind(&routine.prompt)
     .bind(&routine.cron_expr)
+    .bind(&routine.timezone)
     .bind(routine.enabled)
     .bind(routine.run_count)
     .bind(&routine.last_run_at)
@@ -175,7 +183,7 @@ pub async fn update(
     verify_thread_ownership(&state, &thread_id, &user_id).await?;
 
     let existing: Option<Routine> = sqlx::query_as(
-        "SELECT id, thread_id, name, prompt, cron_expr, enabled,
+        "SELECT id, thread_id, name, prompt, cron_expr, timezone, enabled,
                 run_count, last_run_at, next_run_at, created_at, updated_at
          FROM routines
          WHERE id = ? AND thread_id = ?",
@@ -206,9 +214,16 @@ pub async fn update(
         }
     }
 
+    if let Some(ref tz_str) = payload.timezone {
+        if tz_str.parse::<chrono_tz::Tz>().is_err() {
+            return Err(AppError::BadRequest(format!("Unknown timezone: '{}'", tz_str)));
+        }
+    }
+
     let name = payload.name.as_deref().unwrap_or(&existing.name);
     let prompt = payload.prompt.as_deref().unwrap_or(&existing.prompt);
     let cron_expr = payload.cron_expr.as_deref().unwrap_or(&existing.cron_expr);
+    let timezone = payload.timezone.as_deref().unwrap_or(&existing.timezone);
     let enabled = payload.enabled.unwrap_or(existing.enabled);
 
     let now = chrono::Utc::now()
@@ -217,12 +232,13 @@ pub async fn update(
 
     sqlx::query(
         "UPDATE routines
-         SET name = ?, prompt = ?, cron_expr = ?, enabled = ?, updated_at = ?
+         SET name = ?, prompt = ?, cron_expr = ?, timezone = ?, enabled = ?, updated_at = ?
          WHERE id = ? AND thread_id = ?",
     )
     .bind(name)
     .bind(prompt)
     .bind(cron_expr)
+    .bind(timezone)
     .bind(enabled)
     .bind(&now)
     .bind(&routine_id)
@@ -236,6 +252,7 @@ pub async fn update(
         name: name.to_string(),
         prompt: prompt.to_string(),
         cron_expr: cron_expr.to_string(),
+        timezone: timezone.to_string(),
         enabled,
         run_count: existing.run_count,
         last_run_at: existing.last_run_at,
@@ -901,5 +918,156 @@ mod tests {
             StatusCode::NOT_FOUND,
             "toggle on an unknown routine id should return 404"
         );
+    }
+
+    // ── Timezone tests ────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_create_routine_with_timezone() {
+        let (app, token, thread_id) = setup_app().await;
+
+        let payload = serde_json::json!({
+            "name": "TZ Routine",
+            "prompt": "say hi",
+            "cron_expr": "0 9 * * *",
+            "timezone": "America/Los_Angeles"
+        })
+        .to_string();
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/threads/{}/routines", thread_id))
+                    .header("Authorization", format!("Bearer {}", token))
+                    .header("content-type", "application/json")
+                    .body(Body::from(payload))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::CREATED);
+
+        let body_bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(json["data"]["timezone"], "America/Los_Angeles");
+    }
+
+    #[tokio::test]
+    async fn test_create_routine_timezone_defaults_to_utc() {
+        let (app, token, thread_id) = setup_app().await;
+
+        let payload = serde_json::json!({
+            "name": "No TZ Routine",
+            "prompt": "say hi",
+            "cron_expr": "0 9 * * *"
+        })
+        .to_string();
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/threads/{}/routines", thread_id))
+                    .header("Authorization", format!("Bearer {}", token))
+                    .header("content-type", "application/json")
+                    .body(Body::from(payload))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::CREATED);
+
+        let body_bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(json["data"]["timezone"], "UTC");
+    }
+
+    #[tokio::test]
+    async fn test_create_routine_invalid_timezone() {
+        let (app, token, thread_id) = setup_app().await;
+
+        let payload = serde_json::json!({
+            "name": "Bad TZ",
+            "prompt": "say hi",
+            "cron_expr": "0 9 * * *",
+            "timezone": "Fake/Zone"
+        })
+        .to_string();
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/threads/{}/routines", thread_id))
+                    .header("Authorization", format!("Bearer {}", token))
+                    .header("content-type", "application/json")
+                    .body(Body::from(payload))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_update_routine_timezone() {
+        let (app, token, thread_id) = setup_app().await;
+        let routine_id = create_routine(&app, &token, &thread_id, "Update TZ Test").await;
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri(format!(
+                        "/api/threads/{}/routines/{}",
+                        thread_id, routine_id
+                    ))
+                    .header("Authorization", format!("Bearer {}", token))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"timezone":"Europe/London"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body_bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(json["data"]["timezone"], "Europe/London");
+    }
+
+    #[tokio::test]
+    async fn test_update_routine_invalid_timezone() {
+        let (app, token, thread_id) = setup_app().await;
+        let routine_id = create_routine(&app, &token, &thread_id, "Bad TZ Update").await;
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri(format!(
+                        "/api/threads/{}/routines/{}",
+                        thread_id, routine_id
+                    ))
+                    .header("Authorization", format!("Bearer {}", token))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"timezone":"Not/Real"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 }

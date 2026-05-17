@@ -86,7 +86,7 @@ impl SchedulerService {
     pub async fn start(self: Arc<Self>, mut rx: tokio::sync::mpsc::Receiver<SchedulerCommand>) {
         // ── Load initial routines ─────────────────────────────────────────────
         let routines: Vec<Routine> = match sqlx::query_as(
-            "SELECT r.id, r.thread_id, r.name, r.prompt, r.cron_expr, r.enabled,
+            "SELECT r.id, r.thread_id, r.name, r.prompt, r.cron_expr, r.timezone, r.enabled,
                     r.run_count, r.last_run_at, r.next_run_at, r.created_at, r.updated_at
              FROM routines r
              JOIN threads t ON r.thread_id = t.id
@@ -239,7 +239,7 @@ impl SchedulerService {
 
     async fn handle_resume_thread(&self, thread_id: &str) {
         let routines: Vec<Routine> = match sqlx::query_as(
-            "SELECT id, thread_id, name, prompt, cron_expr, enabled,
+            "SELECT id, thread_id, name, prompt, cron_expr, timezone, enabled,
                     run_count, last_run_at, next_run_at, created_at, updated_at
              FROM routines
              WHERE thread_id = ? AND enabled = 1",
@@ -291,17 +291,13 @@ impl SchedulerService {
         let pool = self.pool.clone();
 
         // Look up the user's timezone preference; fall back to UTC.
-        let tz: Tz = {
-            let row: Option<(Option<String>,)> =
-                sqlx::query_as("SELECT timezone FROM users LIMIT 1")
-                    .fetch_optional(&self.pool)
-                    .await
-                    .unwrap_or(None);
-            let tz_str = row
-                .and_then(|(tz,)| tz)
-                .unwrap_or_else(|| "UTC".to_string());
-            tz_str.parse::<Tz>().unwrap_or(Tz::UTC)
-        };
+        let tz: Tz = routine.timezone.parse::<Tz>().unwrap_or_else(|_| {
+            warn!(
+                "Scheduler: unknown timezone '{}' for routine '{}', falling back to UTC",
+                routine.timezone, routine.id
+            );
+            Tz::UTC
+        });
 
         let job = Job::new_async_tz(cron_6.as_str(), tz, move |_uuid, _lock| {
             // Inner clones so each invocation gets its own owned copies.
@@ -428,7 +424,7 @@ impl SchedulerService {
     /// Load a single routine from the DB by its ID.
     async fn load_routine_from_db(&self, routine_id: &str) -> Result<Option<Routine>> {
         let routine: Option<Routine> = sqlx::query_as(
-            "SELECT id, thread_id, name, prompt, cron_expr, enabled,
+            "SELECT id, thread_id, name, prompt, cron_expr, timezone, enabled,
                     run_count, last_run_at, next_run_at, created_at, updated_at
              FROM routines
              WHERE id = ?",
@@ -448,5 +444,47 @@ impl SchedulerService {
             .await?;
 
         Ok(row.map_or(false, |(status,)| status == "active"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono_tz::Tz;
+
+    /// Verify that the timezone strings we store in the DB round-trip through
+    /// chrono_tz correctly.  This is the parse path used in register_routine.
+    #[test]
+    fn test_valid_timezone_parses() {
+        for tz_str in &["UTC", "America/Los_Angeles", "Europe/London", "Asia/Tokyo"] {
+            let result = tz_str.parse::<Tz>();
+            assert!(
+                result.is_ok(),
+                "Expected '{}' to parse as a valid timezone",
+                tz_str
+            );
+        }
+    }
+
+    #[test]
+    fn test_invalid_timezone_fails() {
+        assert!("Fake/Zone".parse::<Tz>().is_err());
+        assert!("Not/Real".parse::<Tz>().is_err());
+        assert!("".parse::<Tz>().is_err());
+    }
+
+    /// Verify LA timezone is 7 or 8 hours behind UTC (PDT/PST).
+    /// This confirms chrono_tz correctly models UTC offsets for DST zones.
+    #[test]
+    fn test_la_timezone_offset_from_utc() {
+        use chrono::{Offset, TimeZone};
+        let tz = "America/Los_Angeles".parse::<Tz>().unwrap();
+        // Jan 15 = PST (UTC-8)
+        let winter = tz.with_ymd_and_hms(2025, 1, 15, 21, 0, 0).unwrap();
+        let offset_hours = winter.offset().fix().local_minus_utc() / 3600;
+        assert_eq!(offset_hours, -8, "PST should be UTC-8");
+        // Jul 15 = PDT (UTC-7)
+        let summer = tz.with_ymd_and_hms(2025, 7, 15, 21, 0, 0).unwrap();
+        let offset_hours = summer.offset().fix().local_minus_utc() / 3600;
+        assert_eq!(offset_hours, -7, "PDT should be UTC-7");
     }
 }

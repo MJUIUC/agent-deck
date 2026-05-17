@@ -8,6 +8,7 @@ pub struct Routine {
     pub name: String,
     pub prompt: String,
     pub cron_expr: String,
+    pub timezone: String,
     pub enabled: bool,
     pub run_count: i64,
     pub last_run_at: Option<String>,
@@ -21,6 +22,7 @@ pub struct CreateRoutine {
     pub name: String,
     pub prompt: String,
     pub cron_expr: String,
+    pub timezone: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -28,6 +30,7 @@ pub struct UpdateRoutine {
     pub name: Option<String>,
     pub prompt: Option<String>,
     pub cron_expr: Option<String>,
+    pub timezone: Option<String>,
     pub enabled: Option<bool>,
 }
 
@@ -42,6 +45,7 @@ impl Routine {
             name: req.name,
             prompt: req.prompt,
             cron_expr: req.cron_expr,
+            timezone: req.timezone.unwrap_or_else(|| "UTC".to_string()),
             enabled: true,
             run_count: 0,
             last_run_at: None,

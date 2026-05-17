@@ -1193,6 +1193,12 @@
     cursor: not-allowed;
 }
 
+.routineFormHint {
+    font-size: 0.72rem;
+    color: var(--text-tertiary);
+    margin-top: 2px;
+}
+
 /* ── Memory section ── */
 .memoryList {
     display: flex;
